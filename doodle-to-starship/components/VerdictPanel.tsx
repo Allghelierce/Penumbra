@@ -5,7 +5,7 @@ import CountUp from "@/components/CountUp";
 import DesignReview, { CantRead, type ReviewIssue, type Trade } from "@/components/DesignReview";
 import SpecimenDrawing from "@/components/SpecimenDrawing";
 import TypeOut from "@/components/TypeOut";
-import type { Analysis, Attempt, Design, DesignAction, DestinationId, FlightTrace, Phase, PriorArtResult, Recap, Review, Verdict } from "@/lib/design";
+import type { Analysis, Attempt, Design, DestinationId, FlightTrace, Phase, PriorArtResult, Recap, Review, Verdict } from "@/lib/design";
 import TrajectoryPreview from "@/components/TrajectoryPreview";
 import { DESTINATIONS, ENGINES } from "@/lib/physics";
 import { km, kmShort, kmSpare } from "@/lib/physics/format";
@@ -25,8 +25,6 @@ interface VerdictPanelProps {
   attempts: Attempt[];
   /** What to try next after the latest flight. */
   recap: Recap | null;
-  /** Apply a suggested fix, the same way a red-pen note does. */
-  onFix: (fix: DesignAction) => void;
   /** The simulated flight for the current design, previewed before launch. */
   trace: FlightTrace | null;
   /** Start the launch (the same as the Launch button). */
@@ -133,7 +131,6 @@ export default function VerdictPanel(props: VerdictPanelProps) {
           trades={props.trades}
           selected={props.selectedIssue}
           onSelect={props.onSelectIssue}
-          onFix={props.onFix}
         />
       </Module>
 
@@ -185,7 +182,7 @@ export default function VerdictPanel(props: VerdictPanelProps) {
         </Module>
       )}
 
-      {props.attempts.length > 0 && <FlightLog attempts={props.attempts} recap={props.recap} onFix={props.onFix} />}
+      {props.attempts.length > 0 && <FlightLog attempts={props.attempts} recap={props.recap} />}
 
       <Module
         title="Delta-v budget"
@@ -297,7 +294,7 @@ const OUTCOME: Record<Verdict, { text: string; tone: string }> = {
 const altitude = (km: number) => (km < 1 ? "0 km" : `${Math.round(km).toLocaleString("en-US")} km`);
 
 /** One row per launch, newest first, with how much better (or worse) each did than the one before. */
-function FlightLog({ attempts, recap, onFix }: { attempts: Attempt[]; recap: Recap | null; onFix: (fix: DesignAction) => void }) {
+function FlightLog({ attempts, recap }: { attempts: Attempt[]; recap: Recap | null }) {
   const rows = [...attempts].reverse();
   const next = recap?.improvements[0];
   return (
@@ -325,13 +322,7 @@ function FlightLog({ attempts, recap, onFix }: { attempts: Attempt[]; recap: Rec
       {next && (
         <div className="border-t border-rule px-4 py-2.5 text-[13px]">
           <span className="mr-2 text-[10px] uppercase tracking-[0.18em] text-haze">Next</span>
-          {next.fix ? (
-            <button type="button" onClick={() => onFix(next.fix!)} className="text-left text-white underline decoration-white/40 underline-offset-4 hover:decoration-white">
-              {next.text}
-            </button>
-          ) : (
-            <span className="text-white/85">{next.text}</span>
-          )}
+          <span className="text-white/85">{next.text}</span>
         </div>
       )}
     </Module>

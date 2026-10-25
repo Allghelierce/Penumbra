@@ -599,10 +599,6 @@ export default function Studio() {
                     marks={reviewed ? (review?.marks ?? []) : []}
                     playKey={String(reviewKey)}
                     scanning={phase === "reading"}
-                    onFix={(fix) => {
-                      setSeenReview(reviewKey);
-                      handleAction(fix);
-                    }}
                     numbers={markNumbers}
                     selectedMark={selectedMark}
                     onSelectMark={(markIndex) => selectIssue(issues.findIndex((issue) => issue.markIndex === markIndex))}
@@ -655,7 +651,7 @@ export default function Studio() {
           </div>
           )}
           <p className={`h-5 text-[13px] ${error ? "text-nogo" : "text-haze"}`} aria-live="polite">
-            {error ?? (reviewed && review?.marks.some((m) => m.fix) ? "Tap a red note on the sketch to apply its fix." : "")}
+            {error ?? (reviewed && issues.some((issue) => issue.severity !== "ok") ? "Redraw to fix the numbered issues, then Check again." : "")}
           </p>
         </section>
 
@@ -673,7 +669,6 @@ export default function Studio() {
             canLaunch={Boolean(reviewed && analysis)}
             attempts={attempts}
             recap={flightRecap}
-            onFix={handleAction}
             phase={phase}
             design={design}
             analysis={analysis}

@@ -49,10 +49,9 @@ interface DesignReviewProps {
   /** Index into `issues` of the selected issue, if any. */
   selected: number | null;
   onSelect: (index: number | null) => void;
-  onFix: (fix: DesignAction) => void;
 }
 
-export default function DesignReview({ issues, trades, selected, onSelect, onFix }: DesignReviewProps) {
+export default function DesignReview({ issues, trades, selected, onSelect }: DesignReviewProps) {
   return (
     <div>
       {issues.length === 0 ? (
@@ -82,11 +81,6 @@ export default function DesignReview({ issues, trades, selected, onSelect, onFix
                     <span className="text-[10px] uppercase tracking-[0.16em] text-haze">Effect </span>
                     {issue.effect}
                   </p>
-                  {issue.fix && (
-                    <button type="button" onClick={() => onFix(issue.fix!)} className="btn-outline mt-2 h-7 px-3 text-[10px]">
-                      Apply fix
-                    </button>
-                  )}
                 </div>
               </li>
             );
