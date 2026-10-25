@@ -72,8 +72,11 @@ export function buildReview(reading: SketchReading, analysis: Analysis): Review 
     marks.push(circleAround(sketch.engines(), note));
   }
 
-  const short = analysis.marginMps < 0;
-  const fix = short ? planShortfallFix(design, analysis, sketch) : null;
+  // A stuck rocket's delta-v counts as 0, so judge its fuel as if the engine fix were made.
+  const flyable = !stuck ? design : extraEngines === null ? null : withExtraEngines(design, extraEngines);
+  const flyableAnalysis = flyable === design ? analysis : flyable && analyze(flyable);
+  const short = flyableAnalysis !== null && flyableAnalysis.marginMps < 0;
+  const fix = short ? planShortfallFix(flyable!, flyableAnalysis, sketch) : null;
   if (fix) marks.push(shortfallMark(fix, sketch));
 
   if (VACUUM_DESTINATIONS.has(design.destination) && hasFeature(design, parts, "fins")) {
@@ -91,7 +94,7 @@ export function buildReview(reading: SketchReading, analysis: Analysis): Review 
 
   return {
     marks: marks.slice(0, MAX_MARKS),
-    summary: summarize(design, analysis, { extraEngines, fix, needsLegs, needsShield }),
+    summary: summarize(design, analysis, { extraEngines, fix, flyableAnalysis, needsLegs, needsShield }),
   };
 }
 
@@ -100,16 +103,8 @@ export function buildReview(reading: SketchReading, analysis: Analysis): Review 
 
 /** Fewest extra bottom-stage engines that lift off at `target` TWR, or null if no count gets there. */
 function enginesForTwr(design: Design, target: number): number | null {
-  const bottom = design.stages[0];
-  if (!bottom || bottom.engines.length === 0) return null;
-
-  // Add to the biggest cluster, keeping any others as drawn.
-  const main = bottom.engines.reduce((best, c, i, all) => (c.count > all[best].count ? i : best), 0);
-  const twrWith = (extra: number) => {
-    const engines = bottom.engines.map((c, i) => (i === main ? { ...c, count: c.count + extra } : c));
-    const trial: Design = { ...design, stages: [{ ...bottom, engines }, ...design.stages.slice(1)] };
-    return analyze(trial).liftoffTwr;
-  };
+  if (!design.stages[0] || design.stages[0].engines.length === 0) return null;
+  const twrWith = (extra: number) => analyze(withExtraEngines(design, extra)).liftoffTwr;
 
   // Each engine adds more thrust than weight, so TWR rises with count: double, then bisect.
   let hi = 1;
@@ -126,6 +121,14 @@ function enginesForTwr(design: Design, target: number): number | null {
   return hi;
 }
 
+/** The design with `extra` more engines in the bottom stage's biggest cluster; other clusters stay as drawn. */
+function withExtraEngines(design: Design, extra: number): Design {
+  const bottom = design.stages[0];
+  const main = bottom.engines.reduce((best, c, i, all) => (c.count > all[best].count ? i : best), 0);
+  const engines = bottom.engines.map((c, i) => (i === main ? { ...c, count: c.count + extra } : c));
+  return { ...design, stages: [{ ...bottom, engines }, ...design.stages.slice(1)] };
+}
+
 type ShortfallFix = {
   stageIndex: number;
   /** Smallest whole-percent tank stretch that closes the gap, if one up to +150% does. */
@@ -137,8 +140,7 @@ type ShortfallFix = {
 function planShortfallFix(design: Design, analysis: Analysis, sketch: Sketch): ShortfallFix | null {
   if (design.stages.length === 0) return null;
   const stageIndex = stageToStretch(design, sketch);
-  // A stuck rocket already has its own mark for thrust; don't hold the tank fix to it too.
-  const keepsLiftoff = (a: Analysis) => analysis.liftoffTwr < 1 || a.liftoffTwr >= 1;
+  const keepsLiftoff = (a: Analysis) => a.liftoffTwr >= 1;
 
   const stretched = (factor: number) =>
     analyze(applyAction(design, { type: "scale-tanks", stageIndex, factor }));
@@ -195,13 +197,15 @@ function summarize(
   found: {
     extraEngines: number | null;
     fix: ShortfallFix | null;
+    /** The design's analysis, or the engine-fixed one if it was stuck. */
+    flyableAnalysis: Analysis | null;
     needsLegs: boolean;
     needsShield: boolean;
   },
 ): string {
   const deltaV = `${km(analysis.totalDeltaVMps)} of ${km(analysis.requiredDeltaVMps)} km/s`;
   const destination = DESTINATION_NAMES[design.destination];
-  const fuelFix = found.fix ? shortfallAdvice(found.fix, analysis) : null;
+  const fuelFix = found.fix && found.flyableAnalysis ? shortfallAdvice(found.fix, found.flyableAnalysis) : null;
 
   if (analysis.liftoffTwr < 1) {
     const thrust =
