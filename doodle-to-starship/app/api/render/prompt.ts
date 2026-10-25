@@ -41,11 +41,31 @@ const CONCEPT = "standing on the launch pad at dusk, floodlit, vapor venting, sh
 
 const STYLE = "Photorealistic, cinematic lighting, high detail, wide shot. No text, no logos, no watermarks.";
 
+/** Text-to-image prompt for /images/generations. */
 export function buildRenderPrompt(
   design: Partial<Design>,
   analysis: Partial<Analysis> | undefined,
   kind: RenderRequest["kind"],
 ): string {
+  return `${describeVehicle(design)}, ${scene(design, analysis, kind)}. ${STYLE}`;
+}
+
+/** Prompt for /images/edits on the napkin PNG, so the photo keeps the user's own drawing. */
+export function buildSketchEditPrompt(
+  design: Partial<Design>,
+  analysis: Partial<Analysis> | undefined,
+  kind: RenderRequest["kind"],
+): string {
+  const vehicle = describeVehicle(design);
+  return [
+    "Turn this pencil napkin sketch into a photorealistic photograph of the real spacecraft it depicts.",
+    "Keep its exact silhouette, proportions, stage count, fins, flaps, legs and engine bells.",
+    `It is ${vehicle[0].toLowerCase()}${vehicle.slice(1)}, ${scene(design, analysis, kind)}.`,
+    "Cinematic lighting. No text, no logos, no pencil lines, no paper.",
+  ].join(" ");
+}
+
+function describeVehicle(design: Partial<Design>): string {
   const stages = Array.isArray(design.stages) ? design.stages : [];
   const ordinal = ["first", "second", "third", "fourth"];
 
@@ -65,15 +85,13 @@ export function buildRenderPrompt(
       ? `, about ${Math.round(design.heightM!)} m tall and ${Math.round(design.diameterM!)} m in diameter`
       : "";
 
-  const vehicle = [
+  return [
     `A ${stages.length > 1 ? `${stages.length}-stage` : "single-stage"} rocket${size}`,
     engines && `with ${engines}`,
     features.length > 0 && `featuring ${features.join(", ")}`,
   ]
     .filter(Boolean)
     .join(", ");
-
-  return `${vehicle}, ${scene(design, analysis, kind)}. ${STYLE}`;
 }
 
 function scene(design: Partial<Design>, analysis: Partial<Analysis> | undefined, kind: RenderRequest["kind"]): string {
