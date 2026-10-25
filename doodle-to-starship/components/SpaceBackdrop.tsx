@@ -41,7 +41,7 @@ const P_FAINT = 0.15; // peak exposure of the faintest star
 const FLOOR = 0.004; // exposure too dim to show
 const HALO = 0.012;
 const SPIKE = 0.03;
-const GLOW = 0.055; // peak Milky Way brightness, as a fraction of white
+const GLOW = 0.09; // peak Milky Way brightness, as a fraction of white
 
 // Low-saturation stellar colours, hot to cool, weighted by how common each looks.
 const TINTS: { color: RGB; weight: number }[] = [
@@ -123,7 +123,7 @@ function magnitude(r: number) {
 
 function cellStars(cx: number, cy: number): Star[] {
   const rand = mulberry32(hash(cx, cy, 1));
-  const n = 26 + Math.floor(rand() * 9);
+  const n = 30 + Math.floor(rand() * 11);
   const stars: Star[] = [];
   for (let i = 0; i < n; i++) {
     const x = (cx + rand()) * CELL;
@@ -210,8 +210,8 @@ function sprite(p: number, color: RGB, d: number, spike = false, core = true): S
 
 type Wisp = { x: number; y: number; rx: number; ry: number; angle: number; color: RGB; peak: number; seed: number };
 const WISPS: Wisp[] = [
-  { x: 0.2, y: 0.22, rx: 0.2, ry: 0.09, angle: -0.5, color: [0.62, 0.48, 0.95], peak: 0.05, seed: 3 },
-  { x: 0.84, y: 0.8, rx: 0.18, ry: 0.08, angle: 0.4, color: [0.36, 0.76, 0.78], peak: 0.042, seed: 9 },
+  { x: 0.2, y: 0.22, rx: 0.2, ry: 0.09, angle: -0.5, color: [0.62, 0.48, 0.95], peak: 0.085, seed: 3 },
+  { x: 0.84, y: 0.8, rx: 0.18, ry: 0.08, angle: 0.4, color: [0.36, 0.76, 0.78], peak: 0.075, seed: 9 },
 ];
 
 // Returns RGB light (0–255) on a coarse grid over the far layer, and how crowded with faint stars each point is.
@@ -232,6 +232,8 @@ function diffuse(w: number, h: number, margin: number) {
       const ny = y / diag;
       const rx = x - 0.5 * w;
       const ry = y - 0.54 * h;
+      // The napkin sits in the middle third of the stage: keep the diffuse light faint behind it.
+      const aside = 0.22 + 0.78 * smoothstep(0.11, 0.24, Math.abs(x / w - 0.5));
       const along = (rx * ux + ry * uy) / diag;
       const across = (ry * ux - rx * uy) / diag - 0.03 * Math.sin(along * 4.4 + 0.9);
       const core = Math.exp(-(across * across) / (2 * 0.075 ** 2));
@@ -245,13 +247,13 @@ function diffuse(w: number, h: number, margin: number) {
       const rift = Math.exp(-0.5 * rr * rr) * smoothstep(0.3, 0.6, fbm(nx * 4.5 + 40, ny * 4.5 + 7, 4));
       const patches = smoothstep(0.56, 0.8, fbm(nx * 10 - 9, ny * 10 + 21, 4)) * wing;
       const dust = Math.min(0.92, 0.88 * rift + 0.55 * patches);
-      const lum = light * (1 - dust) * GLOW * 255;
+      const lum = light * (1 - dust) * aside * GLOW * 255;
       const warm = clamp01(0.2 + 0.5 * core * swell + 0.6 * dust);
       const k = j * gw + i;
       let r = lum * (0.9 + 0.1 * warm);
-      let g = lum * (0.91 - 0.05 * warm);
-      let b = lum * (0.93 - 0.25 * warm);
-      crowd[k] = light * (1 - dust) * (1 - dust);
+      let g = lum * (0.92 - 0.04 * warm);
+      let b = lum * (0.93 - 0.14 * warm);
+      crowd[k] = light * (1 - dust) * (1 - dust) * (0.4 + 0.6 * aside);
       for (const wp of WISPS) {
         const dx = (x - wp.x * w) / diag;
         const dy = (y - wp.y * h) / diag;
@@ -265,7 +267,7 @@ function diffuse(w: number, h: number, margin: number) {
         const wx = nx * 7 + wp.seed + 1.5 * fbm(nx * 3 + wp.seed, ny * 3, 3);
         const wy = ny * 7 - wp.seed + 1.5 * fbm(nx * 3, ny * 3 + wp.seed, 3);
         const ridge = 1 - Math.abs(2 * fbm(wx, wy, 4) - 1);
-        const v = env * (0.25 + 0.75 * ridge ** 3) * wp.peak * 255;
+        const v = env * (0.2 + 0.8 * ridge ** 2.5) * aside * wp.peak * 255;
         r += v * wp.color[0];
         g += v * wp.color[1];
         b += v * wp.color[2];
@@ -358,11 +360,11 @@ function build(w: number, h: number, d: number): Scene {
       paintDiffuse(img, d, field.gw, field.rgb);
       // Grain of unresolved stars along the band, thinned out where the dust is.
       const area = (w + 2 * m) * (h + 2 * m);
-      for (let i = 0, n = Math.round(area * 0.004); i < n; i++) {
+      for (let i = 0, n = Math.round(area * 0.009); i < n; i++) {
         const lx = rand() * (w + 2 * m);
         const ly = rand() * (h + 2 * m);
         const keep = rand();
-        const p = 0.03 + 0.26 * rand() ** 3;
+        const p = 0.03 + 0.34 * rand() ** 3;
         if (keep > Math.min(1, sample(field.gw, field.crowd, lx, ly) * 1.1)) continue;
         splat(px, W, H, lx * d, ly * d, p, DUST_LIGHT, d);
       }
@@ -513,21 +515,25 @@ function draw(ctx: CanvasRenderingContext2D, s: Scene, t: number, moving: boolea
     const tail = Math.min(age, 0.3) * v * d;
     const tx = hx - cos * tail;
     const ty = hy - sin * tail;
-    const half = m.width * d * 0.5 * (0.6 + 0.4 * env);
     const grad = ctx.createLinearGradient(tx, ty, hx, hy);
     grad.addColorStop(0, "rgba(255,236,214,0)");
     grad.addColorStop(0.7, `rgba(255,244,232,${0.35 * env})`);
     grad.addColorStop(1, `rgba(255,255,255,${0.9 * env})`);
-    ctx.globalAlpha = 1;
     ctx.fillStyle = grad;
-    ctx.beginPath();
-    ctx.moveTo(tx, ty);
-    ctx.lineTo(hx - sin * half, hy + cos * half);
-    ctx.lineTo(hx + sin * half, hy - cos * half);
-    ctx.closePath();
-    ctx.fill();
+    // A wide faint glow under a thin bright streak, both tapering to the tail.
+    for (const [spread, alpha] of [[4, 0.18], [1, 1]]) {
+      const half = m.width * d * 0.5 * spread * (0.6 + 0.4 * env);
+      ctx.globalAlpha = alpha;
+      ctx.beginPath();
+      ctx.moveTo(tx, ty);
+      ctx.lineTo(hx - sin * half, hy + cos * half);
+      ctx.lineTo(hx + sin * half, hy - cos * half);
+      ctx.closePath();
+      ctx.fill();
+    }
     ctx.globalAlpha = env;
     ctx.drawImage(s.dot.canvas, hx - s.dot.c, hy - s.dot.c);
+    ctx.drawImage(s.dot.canvas, hx - s.dot.c * 2, hy - s.dot.c * 2, s.dot.c * 4, s.dot.c * 4);
   }
   ctx.globalAlpha = 1;
   ctx.globalCompositeOperation = "source-over";
