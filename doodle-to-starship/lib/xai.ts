@@ -23,19 +23,24 @@ const VIDEO_OPTIONS = { duration: 6, resolution: "480p" };
  */
 export function timeouts() {
   return {
-    vision: envMs("XAI_VISION_TIMEOUT_MS", 12_000),
-    text: envMs("XAI_TEXT_TIMEOUT_MS", 6_000),
-    image: envMs("XAI_IMAGE_TIMEOUT_MS", 25_000),
-    video: envMs("XAI_VIDEO_TIMEOUT_MS", 15_000),
+    vision: envNumber("XAI_VISION_TIMEOUT_MS", 12_000),
+    text: envNumber("XAI_TEXT_TIMEOUT_MS", 6_000),
+    image: envNumber("XAI_IMAGE_TIMEOUT_MS", 25_000),
+    video: envNumber("XAI_VIDEO_TIMEOUT_MS", 15_000),
   };
 }
 
-function envMs(name: string, fallback: number): number {
+function envNumber(name: string, fallback: number): number {
   const value = Number(process.env[name]);
   return Number.isFinite(value) && value > 0 ? value : fallback;
 }
 
-export type XaiErrorKind = "auth" | "rate-limit" | "server" | "bad-request" | "timeout" | "network";
+export type XaiErrorKind = "auth" | "rate-limit" | "server" | "bad-request" | "timeout" | "network" | "budget";
+
+/** Paid calls stop for the rest of the UTC day once metered spend reaches this (XAI_DAILY_BUDGET_USD). */
+export function dailyBudgetUsd(): number {
+  return envNumber("XAI_DAILY_BUDGET_USD", 15);
+}
 
 export interface XaiError {
   kind: XaiErrorKind;
@@ -48,17 +53,46 @@ export interface XaiError {
 interface XaiHealth {
   lastError: XaiError | null;
   lastOkAt: string | null;
+  /** Metered spend for one UTC day, per server instance. */
+  spend: { day: string; ticks: number };
 }
 
-// On globalThis because dev bundles each route separately; /api/xai-status must see every route's calls.
+const TICKS_PER_USD = 1e10;
+const utcDay = () => new Date().toISOString().slice(0, 10);
+
+// On globalThis because dev bundles each route separately; /api/xai-status and the budget must see
+// every route's calls.
 const health: XaiHealth = ((globalThis as { __xaiHealth?: XaiHealth }).__xaiHealth ??= {
   lastError: null,
   lastOkAt: null,
+  spend: { day: utcDay(), ticks: 0 },
 });
+health.spend ??= { day: utcDay(), ticks: 0 };
 
-/** The most recent failure (any route) and the most recent success, for /api/xai-status. */
-export function xaiHealth(): XaiHealth {
-  return { ...health };
+function spentTodayUsd(): number {
+  if (health.spend.day !== utcDay()) health.spend = { day: utcDay(), ticks: 0 };
+  return health.spend.ticks / TICKS_PER_USD;
+}
+
+/** Counts a cost toward today's budget and the current request's x-xai-cost-usd header. */
+function addCost(ticks: number) {
+  spentTodayUsd();
+  health.spend.ticks += ticks;
+  const meter = costMeter.getStore();
+  if (meter) {
+    meter.ticks += ticks;
+    meter.seen = true;
+  }
+}
+
+/** The most recent failure (any route), the most recent success and today's spend, for /api/xai-status. */
+export function xaiHealth() {
+  return {
+    lastError: health.lastError,
+    lastOkAt: health.lastOkAt,
+    spentTodayUsd: Math.round(spentTodayUsd() * 10_000) / 10_000,
+    dailyBudgetUsd: dailyBudgetUsd(),
+  };
 }
 
 function recordError(path: string, status: number | null, kind: XaiErrorKind, message: string) {
@@ -77,7 +111,6 @@ function kindOf(status: number, detail: string): XaiErrorKind {
 
 /** Adds up usage.cost_in_usd_ticks for every xAI call made inside metered(). 1 USD = 1e10 ticks. */
 const costMeter = new AsyncLocalStorage<{ ticks: number; seen: boolean }>();
-const TICKS_PER_USD = 1e10;
 
 /** Runs a route handler and stamps what its xAI calls cost onto the response as x-xai-cost-usd. */
 export async function metered(handle: () => Promise<Response>): Promise<Response> {
@@ -115,6 +148,7 @@ interface ImageResult {
 }
 
 interface VideoJob {
+  usage?: { cost_in_usd_ticks?: number };
   request_id?: string;
   status?: string;
   progress?: number;
@@ -124,6 +158,11 @@ interface VideoJob {
 async function request<T>(method: "GET" | "POST", path: string, body: unknown, timeoutMs: number): Promise<T | null> {
   const key = process.env.XAI_API_KEY;
   if (!key) return null;
+  // Spend brake: paid calls fall back like no-key mode; polls (GET) are free and keep working.
+  if (method === "POST" && spentTodayUsd() >= dailyBudgetUsd()) {
+    recordError(path, null, "budget", `daily xAI budget of $${dailyBudgetUsd()} reached`);
+    return null;
+  }
   try {
     const res = await fetch(`${XAI_BASE_URL}${path}`, {
       method,
@@ -139,11 +178,7 @@ async function request<T>(method: "GET" | "POST", path: string, body: unknown, t
     }
     const json = (await res.json()) as T & { usage?: { cost_in_usd_ticks?: number } };
     const ticks = json?.usage?.cost_in_usd_ticks;
-    const meter = costMeter.getStore();
-    if (meter && typeof ticks === "number") {
-      meter.ticks += ticks;
-      meter.seen = true;
-    }
+    if (typeof ticks === "number") addCost(ticks);
     health.lastOkAt = new Date().toISOString();
     return json;
   } catch (err) {
@@ -269,7 +304,10 @@ export async function startVideo(imageUrl: string, prompt: string): Promise<stri
     { model: VIDEO_MODEL, image: { url: imageUrl }, prompt, ...VIDEO_OPTIONS },
     timeouts().video,
   );
-  return typeof job?.request_id === "string" ? job.request_id : null;
+  if (typeof job?.request_id !== "string") return null;
+  // Video is billed when the clip is made, so count it now at list price ($0.02/s) for the budget.
+  if (!job.usage) addCost(VIDEO_OPTIONS.duration * 0.02 * TICKS_PER_USD);
+  return job.request_id;
 }
 
 export type VideoStatus = "pending" | "done" | "failed" | "expired";
