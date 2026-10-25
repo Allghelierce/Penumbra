@@ -6,8 +6,8 @@ import { AsyncLocalStorage } from "node:async_hooks";
 // any failure (no key, timeout, HTTP error, bad JSON) so routes can fall back.
 
 export const XAI_BASE_URL = "https://api.x.ai/v1";
-export const VISION_MODEL = "grok-4.7";
-/** grok-4.7 defaults to high effort, which is slow. */
+/** grok-4.7 timed out the 12 s live budget even at low effort; grok-4.3 at low is much faster. */
+export const VISION_MODEL = "grok-4.3";
 const VISION_REASONING = "low";
 export const TEXT_MODEL = "grok-4.3";
 const TEXT_REASONING = "none";
