@@ -227,7 +227,7 @@ function LaunchRun(props: RunProps) {
       <style>{KEYFRAMES}</style>
       <canvas ref={canvasRef} className="absolute inset-0 h-full w-full" />
 
-      <div className="ls-fade pointer-events-none absolute left-4 top-4 flex items-center gap-3 [animation-delay:1.2s] sm:left-6 sm:top-5">
+      <div className="ls-fade pointer-events-none absolute left-4 top-4 flex items-center gap-3 [animation-delay:1.3s] sm:left-6 sm:top-5">
         <span className="font-display text-sm font-semibold uppercase tracking-[0.22em]">Penumbra</span>
         <span className="h-3 w-px bg-white/25" />
         <span className="max-w-[40vw] truncate text-[11px] font-semibold uppercase tracking-[0.18em] text-haze">
@@ -256,8 +256,9 @@ function LaunchRun(props: RunProps) {
         readoutRef={readoutRef}
       />
 
+      {/* Overlay chrome waits for the sky to cover the studio, so it never overlaps the studio's header. */}
       {!ended && (
-        <div className="absolute right-4 top-4 flex items-center gap-5 text-[11px] font-semibold uppercase tracking-[0.18em] text-haze sm:right-6 sm:top-5">
+        <div className="ls-fade absolute right-4 top-4 flex items-center gap-5 text-[11px] font-semibold uppercase tracking-[0.18em] text-haze [animation-delay:1.3s] sm:right-6 sm:top-5">
           <button type="button" onClick={props.onMute} aria-pressed={props.muted} className={control}>
             {props.muted ? "Sound off" : "Sound on"}
           </button>
@@ -377,7 +378,7 @@ function AltitudeLadder({
     ...FAR_MARKS.filter((m) => m.km <= top).map((m) => ({ ...m, hero: false })),
   ];
   return (
-    <div className="ls-fade pointer-events-none absolute bottom-32 right-8 top-20 hidden w-44 [animation-delay:1.4s] lg:block">
+    <div className="ls-fade pointer-events-none absolute bottom-32 right-8 top-20 hidden w-44 [animation-delay:1.6s] lg:block">
       <div ref={boxRef} className="relative h-full">
         <div className="absolute inset-y-0 left-0 w-px bg-white/15" />
         {LAYERS.map((l) => {
