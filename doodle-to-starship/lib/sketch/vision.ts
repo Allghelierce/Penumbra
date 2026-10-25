@@ -1,6 +1,6 @@
 import type { DestinationId, EngineId, Part, SketchReading, Stage } from "../design";
 import { enginesForBase, enginesForBells, MAX_ENGINES, REFERENCE_BELL_M, upperStageEngines } from "./engines";
-import { clamp, NAPKIN_HEIGHT_M, NAPKIN_WIDTH_M, toBox } from "./geometry";
+import { clamp, NAPKIN_HEIGHT_M, NAPKIN_WIDTH_M, napkinScale, toBox } from "./geometry";
 import { ENGINE_IDS, isEngineId, isPartKind, isPropellantId, PART_KINDS, PROPELLANT_IDS } from "./ids";
 
 // The Grok vision side of /api/read: the strict JSON schema, the prompt, and the
@@ -108,16 +108,19 @@ export function buildReadPrompt(hint: SketchReading): string {
 export function sanitizeReading(raw: unknown, destination: DestinationId): SketchReading | null {
   if (!isRecord(raw)) return null;
 
-  const diameterM = round1(clamp(num(raw.diameterM, 5), 0.3, 30));
+  // Same uniform shrink as the geometry reader, so wide doodles don't become 27 m rockets.
+  const rawDiameterM = clamp(num(raw.diameterM, 5), 0.3, 30);
+  const scale = napkinScale(rawDiameterM);
+  const diameterM = round1(rawDiameterM * scale);
   const stages: Stage[] = [];
   for (const s of (Array.isArray(raw.stages) ? raw.stages : []).filter(isRecord).slice(0, MAX_STAGES)) {
     const i = stages.length;
     const engine: EngineId = isEngineId(s.engine) ? s.engine : i === 0 ? "raptor-3" : "raptor-vacuum";
     stages.push({
       label: str(s.label, 24) || `Stage ${i + 1}`,
-      engines: [{ engine, count: engineCount(s, i, diameterM, stages[0]?.engines[0].count ?? 1) }],
+      engines: [{ engine, count: engineCount(s, i, diameterM, scale, stages[0]?.engines[0].count ?? 1) }],
       propellant: isPropellantId(s.propellant) ? s.propellant : "methalox",
-      tankVolumeM3: Math.round(clamp(num(s.tankVolumeM3, 100), 1, 10_000)),
+      tankVolumeM3: Math.round(clamp(num(s.tankVolumeM3, 100) * scale ** 3, 1, 10_000)),
     });
   }
   if (stages.length === 0) return null;
@@ -152,10 +155,10 @@ export function sanitizeReading(raw: unknown, destination: DestinationId): Sketc
     design: {
       name: str(raw.name, 40) || "Napkin Special",
       stages,
-      payloadMassKg: Math.round(clamp(num(raw.payloadMassKg, 10_000), 0, 500_000)),
+      payloadMassKg: Math.round(clamp(num(raw.payloadMassKg, 10_000) * scale ** 3, 0, 500_000)),
       destination,
       features,
-      heightM: round1(clamp(num(raw.heightM, 50), 1, 200)),
+      heightM: round1(clamp(num(raw.heightM, 50) * scale, 1, 200)),
       diameterM,
     },
     parts,
@@ -163,11 +166,17 @@ export function sanitizeReading(raw: unknown, destination: DestinationId): Sketc
 }
 
 /** A written count wins; otherwise drawn bells are read at scale (see ./engines). */
-function engineCount(s: Record<string, unknown>, index: number, diameterM: number, boosterEngines: number): number {
+function engineCount(
+  s: Record<string, unknown>,
+  index: number,
+  diameterM: number,
+  scale: number,
+  boosterEngines: number,
+): number {
   const written = num(s.writtenEngineCount, NaN);
   if (written >= 1) return Math.round(clamp(written, 1, MAX_ENGINES));
   const bells = Math.round(clamp(num(s.bellsDrawn, 0), 0, MAX_ENGINES));
-  if (bells > 0) return enginesForBells(Array(bells).fill(num(s.bellWidthM, REFERENCE_BELL_M)));
+  if (bells > 0) return enginesForBells(Array(bells).fill(num(s.bellWidthM, REFERENCE_BELL_M) * scale));
   return index === 0 ? enginesForBase(diameterM) : upperStageEngines(boosterEngines);
 }
 

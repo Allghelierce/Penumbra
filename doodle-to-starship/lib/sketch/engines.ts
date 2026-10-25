@@ -5,7 +5,8 @@
 export const REFERENCE_BELL_M = 1.3;
 /** How much of a round base a ring of bells covers: Super Heavy fits 33 Raptors on 9 m. */
 const BASE_PACKING = 0.69;
-export const MAX_ENGINES = 200;
+/** Per stage. Super Heavy has 33. */
+export const MAX_ENGINES = 40;
 
 const clampCount = (n: number) => Math.min(MAX_ENGINES, Math.max(1, Math.round(n)));
 

@@ -15,6 +15,8 @@ import type {
 /** The full napkin height in metres; the width follows from NAPKIN_ASPECT. */
 export const NAPKIN_HEIGHT_M = 120;
 export const NAPKIN_WIDTH_M = NAPKIN_HEIGHT_M * NAPKIN_ASPECT;
+/** Wide doodles shrink uniformly so the body is at most this wide (Super Heavy is 9 m). */
+export const MAX_BODY_DIAMETER_M = 12;
 
 // Height bands, as fractions of the drawing's own height from its top.
 const NOSE_END = 0.15;
@@ -66,6 +68,9 @@ export function readFromGeometry(strokes: Stroke[], destination: DestinationId):
   const bodyLeft = body.center - bodyW / 2;
   const bodyRight = body.center + bodyW / 2;
   const tolerance = Math.max(0.15 * bodyW, 0.01);
+  // One uniform scale for every length: 120 m per napkin height, unless that makes the body too wide.
+  const napkinHeightM = NAPKIN_HEIGHT_M * napkinScale(bodyW * NAPKIN_WIDTH_M);
+  const napkinWidthM = napkinHeightM * NAPKIN_ASPECT;
 
   // Stage boundaries: near-horizontal strokes across the body inside the tank band.
   const boundaries: number[] = [];
@@ -97,10 +102,10 @@ export function readFromGeometry(strokes: Stroke[], destination: DestinationId):
       b.maxX <= bodyRight + tolerance
     );
   });
-  const bodyDiameterM = bodyW * NAPKIN_WIDTH_M;
+  const bodyDiameterM = bodyW * napkinWidthM;
   const engineCount =
     engineStrokes.length > 0
-      ? enginesForBells(engineStrokes.map((s) => widthOf(s) * NAPKIN_WIDTH_M))
+      ? enginesForBells(engineStrokes.map((s) => widthOf(s) * napkinWidthM))
       : enginesForBase(bodyDiameterM);
 
   // Landing legs: a pair of strokes, one per side, that leave a wall and angle down and outward.
@@ -115,8 +120,8 @@ export function readFromGeometry(strokes: Stroke[], destination: DestinationId):
   const hatchesBySide = { left: [] as Stroke[], right: [] as Stroke[] };
   for (const stroke of clean) {
     const b = boundsOf(stroke.points);
-    const wM = (b.maxX - b.minX) * NAPKIN_WIDTH_M;
-    const hM = (b.maxY - b.minY) * NAPKIN_HEIGHT_M;
+    const wM = (b.maxX - b.minX) * napkinWidthM;
+    const hM = (b.maxY - b.minY) * napkinHeightM;
     const short = Math.max(wM, hM) < 0.35 * bodyDiameterM;
     const diagonal = wM > 0 && hM > 0 && hM / wM > 0.3 && hM / wM < 3;
     const inside =
@@ -155,7 +160,7 @@ export function readFromGeometry(strokes: Stroke[], destination: DestinationId):
       i === 0
         ? [{ engine: "raptor-3", count: engineCount }]
         : [{ engine: "raptor-vacuum", count: upperStageEngines(engineCount) }];
-    const tankHeightM = (seg.y1 - seg.y0) * NAPKIN_HEIGHT_M;
+    const tankHeightM = (seg.y1 - seg.y0) * napkinHeightM;
     return {
       label: labels[i],
       engines,
@@ -170,7 +175,7 @@ export function readFromGeometry(strokes: Stroke[], destination: DestinationId):
     return i >= 0 ? i : y < atRel(PAYLOAD_END) ? topStage : 0;
   };
 
-  const payloadHeightM = (PAYLOAD_END - NOSE_END) * drawingH * NAPKIN_HEIGHT_M;
+  const payloadHeightM = (PAYLOAD_END - NOSE_END) * drawingH * napkinHeightM;
   const payloadMassKg = Math.max(100, Math.round((area * payloadHeightM * PAYLOAD_DENSITY_KG_M3) / 100) * 100);
 
   const bodyBox = (y0: number, y1: number): Part["box"] => toBox(bodyLeft, y0, bodyRight, y1);
@@ -223,7 +228,7 @@ export function readFromGeometry(strokes: Stroke[], destination: DestinationId):
         ...(hatches.length > 0 ? ["heat-shield"] : []),
         ...(legs.length > 0 ? ["landing-legs"] : []),
       ],
-      heightM: round1(drawingH * NAPKIN_HEIGHT_M),
+      heightM: round1(drawingH * napkinHeightM),
       diameterM: round1(bodyDiameterM),
     },
     parts,
@@ -342,6 +347,11 @@ function median(values: number[]): number {
   const sorted = [...values].sort((a, b) => a - b);
   const mid = Math.floor(sorted.length / 2);
   return sorted.length % 2 ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) / 2;
+}
+
+/** Factor (≤ 1) that shrinks a design uniformly so a body this wide comes out at most MAX_BODY_DIAMETER_M. */
+export function napkinScale(bodyDiameterM: number): number {
+  return bodyDiameterM > MAX_BODY_DIAMETER_M ? MAX_BODY_DIAMETER_M / bodyDiameterM : 1;
 }
 
 export function clamp(value: number, min: number, max: number): number {

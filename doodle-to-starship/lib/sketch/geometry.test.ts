@@ -21,10 +21,11 @@ function summarize(strokes: Stroke[]) {
 
 describe("readFromGeometry", () => {
   // Engine counts come from the bells read at scale: hopper 1 huge bell, orbiter 3, mars ship 5.
-  it("reads the napkin hopper as one finned stage whose single huge bell is a big cluster", () => {
+  it("reads the napkin hopper as one finned stage whose single wide bell is a cluster", () => {
     const r = summarize(demo("napkin-hopper").strokes);
     expect(r).toMatchObject({ stages: 1, fins: true, finParts: 2 });
-    expect(r.engines).toBeGreaterThan(80);
+    expect(r.engines).toBeGreaterThanOrEqual(15);
+    expect(r.engines).toBeLessThanOrEqual(35);
   });
 
   it("reads the two-stage orbiter's boundary line, three bells and fins", () => {
@@ -51,11 +52,12 @@ describe("readFromGeometry", () => {
     }
   });
 
-  it("keeps the body diameter close to the drawn body, not the fins", () => {
-    // Hopper body is 0.22 square units wide = 0.22 / (3/4) of the napkin width = 26.4 m.
+  it("measures the body, not the fins, and shrinks wide doodles uniformly to a 12 m body", () => {
+    // Hopper body: 0.22 square units wide and about 0.62 tall (nose tip to bell), so ~2.8:1.
     const { design } = summarize(demo("napkin-hopper").strokes);
-    expect(design.diameterM).toBeGreaterThan(22);
-    expect(design.diameterM).toBeLessThan(31);
+    expect(design.diameterM).toBe(12);
+    expect(design.heightM / design.diameterM).toBeGreaterThan(2.5);
+    expect(design.heightM / design.diameterM).toBeLessThan(3.2);
   });
 
   it("computes tank volume as π r² h × 0.8 and keeps boxes on the napkin", () => {
