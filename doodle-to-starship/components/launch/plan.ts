@@ -266,7 +266,8 @@ function flightPlan(
     flightDur,
     liftoffAt,
     cues,
-    captions: captionsFor(cues, maxAltKm, false, sepsSeen),
+    // In orbit the finale has the stage; later events still reach onEvent but get no caption.
+    captions: captionsFor(cues, maxAltKm, false, sepsSeen, outcome === "suborbital" ? Infinity : finaleAt - 0.2),
     burns,
     seps,
     finaleAt,
@@ -320,13 +321,18 @@ function finaleFor(outcome: Verdict, design: Design, at: number): Finale {
   }
 }
 
-function captionsFor(cues: Cue[], maxAltKm: number, onPad: boolean, sepsSeen = { n: 0 }): CaptionCue[] {
+function captionsFor(cues: Cue[], maxAltKm: number, onPad: boolean, sepsSeen = { n: 0 }, until = Infinity): CaptionCue[] {
   const out: CaptionCue[] = [];
   let lastAt = -Infinity;
   for (const c of cues) {
     const base = captionText(c.event.kind, maxAltKm, sepsSeen.n, onPad);
     if (c.event.kind === "stage-sep") sepsSeen.n++;
-    if (!base) continue;
+    if (!base || c.at >= until) continue;
+    // "fuel exhausted" already says the engines stopped.
+    const dryAtCutoff =
+      c.event.kind === "engine-cutoff" &&
+      cues.some((o) => o.event.kind === "fuel-exhausted" && Math.abs(o.event.tS - c.event.tS) < 2);
+    if (dryAtCutoff) continue;
     const label = c.event.label?.trim();
     const sub = label && normalize(label) !== normalize(base.text) ? label : undefined;
     const at = Math.max(c.at, lastAt + 1.6);
@@ -358,7 +364,7 @@ function captionText(kind: FlightEventKind, maxAltKm: number, seps: number, onPa
   }
 }
 
-const normalize = (s: string) => s.toLowerCase().replace(/[^a-z0-9]/g, "");
+const normalize = (s: string) => s.toLowerCase().replace(/\b(at|the|of)\b/g, "").replace(/[^a-z0-9]/g, "");
 
 export function sampleAt(points: FlightPoint[], t: number): Sample {
   const n = points.length;

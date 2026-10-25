@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import LaunchScene from "@/components/LaunchScene";
-import { FIXTURES, FIXTURE_RENDER, type LaunchFixture } from "./fixtures";
+import { FIXTURES, FIXTURE_RENDER, REAL_FIXTURES, type LaunchFixture } from "./fixtures";
 
 type RenderMode = "late" | "now" | "none";
 
@@ -25,7 +25,7 @@ export default function LaunchDevPage() {
   // ?play=<fixture id> starts a launch on load (handy for screenshots).
   useEffect(() => {
     const id = new URLSearchParams(window.location.search).get("play");
-    const fixture = FIXTURES.find((f) => f.id === id);
+    const fixture = [...REAL_FIXTURES, ...FIXTURES].find((f) => f.id === id);
     if (!fixture) return;
     const h = window.setTimeout(() => play(fixture), 0);
     return () => window.clearTimeout(h);
@@ -44,19 +44,27 @@ export default function LaunchDevPage() {
         Dev bench for components/LaunchScene.tsx. Esc or “skip” jumps to the end card.
       </p>
 
-      <section className="mt-6 flex flex-wrap gap-3">
-        {FIXTURES.map((f) => (
-          <button
-            key={f.id}
-            type="button"
-            onClick={() => play(f)}
-            className="rounded-[3px] border border-napkin-edge bg-napkin px-4 py-3 text-left shadow-sm transition-transform hover:-rotate-1"
-          >
-            <div className="font-hand text-3xl leading-none">{f.title}</div>
-            <div className="mt-1 font-mono text-[11px] text-ink-muted">{f.note}</div>
-          </button>
-        ))}
-      </section>
+      {[
+        { title: "Real physics: demo sketches", list: REAL_FIXTURES },
+        { title: "Hand-made traces", list: FIXTURES },
+      ].map((group) => (
+        <section key={group.title} className="mt-6">
+          <h2 className="font-mono text-xs uppercase tracking-widest text-ink-muted">{group.title}</h2>
+          <div className="mt-2 flex flex-wrap gap-3">
+            {group.list.map((f) => (
+              <button
+                key={f.id}
+                type="button"
+                onClick={() => play(f)}
+                className="rounded-[3px] border border-napkin-edge bg-napkin px-4 py-3 text-left shadow-sm transition-transform hover:-rotate-1"
+              >
+                <div className="font-hand text-3xl leading-none">{f.title}</div>
+                <div className="mt-1 font-mono text-[11px] text-ink-muted">{f.note}</div>
+              </button>
+            ))}
+          </div>
+        </section>
+      ))}
 
       <fieldset className="mt-6 flex flex-wrap gap-x-5 gap-y-2 font-mono text-xs">
         <legend className="mb-2 text-ink-muted">Outcome render</legend>

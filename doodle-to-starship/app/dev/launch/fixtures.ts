@@ -11,8 +11,12 @@ import {
   type Stroke,
   type Verdict,
 } from "@/lib/design";
+import { DEMO_SKETCHES } from "@/lib/demo-sketches";
+import { analyze, simulateFlight } from "@/lib/physics";
+import { readFromGeometry } from "@/lib/sketch/geometry";
 
-// Hand-made launch fixtures so the scene can be tuned before @/lib/physics lands.
+// Launch fixtures: the demo sketches run through the real geometry reader and physics,
+// plus hand-made traces that pin down each outcome.
 
 export interface LaunchFixture {
   id: string;
@@ -237,3 +241,38 @@ export const FIXTURE_RENDER =
   encodeURIComponent(
     `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 400"><defs><linearGradient id="s" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#05070d"/><stop offset="1" stop-color="#0b1a33"/></linearGradient><radialGradient id="f" cx=".5" cy=".75" r=".5"><stop offset="0" stop-color="#ffb347"/><stop offset=".4" stop-color="#ff5a1f" stop-opacity=".7"/><stop offset="1" stop-color="#ff5a1f" stop-opacity="0"/></radialGradient></defs><rect width="400" height="400" fill="url(#s)"/><circle cx="200" cy="900" r="620" fill="#0f2c4d" stroke="#6eaaff" stroke-width="4"/><rect width="400" height="400" fill="url(#f)" opacity=".5"/><path d="M200 70 L225 130 L225 250 L175 250 L175 130 Z" fill="#f4f1ea"/><path d="M188 250 L200 330 L212 250 Z" fill="#ffb347"/><text x="200" y="380" font-family="monospace" font-size="16" fill="#ffffff99" text-anchor="middle">fixture render</text></svg>`,
   );
+
+function real(id: string, title: string, strokes: Stroke[], destination: Design["destination"], tweak?: (d: Design) => Design): LaunchFixture | null {
+  try {
+    const read = readFromGeometry(strokes, destination);
+    const design = tweak ? tweak(read.design) : read.design;
+    const result = analyze(design);
+    const trace = simulateFlight(design, result);
+    const stages = design.stages.length;
+    return {
+      id,
+      title,
+      note: `${result.verdict} · ${stages} stage${stages === 1 ? "" : "s"} · ${design.destination}`,
+      strokes,
+      reading: { design, parts: read.parts },
+      analysis: result,
+      trace,
+    };
+  } catch (err) {
+    console.error(`fixture ${id}`, err);
+    return null;
+  }
+}
+
+const sketch = (id: string) => DEMO_SKETCHES.find((d) => d.id === id);
+
+/** Demo sketches through readFromGeometry → analyze → simulateFlight. */
+export const REAL_FIXTURES: LaunchFixture[] = [
+  ...DEMO_SKETCHES.map((d) => real(d.id, d.title, d.strokes, d.destination)),
+  real("orbiter-moon", "Orbiter → Moon", sketch("two-stage-orbiter")?.strokes ?? [], "moon-orbit"),
+  real("orbiter-heavy", "Orbiter, 5,000 t payload", sketch("two-stage-orbiter")?.strokes ?? [], "leo", (d) => ({ ...d, payloadMassKg: 5_000_000 })),
+  real("orbiter-small-tanks", "Orbiter, tiny tanks", sketch("two-stage-orbiter")?.strokes ?? [], "leo", (d) => ({
+    ...d,
+    stages: d.stages.map((s) => ({ ...s, tankVolumeM3: s.tankVolumeM3 * 0.25 })),
+  })),
+].filter((f): f is LaunchFixture => f !== null);
