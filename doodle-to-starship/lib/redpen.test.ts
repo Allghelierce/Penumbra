@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import { applyAction } from "./actions";
 import { NAPKIN_ASPECT, type Design, type Part, type RedPenMark, type SketchReading } from "./design";
 import { analyze } from "./physics";
-import { buildReview } from "./redpen";
+import { buildReview, isIssueMark } from "./redpen";
 
 function falconLike(overrides: Partial<Design> = {}): Design {
   return {
@@ -37,10 +37,12 @@ function partsFor(design: Design): Part[] {
   return parts;
 }
 
+/** The numbered issue marks only; the identifying markup is tested on its own below. */
 function review(design: Design, parts = partsFor(design)) {
   const reading: SketchReading = { design, parts };
   const analysis = analyze(design);
-  return { analysis, review: buildReview(reading, analysis) };
+  const full = buildReview(reading, analysis);
+  return { analysis, review: { ...full, marks: full.marks.filter(isIssueMark) }, full };
 }
 
 function notes(marks: RedPenMark[]) {
@@ -87,7 +89,7 @@ function expectOnNapkin(mark: RedPenMark) {
       inside([mark.from[0] - width / 2, mark.from[1]]);
       inside([mark.from[0] + width / 2, mark.from[1]]);
     }
-  } else {
+  } else if (mark.kind === "ghost-line") {
     expect(mark.points.length).toBeGreaterThan(1);
     mark.points.forEach(inside);
   }
@@ -310,5 +312,68 @@ describe("every review", () => {
 
   it("is deterministic", () => {
     expect(review(everythingWrong).review).toEqual(review(everythingWrong).review);
+  });
+});
+
+describe("the engineer's markup", () => {
+  const design = falconLike({ features: ["fins"] });
+  const parts = [...partsFor(design), { kind: "fin" as const, label: "fin", box: [0.6, 0.7, 0.06, 0.1] as Part["box"], stageIndex: 0 }];
+  const { full, analysis } = review(design, parts);
+  const of = <K extends RedPenMark["kind"]>(kind: K) => full.marks.filter((m): m is Extract<RedPenMark, { kind: K }> => m.kind === kind);
+
+  it("comes before the issue marks: outlines, then dimensions, then callouts", () => {
+    const order = { outline: 0, dimension: 1, callout: 2, arrow: 3, circle: 3, "ghost-line": 3 };
+    full.marks.forEach((m, i) => {
+      if (i > 0) expect(order[m.kind]).toBeGreaterThanOrEqual(order[full.marks[i - 1].kind]);
+    });
+  });
+
+  it("outlines every part once per kind and stage, named for what it is", () => {
+    const notes = of("outline").map((m) => m.note);
+    expect(notes).toEqual(expect.arrayContaining(["Nose / fairing", "Payload bay", "Engines", "Booster LOX/RP-1", "Stage 2 LOX/RP-1"]));
+    expect(notes.filter((n) => n === "Fins")).toHaveLength(1);
+    for (const m of of("outline")) {
+      expect(m.box[0]).toBeGreaterThanOrEqual(0);
+      expect(m.box[1]).toBeGreaterThanOrEqual(0);
+      expect(m.box[0] + m.box[2]).toBeLessThanOrEqual(1);
+      expect(m.box[1] + m.box[3]).toBeLessThanOrEqual(1);
+    }
+  });
+
+  it("dimensions the height beside the body and the diameter across it", () => {
+    const [height, diameter] = of("dimension");
+    expect(height.note).toBe("70 m");
+    expect(height.from[0]).toBeCloseTo(height.to[0], 6);
+    expect(height.from[0]).toBeLessThan(0.42);
+    expect(diameter.note).toBe("3.7 m");
+    expect(diameter.from[1]).toBeCloseTo(diameter.to[1], 6);
+  });
+
+  it("calls out real numbers from the physics, in the margin, without overlapping", () => {
+    const callouts = of("callout");
+    expect(callouts.length).toBeGreaterThanOrEqual(3);
+    expect(callouts.length).toBeLessThanOrEqual(6);
+    const boosterProp = Math.round(analysis.stages[0].propellantMassKg / 1000).toLocaleString("en-US");
+    expect(callouts.some((c) => c.note.includes(`${boosterProp} t prop`))).toBe(true);
+    expect(callouts.some((c) => /^9× Merlin 1D/.test(c.note))).toBe(true);
+    expect(callouts.some((c) => c.note === "Payload 1 t")).toBe(true);
+    callouts.forEach((c, i) => {
+      for (const p of [c.anchor, c.label]) {
+        expect(p[0]).toBeGreaterThanOrEqual(0);
+        expect(p[0]).toBeLessThanOrEqual(1);
+        expect(p[1]).toBeGreaterThanOrEqual(0);
+        expect(p[1]).toBeLessThanOrEqual(1);
+      }
+      // Written away from the anchor; it has to fit on the napkin.
+      const width = c.note.length * 0.012;
+      if (c.label[0] < c.anchor[0]) expect(c.label[0] - width).toBeGreaterThanOrEqual(0);
+      else expect(c.label[0] + width).toBeLessThanOrEqual(1);
+      if (i > 0) expect(c.label[1] - callouts[i - 1].label[1]).toBeGreaterThanOrEqual(0.05 - 1e-9);
+    });
+  });
+
+  it("draws no markup when the reading found no parts", () => {
+    const bare = buildReview({ design, parts: [] }, analyze(design)).marks;
+    expect(bare.every(isIssueMark)).toBe(true);
   });
 });

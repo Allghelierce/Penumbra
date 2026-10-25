@@ -5,7 +5,7 @@
 import { applyAction } from "./actions";
 import type { Analysis, Design, DesignAction, RedPenMark, SketchReading } from "./design";
 import { analyze, DESTINATIONS, ENGINES, km, kmShort, kmSpare } from "./physics";
-import { buildReview, DESTINATION_NAMES, SAFE_TWR } from "./redpen";
+import { buildReview, DESTINATION_NAMES, isIssueMark, SAFE_TWR } from "./redpen";
 
 export interface Issue {
   /** 1-based, in display order; the UI numbers the matching red-pen mark with it. */
@@ -37,8 +37,9 @@ type Draft = Omit<Issue, "n">;
 
 export function diagnose(design: Design, analysis: Analysis, reading?: SketchReading): Issue[] {
   const marks = buildReview(reading ?? { design, parts: [] }, analysis).marks;
+  // Only the numbered issue marks; the outlines, callouts and dimensions just identify parts.
   const markFor = (test: (m: RedPenMark) => boolean) => {
-    const i = marks.findIndex(test);
+    const i = marks.findIndex((m) => isIssueMark(m) && test(m));
     return i >= 0 ? i : undefined;
   };
 
@@ -200,7 +201,7 @@ function slowUpperStages(a: Analysis): Draft[] {
 function hardwareIssues(design: Design, all: RedPenMark[], markFor: MarkFinder): Draft[] {
   const out: Draft[] = [];
   const dest = DESTINATION_NAMES[design.destination];
-  const has = (note: string) => all.some((m) => m.note === note);
+  const has = (note: string) => all.some((m) => isIssueMark(m) && m.note === note);
   if (has("needs legs")) {
     out.push({
       severity: "no-go",

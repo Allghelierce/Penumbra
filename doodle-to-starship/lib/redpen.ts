@@ -16,7 +16,7 @@ import {
   type Review,
   type SketchReading,
 } from "./design";
-import { analyze } from "./physics";
+import { analyze, ENGINES } from "./physics";
 
 type Box = [x: number, y: number, w: number, h: number];
 
@@ -95,9 +95,8 @@ export function buildReview(reading: SketchReading, analysis: Analysis): Review 
   if (fix) marks.push(shortfallMark(fix, sketch));
 
   if (VACUUM_DESTINATIONS.has(design.destination) && hasFeature(design, parts, "fins")) {
-    // Fins are symmetric, so this arrow takes the side the other notes leave free, if the note fits there.
-    const other = -sketch.openSide() as 1 | -1;
-    const side = noteFits(sketch.finSide(other), other, FINS_NOTE) ? other : sketch.openSide();
+    // The other side holds the spec callouts, so fins take the open side like the other notes.
+    const side = sketch.openSide();
     marks.push(arrowTo(sketch.finSide(side), side, -0.04, FINS_NOTE));
   }
 
@@ -113,7 +112,8 @@ export function buildReview(reading: SketchReading, analysis: Analysis): Review 
   if (flies) marks.push(circleAround(sketch.whole(), "flies!"));
 
   return {
-    marks: marks.slice(0, MAX_MARKS),
+    // The engineer's markup (outlines, specs, dimensions) first, then the numbered issue marks.
+    marks: [...engineerMarkup(design, analysis, parts, sketch), ...marks.slice(0, MAX_MARKS)],
     summary: summarize(design, analysis, { extraEngines, sensibleEngines, fix, flyableAnalysis, needsLegs, needsShield }),
   };
 }
@@ -401,12 +401,6 @@ function circleAround([x, y, w, h]: Box, note: string): RedPenMark {
   return { kind: "circle", center, radius, note };
 }
 
-/** Whether an arrow to `to` from `side` has room on the napkin for `note` past its tail. */
-function noteFits([tx]: Point, side: 1 | -1, note: string) {
-  const reach = MIN_ARROW + EDGE + note.length * NOTE_CHAR_WIDTH;
-  return side > 0 ? tx + reach <= 1 : tx - reach >= 0;
-}
-
 /**
  * An arrow coming in from `side` (1 = right, -1 = left), with its note written outward from
  * the tail. If the note has no room there, it tries the short form of the note, then the other
@@ -494,4 +488,148 @@ function kmShort(totalMps: number, requiredMps: number) {
 
 function kmSpare(totalMps: number, requiredMps: number) {
   return (Math.max(0, tenths(totalMps) - tenths(requiredMps)) / 10).toFixed(1);
+}
+
+// ---------------------------------------------------------------------------
+// The engineer's markup: what each part is, its real numbers, and the vehicle's size
+
+const ISSUE_KINDS = new Set<RedPenMark["kind"]>(["arrow", "circle", "ghost-line"]);
+
+/** Issue marks (the numbered corrections) as opposed to the identifying markup drawn before them. */
+export function isIssueMark(mark: RedPenMark) {
+  return ISSUE_KINDS.has(mark.kind);
+}
+
+/** Callouts are set in small mono type; about this much napkin width per character. */
+const CALLOUT_CHAR_WIDTH = 0.012;
+/** Vertical room one callout label needs, as a fraction of the napkin's height. */
+const CALLOUT_LINE = 0.05;
+const MAX_CALLOUTS = 6;
+
+/** What's in the tanks, for the outline notes ("Booster LOX/CH4"). */
+const TANK_NAMES: Record<Design["stages"][number]["propellant"], string> = {
+  methalox: "LOX/CH4",
+  kerolox: "LOX/RP-1",
+  hydrolox: "LOX/LH2",
+  solid: "solid motor",
+  hypergolic: "N2O4/UDMH",
+};
+const PART_NAMES: Partial<Record<PartKind, string>> = {
+  nose: "Nose / fairing",
+  payload: "Payload bay",
+  engine: "Engines",
+  fin: "Fins",
+  "landing-legs": "Legs",
+  "heat-shield": "Heat shield",
+  "solar-panel": "Solar panels",
+  window: "Window",
+};
+const SHORT_ENGINE: Partial<Record<string, string>> = {
+  "raptor-vacuum": "RVac",
+  "merlin-vacuum": "MVac",
+  "generic-solid": "SRM",
+};
+
+function engineerMarkup(design: Design, analysis: Analysis, parts: Part[], sketch: Sketch): RedPenMark[] {
+  if (parts.length === 0) return [];
+  return [...outlines(design, parts), ...dimensions(design, sketch), ...callouts(design, analysis, parts, sketch)];
+}
+
+/** One outline per part kind and stage (duplicates merged), identifying it. */
+function outlines(design: Design, parts: Part[]): RedPenMark[] {
+  const groups = new Map<string, { box: Box; note: string }>();
+  for (const part of parts) {
+    const stage = part.stageIndex !== undefined ? design.stages[part.stageIndex] : undefined;
+    const tankStage = stage ?? design.stages[0];
+    const note =
+      part.kind === "tank"
+        ? `${tankStage?.label ?? "Tanks"} ${TANK_NAMES[tankStage?.propellant ?? "kerolox"]}`.slice(0, 22)
+        : (PART_NAMES[part.kind] ?? (/interstage/i.test(part.label) ? "Interstage" : part.label.slice(0, 16)));
+    const key = `${part.kind}|${part.stageIndex ?? ""}|${note}`;
+    const prev = groups.get(key);
+    groups.set(key, { box: prev ? union([prev.box, part.box])! : part.box, note });
+  }
+  return [...groups.values()].map(({ box, note }) => ({ kind: "outline", box: clampBox(box), note }));
+}
+
+/** Total height beside the rocket, and the body's diameter near the base. */
+function dimensions(design: Design, sketch: Sketch): RedPenMark[] {
+  const [x, y, , h] = sketch.whole();
+  const out: RedPenMark[] = [];
+  // The height runs about 0.06 left of the body, where the overlay writes its note rotated.
+  const lineX = clamp(x - 0.06, EDGE, 1 - EDGE);
+  if (design.heightM > 0) {
+    out.push({ kind: "dimension", from: [lineX, clamp(y, EDGE, 1 - EDGE)], to: [lineX, clamp(y + h, EDGE, 1 - EDGE)], note: `${metres(design.heightM)} m` });
+  }
+  const body = sketch.biggestTankPart()?.box;
+  if (body && design.diameterM > 0) {
+    const atY = clamp(body[1] + body[3] * 0.9, EDGE, 1 - EDGE);
+    out.push({ kind: "dimension", from: [clamp(body[0], EDGE, 1 - EDGE), atY], to: [clamp(body[0] + body[2], EDGE, 1 - EDGE), atY], note: `${metres(design.diameterM)} m` });
+  }
+  return out;
+}
+
+/** Spec labels in the margin opposite the issue notes, with leaders to their parts. */
+function callouts(design: Design, analysis: Analysis, parts: Part[], sketch: Sketch): RedPenMark[] {
+  const side = -sketch.openSide() as 1 | -1;
+  const whole = sketch.whole();
+  const edgeX = side < 0 ? whole[0] : whole[0] + whole[2];
+  const tonnes = (kg: number) => `${Math.round(kg / 1000).toLocaleString("en-US")} t`;
+  const anchorOf = (box: Box): Point => [side < 0 ? box[0] : box[0] + box[2], box[1] + box[3] / 2];
+  const wanted: { anchor: Point; notes: string[] }[] = [];
+
+  // Payload at the top, then each stage from the top down, then the engines at the bottom.
+  const payloadBox = union(parts.filter((p) => p.kind === "payload").map((p) => p.box)) ?? union(parts.filter((p) => p.kind === "nose").map((p) => p.box));
+  if (payloadBox && design.payloadMassKg > 0) wanted.push({ anchor: anchorOf(payloadBox), notes: [`Payload ${tonnes(design.payloadMassKg)}`] });
+
+  for (let i = design.stages.length - 1; i >= 0; i--) {
+    const stage = design.stages[i];
+    const a = analysis.stages[i];
+    if (!a) continue;
+    const box =
+      union(parts.filter((p) => p.kind === "tank" && p.stageIndex === i).map((p) => p.box)) ??
+      (design.stages.length === 1 ? (sketch.biggestTankPart()?.box ?? null) : null);
+    if (!box) continue;
+    wanted.push({
+      anchor: anchorOf(box),
+      notes: [`${stage.label} · ${tonnes(a.propellantMassKg)} prop · Δv ${km(a.deltaVMps)}`, `${stage.label} · ${tonnes(a.propellantMassKg)} prop`, `${tonnes(a.propellantMassKg)} prop`],
+    });
+  }
+
+  const bottom = design.stages[0];
+  const thrust = analysis.stages[0]?.thrustN ?? 0;
+  if (bottom?.engines.length) {
+    const cluster = bottom.engines.map((c) => `${c.count}× ${SHORT_ENGINE[c.engine] ?? ENGINES[c.engine].name}`).join(" + ");
+    wanted.push({
+      anchor: anchorOf(sketch.engines()),
+      notes: [`${cluster} · ${Math.round(thrust / 9.80665 / 1000).toLocaleString("en-US")} tf`, cluster],
+    });
+  }
+
+  // Stack the labels down the margin in anchor order, at least one line apart.
+  wanted.sort((a, b) => a.anchor[1] - b.anchor[1]);
+  // Past the height dimension when they share the left margin.
+  const labelX = clamp(edgeX + side * (side < 0 ? 0.1 : 0.06), EDGE, 1 - EDGE);
+  const room = side < 0 ? labelX - EDGE : 1 - EDGE - labelX;
+  const out: RedPenMark[] = [];
+  let lastY = -Infinity;
+  for (const { anchor, notes } of wanted.slice(0, MAX_CALLOUTS)) {
+    const note = notes.find((n) => n.length * CALLOUT_CHAR_WIDTH <= room);
+    if (!note) continue;
+    const y = Math.max(anchor[1], lastY + CALLOUT_LINE);
+    if (y > 1 - EDGE) break;
+    lastY = y;
+    out.push({ kind: "callout", anchor: [clamp(anchor[0], EDGE, 1 - EDGE), clamp(anchor[1], EDGE, 1 - EDGE)], label: [labelX, y], note });
+  }
+  return out;
+}
+
+function clampBox([x, y, w, h]: Box): Box {
+  const x0 = clamp(x, 0, 1);
+  const y0 = clamp(y, 0, 1);
+  return [x0, y0, clamp(x + w, 0, 1) - x0, clamp(y + h, 0, 1) - y0];
+}
+
+function metres(m: number) {
+  return m >= 10 ? String(Math.round(m)) : m.toFixed(1);
 }
