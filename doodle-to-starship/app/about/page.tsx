@@ -59,14 +59,14 @@ export default function About() {
       <main className="mx-auto max-w-[1180px] px-8">
         <section className="py-16">
           <p className="text-[15px] text-haze">How it works</p>
-          <h1 className="mt-3 max-w-[900px] font-display text-[52px] font-semibold leading-[1.05]">
-            Every spacecraft in history started as a sketch. We give your sketch 70 years of NASA and SpaceX
-            experience in 60 seconds.
+          <h1 className="mt-3 max-w-[960px] font-display text-[46px] font-semibold leading-[1.08]">
+            An engineer sketches a vehicle idea and instantly gets delta-v and thrust-to-weight, red-pen fixes computed
+            from the physics, and NASA papers showing where it&apos;s been tried.
           </h1>
-          <p className="mt-6 max-w-[720px] text-[17px] leading-relaxed text-haze">
-            Draw a spacecraft on the napkin. Grok reads it and renders it; deterministic code built on published
-            engine data decides whether it flies. The red pen shows the fix, a Grok Voice engineer applies it when you
-            ask, and your own doodle flies the result.
+          <p className="mt-6 max-w-[760px] text-[17px] leading-relaxed text-haze">
+            The first ten minutes of a concept review. Grok reads the sketch, renders it and runs Mission Control by
+            voice; deterministic code built on published engine data decides whether it flies. Every flight ends with a
+            recap of what to try next, already checked against the physics.
           </p>
         </section>
 
@@ -225,7 +225,7 @@ export default function About() {
               [
                 "Grok Voice",
                 "Realtime",
-                "A propulsion engineer you talk to over a realtime WebSocket. The server mints a short-lived token, so the API key never reaches the browser. Every design edit is a tool call that re-runs the physics.",
+                "Mission Control and a propulsion engineer you talk to over a realtime WebSocket: a spoken GO/NO-GO poll before launch, webcast callouts, and design edits by voice. The server mints a short-lived token, so the API key never reaches the browser. Every edit is a tool call that re-runs the physics.",
               ],
             ]}
           />
@@ -326,7 +326,7 @@ const NODES: { title: string; lines: [string, string]; grok: boolean }[] = [
   { title: "Grok vision", lines: ["stages, bells,", "tank sizes"], grok: true },
   { title: "Physics", lines: ["rocket equation,", "real engine data"], grok: false },
   { title: "Red pen", lines: ["tested fixes drawn", "on your sketch"], grok: false },
-  { title: "Grok Voice", lines: ["engineer edits", "by tool call"], grok: true },
+  { title: "Grok Voice", lines: ["GO/NO-GO poll,", "edits by voice"], grok: true },
   { title: "Launch sim", lines: ["your doodle flies", "the flight trace"], grok: false },
   { title: "Grok Imagine", lines: ["photo, patch,", "replay video"], grok: true },
 ];
