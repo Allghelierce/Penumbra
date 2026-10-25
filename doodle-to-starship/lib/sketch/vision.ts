@@ -1,6 +1,7 @@
 import type { DestinationId, EngineId, Part, SketchReading, Stage } from "../design";
 import { enginesForBase, enginesForBells, MAX_ENGINES, REFERENCE_BELL_M, upperStageEngines } from "./engines";
 import { clamp, NAPKIN_HEIGHT_M, NAPKIN_WIDTH_M, napkinScale, toBox } from "./geometry";
+import { tuneEngines } from "./tune";
 import { ENGINE_IDS, isEngineId, isPartKind, isPropellantId, PART_KINDS, PROPELLANT_IDS } from "./ids";
 
 // The Grok vision side of /api/read: the strict JSON schema, the prompt, and the
@@ -113,9 +114,13 @@ export function sanitizeReading(raw: unknown, destination: DestinationId): Sketc
   const scale = napkinScale(rawDiameterM);
   const diameterM = round1(rawDiameterM * scale);
   const stages: Stage[] = [];
+  const minEngines: number[] = [];
+  const locked: boolean[] = [];
   for (const s of (Array.isArray(raw.stages) ? raw.stages : []).filter(isRecord).slice(0, MAX_STAGES)) {
     const i = stages.length;
     const engine: EngineId = isEngineId(s.engine) ? s.engine : i === 0 ? "raptor-3" : "raptor-vacuum";
+    minEngines.push(Math.max(1, Math.round(clamp(num(s.bellsDrawn, 1), 1, MAX_ENGINES))));
+    locked.push(num(s.writtenEngineCount, 0) >= 1);
     stages.push({
       label: str(s.label, 24) || `Stage ${i + 1}`,
       engines: [{ engine, count: engineCount(s, i, diameterM, scale, stages[0]?.engines[0].count ?? 1) }],
@@ -151,8 +156,8 @@ export function sanitizeReading(raw: unknown, destination: DestinationId): Sketc
     ),
   ].slice(0, MAX_FEATURES);
 
-  return {
-    design: {
+  const design = tuneEngines(
+    {
       name: str(raw.name, 40) || "Napkin Special",
       stages,
       payloadMassKg: Math.round(clamp(num(raw.payloadMassKg, 10_000) * scale ** 3, 0, 500_000)),
@@ -161,8 +166,9 @@ export function sanitizeReading(raw: unknown, destination: DestinationId): Sketc
       heightM: round1(clamp(num(raw.heightM, 50) * scale, 1, 200)),
       diameterM,
     },
-    parts,
-  };
+    { minEngines, locked },
+  );
+  return { design, parts };
 }
 
 /** A written count wins; otherwise drawn bells are read at scale (see ./engines). */

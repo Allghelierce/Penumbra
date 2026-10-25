@@ -1,5 +1,6 @@
 import { NAPKIN_ASPECT } from "../design";
 import { enginesForBase, enginesForBells, upperStageEngines } from "./engines";
+import { tuneEngines } from "./tune";
 import type {
   DestinationId,
   EngineCluster,
@@ -178,6 +179,23 @@ export function readFromGeometry(strokes: Stroke[], destination: DestinationId):
   const payloadHeightM = (PAYLOAD_END - NOSE_END) * drawingH * napkinHeightM;
   const payloadMassKg = Math.max(100, Math.round((area * payloadHeightM * PAYLOAD_DENSITY_KG_M3) / 100) * 100);
 
+  const design = tuneEngines(
+    {
+      name: "Napkin Special",
+      stages,
+      payloadMassKg,
+      destination,
+      features: [
+        ...(hasFins ? ["fins"] : []),
+        ...(hatches.length > 0 ? ["heat-shield"] : []),
+        ...(legs.length > 0 ? ["landing-legs"] : []),
+      ],
+      heightM: round1(drawingH * napkinHeightM),
+      diameterM: round1(bodyDiameterM),
+    },
+    { minEngines: [Math.max(1, engineStrokes.length)] },
+  );
+
   const bodyBox = (y0: number, y1: number): Part["box"] => toBox(bodyLeft, y0, bodyRight, y1);
   const parts: Part[] = [
     { kind: "nose", label: "Nose", box: bodyBox(top, atRel(NOSE_END)), stageIndex: topStage },
@@ -197,7 +215,7 @@ export function readFromGeometry(strokes: Stroke[], destination: DestinationId):
     ),
     {
       kind: "engine",
-      label: `${engineCount} × Raptor 3`,
+      label: `${design.stages[0].engines[0].count} × Raptor 3`,
       box:
         engineStrokes.length > 0
           ? boxOf(boundsOf(engineStrokes.flatMap((s) => s.points)))
@@ -217,22 +235,7 @@ export function readFromGeometry(strokes: Stroke[], destination: DestinationId):
     parts.push({ kind: "landing-legs", label: "Landing leg", box: boxOf(b), stageIndex: stageAt(b.minY) });
   }
 
-  return {
-    design: {
-      name: "Napkin Special",
-      stages,
-      payloadMassKg,
-      destination,
-      features: [
-        ...(hasFins ? ["fins"] : []),
-        ...(hatches.length > 0 ? ["heat-shield"] : []),
-        ...(legs.length > 0 ? ["landing-legs"] : []),
-      ],
-      heightM: round1(drawingH * napkinHeightM),
-      diameterM: round1(bodyDiameterM),
-    },
-    parts,
-  };
+  return { design, parts };
 }
 
 /** Which wall a stroke leaves when it runs from that wall down and outward past it, like a leg. */

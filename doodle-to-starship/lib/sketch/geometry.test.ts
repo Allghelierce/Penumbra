@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import { DEMO_SKETCHES } from "../demo-sketches";
 import type { Stroke } from "../design";
+import { analyze } from "../physics";
 import { enginesForBase, enginesForBells } from "./engines";
 import { readFromGeometry } from "./geometry";
 
@@ -24,8 +25,17 @@ describe("readFromGeometry", () => {
   it("reads the napkin hopper as one finned stage whose single wide bell is a cluster", () => {
     const r = summarize(demo("napkin-hopper").strokes);
     expect(r).toMatchObject({ stages: 1, fins: true, finParts: 2 });
-    expect(r.engines).toBeGreaterThanOrEqual(15);
-    expect(r.engines).toBeLessThanOrEqual(35);
+    expect(r.engines).toBeGreaterThanOrEqual(1);
+    expect(r.engines).toBeLessThanOrEqual(15);
+  });
+
+  it("gives every demo a realistic liftoff TWR (1.2–2.0) and upper stages at least 0.5", () => {
+    for (const d of DEMO_SKETCHES) {
+      const a = analyze(readFromGeometry(d.strokes, d.destination).design);
+      expect(a.liftoffTwr, d.id).toBeGreaterThan(1.2);
+      expect(a.liftoffTwr, d.id).toBeLessThanOrEqual(2.0);
+      for (const stage of a.stages.slice(1)) expect(stage.twrAtIgnition, d.id).toBeGreaterThanOrEqual(0.5);
+    }
   });
 
   it("reads the two-stage orbiter's boundary line, three bells and fins", () => {
