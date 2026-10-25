@@ -150,3 +150,18 @@ body {
 .pen-fix:hover {
   text-decoration: underline;
 }
+
+/* The mission patch gets slapped onto the napkin like a sticker. */
+.sticker-in {
+  animation: sticker-in 0.45s cubic-bezier(0.2, 1.4, 0.4, 1) both;
+}
+@keyframes sticker-in {
+  from {
+    opacity: 0;
+    transform: scale(1.6) rotate(-12deg);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1) rotate(8deg);
+  }
+}

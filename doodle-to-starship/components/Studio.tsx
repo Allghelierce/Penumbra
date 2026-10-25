@@ -96,6 +96,7 @@ export default function Studio() {
   const [stale, setStale] = useState(false);
   const [concept, setConcept] = useState<{ url: string | null; loading: boolean }>({ url: null, loading: false });
   const [priorArt, setPriorArt] = useState<PriorArtResult[]>([]);
+  const [patchUrl, setPatchUrl] = useState<string | null>(null);
   const [flight, setFlight] = useState<{ trace: FlightTrace; renderUrl: string | null } | null>(null);
   const [narration, setNarration] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -133,6 +134,16 @@ export default function Studio() {
     }
   }, []);
 
+  const fetchPatch = useCallback(async (nextDesign: Design, nextAnalysis: Analysis) => {
+    try {
+      const body: RenderRequest = { design: nextDesign, analysis: nextAnalysis, kind: "patch" };
+      const { url } = await postJson<RenderResponse>("/api/render", body);
+      setPatchUrl(url);
+    } catch {
+      setPatchUrl(null);
+    }
+  }, []);
+
   const fetchPriorArt = useCallback(async (nextDesign: Design) => {
     try {
       const res = await fetch(`/api/prior-art?q=${encodeURIComponent(priorArtQuery(nextDesign))}&limit=3`);
@@ -167,6 +178,7 @@ export default function Studio() {
         return;
       }
       void fetchConcept(nextDesign, nextAnalysis, image);
+      void fetchPatch(nextDesign, nextAnalysis);
       void fetchPriorArt(nextDesign);
       await requestReview(nextReading, nextAnalysis);
     } catch {
@@ -230,6 +242,7 @@ export default function Studio() {
     setStale(false);
     setConcept({ url: null, loading: false });
     setPriorArt([]);
+    setPatchUrl(null);
     setError(null);
     setPhase("draw");
   }
@@ -332,6 +345,14 @@ export default function Studio() {
         <section className="flex min-h-0 min-w-0 flex-1 flex-col items-center gap-4">
           <div className="flex min-h-0 w-full flex-1 justify-center">
             <NapkinCanvas strokes={strokes} onChange={changeStrokes} disabled={phase === "reading"}>
+              {patchUrl && (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img
+                  src={patchUrl}
+                  alt="Grok Imagine mission patch"
+                  className="sticker-in absolute right-[5%] top-[3%] aspect-square w-[24%] rounded-full object-cover shadow-[0_6px_14px_-4px_rgba(0,0,0,0.45)]"
+                />
+              )}
               <div className={`absolute inset-0 transition-opacity duration-300 ${stale ? "opacity-30" : ""}`}>
                 <RedPenOverlay
                   parts={reviewed ? reading.parts : []}
