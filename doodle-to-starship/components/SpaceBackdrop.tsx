@@ -393,7 +393,7 @@ function build(w: number, h: number, d: number): Scene {
         layer: s.layer,
         f: [0.08 + 0.3 * r(), 0.2 + 0.5 * r(), 0.5 + 0.9 * r()],
         ph: [TAU * r(), TAU * r(), TAU * r()],
-        depth: 0.35 + 0.4 * r(),
+        depth: 0.3 + 0.28 * r(), // how far a star dims at the bottom of its glimmer
       });
     }
     if (s.glint) glints.push({ sprite: sprite(Math.max(1.5 * s.p, 24), s.color, d, true, false), x: s.x, y: s.y, layer: s.layer, period: 5 + 5 * r(), phase: r() });
