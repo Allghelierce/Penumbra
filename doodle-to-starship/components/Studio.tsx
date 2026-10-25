@@ -502,6 +502,8 @@ export default function Studio() {
         <section className="min-h-0 overflow-y-auto border-l border-rule bg-black">
           <VerdictPanel
             attempts={attempts}
+            recap={flightRecap}
+            onFix={handleAction}
             phase={phase}
             design={design}
             analysis={analysis}
