@@ -376,14 +376,14 @@ export default function Studio() {
             </NapkinCanvas>
           </div>
 
-          <div className="flex w-full max-w-[760px] items-stretch gap-4">
-            <dl className="grid min-w-0 flex-1 grid-cols-[1.25fr_1.35fr_0.95fr_0.45fr] divide-x divide-rule rounded-[3px] border border-rule bg-umbra/70 text-[13px]">
+          <div className="flex w-full items-stretch gap-4">
+            <dl className="grid min-w-0 max-w-[560px] flex-1 grid-cols-[1.25fr_1.35fr_0.95fr_0.45fr] divide-x divide-rule rounded-[3px] border border-rule bg-umbra/70 text-[13px]">
               <TitleCell label="Drawing" value={design?.name ?? (strokes.length ? "Untitled sketch" : "Blank napkin")} />
               <TitleCell label="Target" value={DESTINATIONS[destination].name} />
               <TitleCell label="Status" value={STATUS[phase === "reviewed" && stale ? "changed" : phase]} />
               <TitleCell label="Rev" value={String(reviewKey)} />
             </dl>
-            <div className="flex shrink-0 items-center gap-2">
+            <div className="ml-auto flex shrink-0 items-center gap-2">
               <button
                 type="button"
                 onClick={() => setStrokes((s) => s.slice(0, -1))}
