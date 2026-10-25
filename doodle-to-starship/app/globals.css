@@ -450,3 +450,22 @@ body {
     opacity: 0.25;
   }
 }
+
+/* The predicted trajectory draws on once per review; the marker keeps flying it. */
+.trajectory-draw {
+  stroke-dasharray: 1;
+  stroke-dashoffset: 1;
+  animation: pen-draw 1.6s cubic-bezier(0.3, 0.1, 0.2, 1) 0.3s forwards;
+}
+details > summary::-webkit-details-marker {
+  display: none;
+}
+@media (prefers-reduced-motion: reduce) {
+  .trajectory-draw {
+    animation: none;
+    stroke-dashoffset: 0;
+  }
+  .trajectory-marker {
+    display: none;
+  }
+}

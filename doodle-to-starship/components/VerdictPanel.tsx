@@ -4,7 +4,8 @@ import type { ReactNode } from "react";
 import CountUp from "@/components/CountUp";
 import SpecimenDrawing from "@/components/SpecimenDrawing";
 import TypeOut from "@/components/TypeOut";
-import type { Analysis, Attempt, Design, DesignAction, DestinationId, Phase, PriorArtResult, Recap, Review, Verdict } from "@/lib/design";
+import type { Analysis, Attempt, Design, DesignAction, DestinationId, FlightTrace, Phase, PriorArtResult, Recap, Review, Verdict } from "@/lib/design";
+import TrajectoryPreview from "@/components/TrajectoryPreview";
 import { DESTINATIONS, ENGINES } from "@/lib/physics";
 import { km, kmShort, kmSpare } from "@/lib/physics/format";
 import { closestAnalogs, historyLine } from "@/lib/analogs";
@@ -16,6 +17,11 @@ interface VerdictPanelProps {
   recap: Recap | null;
   /** Apply a suggested fix, the same way a red-pen note does. */
   onFix: (fix: DesignAction) => void;
+  /** The simulated flight for the current design, previewed before launch. */
+  trace: FlightTrace | null;
+  /** Start the launch (the same as the Launch button). */
+  onLaunch: () => void;
+  canLaunch: boolean;
   phase: Phase;
   design: Design | null;
   analysis: Analysis | null;
@@ -126,6 +132,21 @@ export default function VerdictPanel(props: VerdictPanelProps) {
         </div>
       </Module>
 
+      {props.trace && (
+        <Module
+          title="Predicted flight"
+          meta={
+            <button type="button" onClick={props.onLaunch} disabled={!props.canLaunch} className="btn-outline h-6 px-2.5 text-[10px]">
+              Watch it fly
+            </button>
+          }
+        >
+          <div className="px-3 pb-2 pt-2">
+            <TrajectoryPreview trace={props.trace} />
+          </div>
+        </Module>
+      )}
+
       {props.attempts.length > 0 && <FlightLog attempts={props.attempts} recap={props.recap} onFix={props.onFix} />}
 
       <Module
@@ -141,10 +162,7 @@ export default function VerdictPanel(props: VerdictPanelProps) {
         <div className="px-4 pb-3 pt-1">
           <BudgetBar analysis={analysis} />
         </div>
-      </Module>
-
-      <Module title="Vehicle">
-        <div className="grid grid-cols-3 divide-x divide-rule">
+        <div className="grid grid-cols-3 divide-x divide-rule border-t border-rule">
           <Figure label="Liftoff mass" value={<CountUp value={analysis.liftoffMassKg} format={tonnes} />} />
           <Figure
             label="Thrust/weight"
@@ -158,6 +176,15 @@ export default function VerdictPanel(props: VerdictPanelProps) {
 
       <ClosestRocket design={design} analysis={analysis} />
 
+      <details className="module group">
+        <summary className="module-head cursor-pointer list-none select-none">
+          <h3 className="font-space text-[11px] font-semibold uppercase tracking-[0.22em] text-white/70">More detail</h3>
+          <span className="text-[12px] text-haze">
+            <span className="group-open:hidden">Destinations, stages, prior art</span>
+            <span className="hidden group-open:inline">Hide</span>
+          </span>
+        </summary>
+        <div className="flex flex-col gap-3 p-3">
       <Module title="Where it can go">
         <ul className="grid grid-cols-2 gap-x-6 gap-y-1 px-4 py-3">
           {ladder.map((d) => {
@@ -216,6 +243,8 @@ export default function VerdictPanel(props: VerdictPanelProps) {
           </ul>
         </Module>
       )}
+        </div>
+      </details>
     </aside>
   );
 }
@@ -325,15 +354,19 @@ function ClosestRocket({ design, analysis }: { design: Design; analysis: Analysi
 
 /** Stage contributions stacked against what the target needs. */
 function BudgetBar({ analysis }: { analysis: Analysis }) {
+  // A rocket that can't lift itself has no usable delta-v; don't draw stage fills it will never burn.
+  const grounded = analysis.liftoffTwr < 1;
+  const stages = grounded ? [] : analysis.stages;
   const scale = Math.max(analysis.totalDeltaVMps, analysis.requiredDeltaVMps) * 1.06;
-  const pct = (mps: number) => `${(mps / scale) * 100}%`;
+  const share = (mps: number) => mps / scale;
+  const pct = (mps: number) => `${share(mps) * 100}%`;
   const shades = ["bg-white/90", "bg-white/55", "bg-white/35", "bg-white/20"];
   const needed = analysis.requiredDeltaVMps / scale;
   return (
     <div className="mt-2">
       <div className="relative h-10">
         <div className="bar-grow absolute inset-x-0 top-3 flex h-4 overflow-hidden bg-white/[0.06]">
-          {analysis.stages.map((s, i) => (
+          {stages.map((s, i) => (
             <div
               key={`${s.label}-${i}`}
               className={`h-full ${shades[i % shades.length]} border-r border-black transition-[width] duration-700 ease-out`}
@@ -350,12 +383,18 @@ function BudgetBar({ analysis }: { analysis: Analysis }) {
         </p>
       </div>
       <div className="mt-1 flex text-[12px] text-haze">
-        {analysis.stages.map((s, i) => (
-          <span key={`${s.label}-${i}`} className="truncate pr-2" style={{ width: pct(s.deltaVMps) }}>
-            {s.label} {km(s.deltaVMps)}
-          </span>
-        ))}
-        <span className="ml-auto whitespace-nowrap text-white">
+        {grounded ? (
+          <span className="text-nogo">Can&apos;t lift off: thrust/weight {analysis.liftoffTwr.toFixed(2)}, needs over 1</span>
+        ) : (
+          stages.map((s, i) => (
+            // Narrow segments drop the stage name and keep the number.
+            <span key={`${s.label}-${i}`} className="truncate pr-2" style={{ width: pct(s.deltaVMps) }} title={`${s.label} ${km(s.deltaVMps)} km/s`}>
+              {share(s.deltaVMps) > 0.2 ? `${s.label} ` : ""}
+              {km(s.deltaVMps)}
+            </span>
+          ))
+        )}
+        <span className="ml-auto whitespace-nowrap pl-2 text-white">
           <CountUp value={analysis.totalDeltaVMps} format={(n) => `${km(n)} km/s total`} />
         </span>
       </div>

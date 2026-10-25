@@ -37,7 +37,7 @@ import { strokesToPng } from "@/lib/napkin";
 import { buildReview } from "@/lib/redpen";
 import { readFromGeometry } from "@/lib/sketch/geometry";
 import { recap } from "@/lib/recap";
-import { analyze, DESTINATIONS, simulateFlight } from "@/lib/physics";
+import { analyze, simulateFlight } from "@/lib/physics";
 
 const DESTINATION_CHIPS: { id: DestinationId; label: string }[] = [
   { id: "leo", label: "Orbit" },
@@ -114,12 +114,23 @@ export default function Studio() {
   const [error, setError] = useState<string | null>(null);
 
   const analysis = useMemo(() => safeAnalyze(design), [design]);
+  // The flight the launch will show, previewed in the report before anyone presses Launch.
+  const predicted = useMemo(() => {
+    if (!design || !analysis) return null;
+    try {
+      return simulateFlight(design, analysis);
+    } catch {
+      return null;
+    }
+  }, [design, analysis]);
 
   // Latest values for callbacks that outlive a render (voice tool calls, async responses).
   const latest = useRef({ reading, design, strokes, destination });
   useEffect(() => {
     latest.current = { reading, design, strokes, destination };
   }, [reading, design, strokes, destination]);
+  // The sample on the napkin, if one is loaded untouched, so its design keeps the sample's name.
+  const sampleTitle = useRef<string | null>(null);
   // One counter per async stream: a response only lands if no newer request (or Clear) superseded it.
   const runs = useRef({ check: 0, review: 0, concept: 0, patch: 0, priorArt: 0, launch: 0 });
   const checking = useRef(false);
@@ -207,7 +218,7 @@ export default function Studio() {
       if (id !== runs.current.check) return;
       // The target may have changed while reading; the latest pick wins.
       const target = latest.current.destination;
-      const nextDesign: Design = { ...read.design, destination: target };
+      const nextDesign: Design = { ...read.design, destination: target, name: sampleTitle.current ?? read.design.name };
       const nextReading: SketchReading = { ...read, design: nextDesign };
       const nextAnalysis = safeAnalyze(nextDesign);
       latest.current = { ...latest.current, reading: nextReading, design: nextDesign };
@@ -296,6 +307,7 @@ export default function Studio() {
   }
 
   function changeStrokes(next: Stroke[]) {
+    sampleTitle.current = null;
     setStrokes(next);
     if (reading) setStale(true);
   }
@@ -309,6 +321,7 @@ export default function Studio() {
     for (const key of Object.keys(runs.current) as (keyof typeof runs.current)[]) runs.current[key]++;
     checking.current = false;
     rendered.current = null;
+    sampleTitle.current = null;
     setAttempts([]);
     setStrokes([]);
     setReading(null);
@@ -326,6 +339,7 @@ export default function Studio() {
     const sketch = DEMO_SKETCHES.find((s) => s.id === id);
     if (!sketch) return;
     clearAll();
+    sampleTitle.current = sketch.title;
     setDestination(sketch.destination);
     const controller = new AbortController();
     replay.current = controller;
@@ -347,6 +361,7 @@ export default function Studio() {
     const sketch = DEMO_SKETCHES.find((s) => s.id === params.get("demo"));
     if (!sketch) return;
     setStrokes(sketch.strokes);
+    sampleTitle.current = sketch.title;
     setDestination(sketch.destination);
     if (params.get("check") === "1") setCheckRequest((n) => n + 1);
     /* eslint-enable react-hooks/set-state-in-effect */
@@ -419,7 +434,7 @@ export default function Studio() {
               key={sketch.id}
               type="button"
               onClick={() => loadDemo(sketch.id)}
-              className="btn-outline h-8 px-3 text-[11px]"
+              className="px-2 py-1 text-[11px] font-semibold uppercase tracking-[0.16em] text-white/80 underline-offset-4 transition-colors hover:text-white hover:underline"
             >
               {sketch.title}
             </button>
@@ -452,14 +467,8 @@ export default function Studio() {
             </NapkinCanvas>
           </div>
 
-          <div className="flex w-full items-stretch gap-4">
-            <dl className="grid min-w-0 max-w-[560px] flex-1 grid-cols-[1.25fr_1.35fr_0.95fr_0.45fr] divide-x divide-rule border border-rule bg-black text-[13px]">
-              <TitleCell label="Drawing" value={design?.name ?? (strokes.length ? "Untitled sketch" : "Blank napkin")} />
-              <TitleCell label="Target" value={DESTINATIONS[destination].name} />
-              <TitleCell label="Status" value={STATUS[phase === "reviewed" && stale ? "changed" : phase]} />
-              <TitleCell label="Rev" value={String(reviewKey)} />
-            </dl>
-            <div className="ml-auto flex shrink-0 items-center gap-2">
+          <div className="flex w-full items-center justify-center">
+            <div className="flex shrink-0 items-center gap-2">
               <button
                 type="button"
                 onClick={() => setStrokes((s) => s.slice(0, -1))}
@@ -501,6 +510,9 @@ export default function Studio() {
 
         <section className="min-h-0 overflow-y-auto border-l border-rule bg-black">
           <VerdictPanel
+            trace={predicted}
+            onLaunch={startLaunch}
+            canLaunch={Boolean(reviewed && analysis)}
             attempts={attempts}
             recap={flightRecap}
             onFix={handleAction}
@@ -550,24 +562,6 @@ export default function Studio() {
           onImprove={improveAndFly}
         />
       )}
-    </div>
-  );
-}
-
-const STATUS: Record<Phase | "changed", string> = {
-  draw: "Sketching",
-  reading: "Reading",
-  reviewed: "Reviewed",
-  changed: "Changed",
-  poll: "Go/no-go poll",
-  launch: "In flight",
-};
-
-function TitleCell({ label, value }: { label: string; value: string }) {
-  return (
-    <div className="min-w-0 px-3 py-1.5">
-      <dt className="text-[10px] uppercase tracking-[0.18em] text-haze">{label}</dt>
-      <dd className="truncate text-starlight">{value}</dd>
     </div>
   );
 }
