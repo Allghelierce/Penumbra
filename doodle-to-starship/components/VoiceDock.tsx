@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useRef, useState, type FormEvent } from "react";
 import { playQuindar, unlockLaunchAudio } from "@/components/LaunchScene";
 import TypeOut from "@/components/TypeOut";
-import type { Analysis, Design, DesignAction, Phase, Poll, PollCall, Review } from "@/lib/design";
+import type { Analysis, Design, DesignAction, Phase, Poll, Review } from "@/lib/design";
 import { parseReply } from "@/lib/mission-control";
 import {
   canRecognize,
@@ -17,7 +17,9 @@ import {
 } from "@/lib/voice/browser";
 import { parseCommand } from "@/lib/voice/intent";
 import { ackLine, buildInstructions, deltaLine, nudge, speakable, toolResult, verdictLine } from "@/lib/voice/persona";
+import { voiceActivity } from "@/lib/voice/activity";
 import { createRealtimeSession, type RealtimeSession } from "@/lib/voice/realtime";
+import { fetchSpeech, playSpeech, stopSpeech, type Speaker } from "@/lib/voice/tts";
 import { toolCallToAction, VOICE_TOOLS } from "@/lib/voice/tools";
 
 export interface VoiceDockProps {
@@ -39,16 +41,68 @@ export interface VoiceDockProps {
   onImprove?: (fix?: DesignAction) => void;
 }
 
-/** Each controller sounds a little different in browser voice. */
-const ROLE_VOICE: Record<PollCall["role"], { pitch: number; rate: number }> = {
-  Propulsion: { pitch: 0.75, rate: 1.12 },
-  Structures: { pitch: 1.0, rate: 1.06 },
-  Trajectory: { pitch: 0.9, rate: 1.1 },
-  Landing: { pitch: 1.12, rate: 1.06 },
-  Flight: { pitch: 0.65, rate: 1.0 },
+/** When xAI speech isn't available, each speaker still sounds a little different in browser voice. */
+const BROWSER_VOICE: Record<Speaker, { pitch: number; rate: number }> = {
+  Propulsion: { pitch: 0.9, rate: 1.02 },
+  Structures: { pitch: 1.0, rate: 1.0 },
+  Trajectory: { pitch: 0.95, rate: 1.02 },
+  Landing: { pitch: 1.05, rate: 1.0 },
+  Flight: { pitch: 0.92, rate: 0.96 },
+  Callout: { pitch: 1.0, rate: 1.08 },
+  Engineer: { pitch: 1.0, rate: 1.0 },
 };
 /** Without speech synthesis the tiles still light, one per this many ms. */
 const SILENT_LINE_MS = 900;
+
+/** Ends the browser line in progress (cancel() doesn't always fire onend). */
+let endBrowserLine: (() => void) | null = null;
+
+/** Bumped by every hush(), so a line still fetching its audio knows it was cancelled. */
+let hushes = 0;
+
+/** Silence every voice: browser speech and xAI audio. */
+function hush() {
+  hushes++;
+  stopSpeaking();
+  endBrowserLine?.();
+  stopSpeech();
+}
+
+/** Browser speech for one line, with a synthetic level for the visuals. Resolves when it's said. */
+function browserLine(text: string, speaker: Speaker, index?: number): Promise<void> {
+  return new Promise((resolve) => {
+    const estimateMs = 600 + text.split(/\s+/).length * 340;
+    const info = { role: speaker, text, index };
+    let level = 0.6;
+    const pulse = setInterval(() => {
+      level = Math.max(0.12, level * 0.82);
+      voiceActivity.emit({ ...info, level });
+    }, 33);
+    let finished = false;
+    const finish = () => {
+      if (finished) return;
+      finished = true;
+      clearInterval(pulse);
+      clearTimeout(safety);
+      if (endBrowserLine === finish) endBrowserLine = null;
+      voiceActivity.quiet();
+      resolve();
+    };
+    endBrowserLine = finish;
+    const safety = setTimeout(finish, estimateMs * 2 + 1500);
+    if (!canSynthesize()) {
+      setTimeout(finish, SILENT_LINE_MS);
+      return;
+    }
+    speak(speakable(text), {
+      onEnd: finish,
+      onBoundary: () => {
+        level = 1;
+      },
+      ...BROWSER_VOICE[speaker],
+    });
+  });
+}
 
 type Mode = "checking" | "grok" | "browser";
 type Talker = "user" | "reviewer" | null;
@@ -247,24 +301,14 @@ export default function VoiceDock({
     sessionRef.current?.updateInstructions(buildInstructions(design, analysis, review));
   }, [design, analysis, review]);
 
-  const sayReply = useRef<(text: string) => void>(() => {});
+  const sayReply = useRef<(text: string, speaker?: Speaker) => void>(() => {});
+  const speakLineRef = useRef<(text: string, speaker: Speaker, index?: number) => Promise<void>>(async () => {});
   // Only the latest utterance may clear the "reviewer is talking" state.
   const utteranceId = useRef(0);
-  sayReply.current = (text: string) => {
-    setReplyCaption(text);
-    // Grok Voice bills per connected minute and needs the mic, so only push-to-talk opens a session;
-    // until then (and after it idles out) lines are spoken by the browser.
-    if (mode === "grok" && sessionRef.current) {
-      sessionRef.current.say(text);
-      return;
-    }
-    const id = ++utteranceId.current;
-    speak(speakable(text), {
-      onStart: () => setTalker((t) => (t === "user" ? t : "reviewer")),
-      onEnd: () => {
-        if (id === utteranceId.current) setTalker((t) => (t === "reviewer" ? null : t));
-      },
-    });
+  // Grok Voice bills per connected minute and needs the mic, so only push-to-talk opens a session;
+  // until then (and after it idles out) lines go through xAI text-to-speech or the browser's voice.
+  sayReply.current = (text: string, speaker: Speaker = "Engineer") => {
+    void speakLineRef.current(text, speaker);
   };
 
   // Narration: speak whenever it changes. Launch callouts get the Quindar tones first, like the loops.
@@ -274,43 +318,52 @@ export default function VoiceDock({
     lastNarration.current = narration;
     if (holdingRef.current) return; // don't talk over the user
     if (phase === "launch") {
-      const timer = setTimeout(() => sayReply.current(narration), playQuindar() * 1000);
+      const timer = setTimeout(() => sayReply.current(narration, "Callout"), playQuindar() * 1000);
       return () => clearTimeout(timer); // a newer callout replaces one still waiting on its tones
     }
     sayReply.current(narration);
   }, [narration, mode, phase]);
 
-  /** Speaks one line and resolves when it has been said, with a timeout in case no end event comes. */
-  const speakLine = useCallback(
-    (text: string, voice?: { pitch: number; rate: number }) =>
-      new Promise<void>((resolve) => {
-        const estimateMs = 600 + text.split(/\s+/).length * 340;
-        let finished = false;
-        const finish = () => {
-          if (finished) return;
-          finished = true;
-          clearTimeout(safety);
-          resolve();
-        };
-        const safety = setTimeout(finish, estimateMs * 2 + 1500);
-        setReplyCaption(text);
-        const session = modeRef.current === "grok" ? sessionRef.current : null;
-        if (session) {
-          session.say(text);
-          // force_message has no completion event: wait about as long as the line, then until Grok goes quiet.
-          const started = Date.now();
-          const wait = () => (Date.now() - started >= estimateMs && !session.busy() ? finish() : setTimeout(wait, 150));
-          setTimeout(wait, 300);
-          return;
-        }
-        if (!canSynthesize()) {
-          setTimeout(finish, SILENT_LINE_MS);
-          return;
-        }
-        speak(speakable(text), { onEnd: finish, ...voice });
-      }),
-    [],
-  );
+  /**
+   * Speaks one scripted line and resolves when it has been said: Grok Voice if push-to-talk already
+   * opened a session, else xAI text-to-speech (cached), else the browser's voice.
+   */
+  const speakLine = useCallback(async (text: string, speaker: Speaker, index?: number): Promise<void> => {
+    hush();
+    const generation = hushes;
+    setReplyCaption(text);
+    const id = ++utteranceId.current;
+    const quietIfLatest = () => {
+      if (id === utteranceId.current) setTalker((t) => (t === "reviewer" ? null : t));
+    };
+    setTalker((t) => (t === "user" ? t : "reviewer"));
+
+    const session = modeRef.current === "grok" ? sessionRef.current : null;
+    if (session) {
+      session.say(text);
+      // force_message has no completion event: wait about as long as the line, then until Grok goes quiet.
+      const estimateMs = 600 + text.split(/\s+/).length * 340;
+      const started = Date.now();
+      await new Promise<void>((resolve) => {
+        const wait = () => (Date.now() - started >= estimateMs && !session.busy() ? resolve() : setTimeout(wait, 150));
+        setTimeout(wait, 300);
+        setTimeout(resolve, estimateMs * 2 + 1500);
+      });
+      quietIfLatest();
+      return;
+    }
+
+    const url = await fetchSpeech(text, speaker);
+    // Something newer started, or Esc/scrub hushed us, while the audio was loading.
+    if (id !== utteranceId.current || generation !== hushes) return;
+    if (url) await playSpeech(url, { role: speaker, text, index });
+    else await browserLine(text, speaker, index);
+    quietIfLatest();
+  }, []);
+
+  useEffect(() => {
+    speakLineRef.current = speakLine;
+  }, [speakLine]);
 
   // ---- The GO/NO-GO poll: read each controller's line, lighting its tile as it starts.
   const pollRun = useRef(0);
@@ -322,11 +375,13 @@ export default function VoiceDock({
     const run = ++pollRun.current;
     pollAnswered.current = false;
     pollDone.current = false;
+    // Fetch every line's audio at once so the readout has no gaps.
+    for (const call of poll.calls) void fetchSpeech(call.line, call.role);
     void (async () => {
       for (let i = 0; i < poll.calls.length; i++) {
         if (run !== pollRun.current) return;
         onPollRevealRef.current?.(i + 1);
-        await speakLine(poll.calls[i].line, ROLE_VOICE[poll.calls[i].role]);
+        await speakLine(poll.calls[i].line, poll.calls[i].role, i);
       }
       if (run !== pollRun.current) return;
       pollDone.current = true;
@@ -334,7 +389,7 @@ export default function VoiceDock({
     })();
     return () => {
       pollRun.current++;
-      stopSpeaking();
+      hush();
       sessionRef.current?.interrupt();
     };
   }, [phase, poll, mode, speakLine]);
@@ -345,7 +400,7 @@ export default function VoiceDock({
     const onKey = (e: KeyboardEvent) => {
       if (e.key !== "Escape") return;
       pollRun.current++;
-      stopSpeaking();
+      hush();
       sessionRef.current?.interrupt();
       onPollRevealRef.current?.(poll.calls.length);
       pollDone.current = true;
@@ -362,7 +417,7 @@ export default function VoiceDock({
     offerRef.current = offer;
     if (!offer || offer.line === lastOffer.current || mode === "checking") return;
     lastOffer.current = offer.line;
-    if (!holdingRef.current) sayReply.current(offer.line);
+    if (!holdingRef.current) sayReply.current(offer.line, "Flight");
   }, [offer, mode]);
 
   handleReplyRef.current = (text: string): boolean => {
@@ -378,7 +433,7 @@ export default function VoiceDock({
       if (answer === "go" && !pollDone.current) {
         // Don't fly past controllers that haven't reported: finish the board, then ask again.
         pollRun.current++;
-        stopSpeaking();
+        hush();
         onPollRevealRef.current?.(currentPoll.calls.length);
         pollDone.current = true;
         sayReply.current(pollPrompt(currentPoll));
@@ -415,7 +470,7 @@ export default function VoiceDock({
       micRef.current?.close();
       sessionRef.current?.close();
       if (idleTimer.current) clearTimeout(idleTimer.current);
-      stopSpeaking();
+      hush();
     },
     [],
   );
@@ -480,7 +535,7 @@ export default function VoiceDock({
     setError(null);
     setTalker("user");
     setUserCaption("");
-    stopSpeaking();
+    hush();
 
     if (mode === "grok") {
       ensureSession().startTalking();

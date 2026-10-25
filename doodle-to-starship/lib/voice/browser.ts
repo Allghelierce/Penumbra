@@ -109,11 +109,23 @@ export function listen(handlers: {
 
 let cachedVoice: SpeechSynthesisVoice | null = null;
 
+/** macOS ships joke voices; never pick these. */
+const NOVELTY = /Albert|Bad News|Bahh|Bells|Boing|Bubbles|Cellos|Fred|Good News|Jester|Junior|Kathy|Organ|Ralph|Superstar|Trinoids|Whisper|Wobble|Zarvox/i;
+
 function pickVoice(): SpeechSynthesisVoice | null {
   if (cachedVoice) return cachedVoice;
-  const voices = window.speechSynthesis.getVoices().filter((v) => v.lang.startsWith("en"));
+  const voices = window.speechSynthesis.getVoices().filter((v) => v.lang.startsWith("en") && !NOVELTY.test(v.name));
   if (voices.length === 0) return null;
-  const preferred = [/Daniel/, /Google UK English Male/, /Aaron/, /Alex/, /Fred/, /Google US English/, /Male/i];
+  // The natural-sounding ones first: downloaded Premium/Enhanced voices, Siri, then good defaults.
+  const preferred = [
+    /Premium/i,
+    /Enhanced/i,
+    /Siri/i,
+    /\b(Ava|Zoe|Evan|Daniel|Samantha|Allison|Tom|Serena|Oliver)\b/,
+    /Google UK English (Female|Male)/,
+    /Google US English/,
+    /Microsoft (Aria|Guy|Jenny).*Online/,
+  ];
   for (const re of preferred) {
     const match = voices.find((v) => re.test(v.name));
     if (match) return (cachedVoice = match);
@@ -124,7 +136,7 @@ function pickVoice(): SpeechSynthesisVoice | null {
 /** Speak text, cancelling anything already being said. onEnd fires when it finishes or is interrupted. */
 export function speak(
   text: string,
-  handlers: { onStart?: () => void; onEnd?: () => void; pitch?: number; rate?: number } = {},
+  handlers: { onStart?: () => void; onEnd?: () => void; onBoundary?: () => void; pitch?: number; rate?: number } = {},
 ): void {
   if (!canSynthesize() || !text.trim()) {
     handlers.onEnd?.();
@@ -135,8 +147,9 @@ export function speak(
   const utterance = new SpeechSynthesisUtterance(text);
   const voice = pickVoice();
   if (voice) utterance.voice = voice;
-  utterance.rate = handlers.rate ?? 1.05;
-  utterance.pitch = handlers.pitch ?? 0.85;
+  utterance.rate = handlers.rate ?? 1.0;
+  utterance.pitch = handlers.pitch ?? 1.0;
+  utterance.onboundary = () => handlers.onBoundary?.();
   utterance.onstart = () => handlers.onStart?.();
   utterance.onend = () => handlers.onEnd?.();
   utterance.onerror = () => handlers.onEnd?.();

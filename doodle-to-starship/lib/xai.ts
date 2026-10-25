@@ -317,6 +317,53 @@ export function editImage(
   return imagine("/images/edits", { prompt, image: { url: image }, ...options }, timeoutMs);
 }
 
+/**
+ * xAI bills TTS per input character. The rate wasn't in our docs copy (the price table renders
+ * client-side), so this meters a conservative $30 per million characters until it's confirmed.
+ */
+const TTS_USD_PER_CHAR = 30 / 1_000_000;
+const TTS_TIMEOUT_MS = 10_000;
+
+/** Speak `text` with an xAI voice. Returns MP3 bytes, or null (no key, no budget, error or timeout). */
+export async function synthesize(text: string, voiceId: string, speed = 1): Promise<Uint8Array | null> {
+  const key = process.env.XAI_API_KEY;
+  if (!key) return null;
+  const label = `/tts (${voiceId})`;
+  if (!paidCallsAllowed()) {
+    recordError(label, null, "budget", `daily xAI budget of $${dailyBudgetUsd()} reached`);
+    return null;
+  }
+  try {
+    const res = await fetch(`${XAI_BASE_URL}/tts`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${key}`, "Content-Type": "application/json" },
+      body: JSON.stringify({
+        text,
+        voice_id: voiceId,
+        language: "en",
+        speed,
+        output_format: { codec: "mp3", sample_rate: 44100, bit_rate: 128000 },
+      }),
+      signal: AbortSignal.timeout(TTS_TIMEOUT_MS),
+      cache: "no-store",
+    });
+    if (!res.ok) {
+      const detail = await res.text().catch(() => "");
+      recordError(label, res.status, kindOf(res.status, detail), detail);
+      return null;
+    }
+    const audio = new Uint8Array(await res.arrayBuffer());
+    addCost(text.length * TTS_USD_PER_CHAR * TICKS_PER_USD);
+    health.lastOkAt = new Date().toISOString();
+    return audio.length > 0 ? audio : null;
+  } catch (err) {
+    const name = err instanceof Error ? err.name : "";
+    const kind = name === "TimeoutError" || name === "AbortError" ? "timeout" : "network";
+    recordError(label, null, kind, `${err instanceof Error ? err.message : String(err)} after ${TTS_TIMEOUT_MS} ms`);
+    return null;
+  }
+}
+
 /** Start an image-to-video job. Returns its request id. There is no cancel, so only call this on a user's ask. */
 export async function startVideo(imageUrl: string, prompt: string): Promise<string | null> {
   const job = await request<VideoJob>(
