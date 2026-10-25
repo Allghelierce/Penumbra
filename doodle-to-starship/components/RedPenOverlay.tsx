@@ -29,15 +29,38 @@ interface RedPenOverlayProps {
   problem?: string | null;
 }
 
-/** Where a mark's issue number sits: at the start of an arrow, the top-left of a circle, the start of a ghost line. */
+/** Where a mark's issue number sits: the start of an arrow, dimension or leader; the top-left of a circle or outline. */
 function badgeAt(mark: RedPenMark): Point {
-  if (mark.kind === "arrow") return mark.from;
-  if (mark.kind === "circle") return [mark.center[0] - mark.radius * 0.72, mark.center[1] - mark.radius * 0.62];
-  return mark.points[0] ?? [0.5, 0.5];
+  switch (mark.kind) {
+    case "arrow":
+    case "dimension":
+      return mark.from;
+    case "circle":
+      return [mark.center[0] - mark.radius * 0.72, mark.center[1] - mark.radius * 0.62];
+    case "outline":
+      return [mark.box[0], mark.box[1]];
+    case "callout":
+      return mark.anchor;
+    case "ghost-line":
+      return mark.points[0] ?? [0.5, 0.5];
+  }
+}
+
+/** The engineer marks up in order: outlines around the parts, then dimensions, then spec callouts, then the issues. */
+const MARKUP_ORDER: Record<RedPenMark["kind"], number> = { outline: 0, dimension: 1, callout: 2, circle: 3, arrow: 3, "ghost-line": 3 };
+
+/** Each mark's start time: stable-sorted by kind, staggered so the whole sheet is marked up in about 3 s. */
+function markDelays(marks: RedPenMark[], start: number): number[] {
+  const order = marks.map((m, i) => ({ i, rank: MARKUP_ORDER[m.kind] })).sort((a, b) => a.rank - b.rank || a.i - b.i);
+  const step = Math.min(0.55, 2.6 / Math.max(1, marks.length));
+  const delays = new Array<number>(marks.length);
+  order.forEach(({ i }, k) => (delays[i] = start + k * step));
+  return delays;
 }
 
 export default function RedPenOverlay({ parts, marks, playKey, scanning, onFix, numbers, selectedMark = null, onSelectMark, problem }: RedPenOverlayProps) {
-  const penStart = 0.4 + parts.length * 0.08;
+  const penStart = 0.3;
+  const delays = markDelays(marks, penStart);
   return (
     <>
       {scanning && (
@@ -64,14 +87,15 @@ export default function RedPenOverlay({ parts, marks, playKey, scanning, onFix, 
           className={marks.length > 0 && !scanning ? "part-tags retire" : "part-tags"}
           style={{ "--retire-delay": `${penStart}s` } as React.CSSProperties}
         >
-          {layoutTags(parts).map((tag, i) => (
-            <PartTag key={i} tag={tag} delay={i * 0.08} />
-          ))}
+          {marks.length === 0 &&
+            layoutTags(parts).map((tag, i) => (
+              <PartTag key={i} tag={tag} delay={i * 0.08} />
+            ))}
         </g>
         <g>
           {marks.map((mark, i) => (
             <g key={i} className="transition-opacity duration-200" opacity={selectedMark !== null && selectedMark !== i ? 0.3 : 1}>
-              <Mark mark={mark} seed={i + 1} delay={penStart + i * 0.9} onFix={onFix} />
+              <Mark mark={mark} seed={i + 1} delay={delays[i]} onFix={onFix} />
             </g>
           ))}
         </g>
@@ -86,7 +110,7 @@ export default function RedPenOverlay({ parts, marks, playKey, scanning, onFix, 
               <g
                 key={i}
                 className={`pen-note ${active ? "mark-pulse" : ""}`}
-                style={{ animationDelay: `${penStart + i * 0.9 + 0.3}s`, transformOrigin: `${bx}px ${by}px`, cursor: onSelectMark ? "pointer" : undefined, pointerEvents: "auto" }}
+                style={{ animationDelay: `${delays[i] + 0.3}s`, transformOrigin: `${bx}px ${by}px`, cursor: onSelectMark ? "pointer" : undefined, pointerEvents: "auto" }}
                 onClick={() => onSelectMark?.(i)}
               >
                 <circle cx={bx} cy={by} r={8.5} fill={active ? "var(--redpen)" : "#fffdf8"} stroke="var(--redpen)" strokeWidth={1.6} />
@@ -206,6 +230,17 @@ function PartTag({ tag, delay }: { tag: Tag; delay: number }) {
 
 const scale = ([x, y]: Point): Point => [x * W, y * H];
 
+/** A small seeded random source so each hand-drawn outline wobbles the same way every render. */
+function wobble(seed: number): () => number {
+  let a = (seed * 2654435761) >>> 0;
+  return () => {
+    a = (a + 0x6d2b79f5) >>> 0;
+    let t = Math.imul(a ^ (a >>> 15), a | 1);
+    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
 function Mark({ mark, seed, delay, onFix }: { mark: RedPenMark; seed: number; delay: number; onFix?: OnFix }) {
   const draw = { animationDelay: `${delay}s` };
   const write = { animationDelay: `${delay + 0.55}s` };
@@ -274,6 +309,74 @@ function Mark({ mark, seed, delay, onFix }: { mark: RedPenMark; seed: number; de
     );
   }
 
+  if (mark.kind === "outline") {
+    // A pen traced around the part: rounded corners, a little wobble, and an overshoot where it closes.
+    const rand = wobble(seed);
+    const j = (k: number) => (rand() - 0.5) * k;
+    const pad = 4;
+    const x0 = mark.box[0] * W - pad;
+    const y0 = mark.box[1] * H - pad;
+    const x1 = (mark.box[0] + mark.box[2]) * W + pad;
+    const y1 = (mark.box[1] + mark.box[3]) * H + pad;
+    const r = Math.min(8, (x1 - x0) / 4, (y1 - y0) / 4);
+    const d =
+      `M${x0 + r + j(2)} ${y0 + j(2)} L${x1 - r + j(2)} ${y0 + j(2)} Q${x1 + j(1)} ${y0 + j(1)} ${x1 + j(1.5)} ${y0 + r + j(2)} ` +
+      `L${x1 + j(2)} ${y1 - r + j(2)} Q${x1 + j(1)} ${y1 + j(1)} ${x1 - r + j(2)} ${y1 + j(1.5)} L${x0 + r + j(2)} ${y1 + j(2)} ` +
+      `Q${x0 + j(1)} ${y1 + j(1)} ${x0 + j(1.5)} ${y1 - r + j(2)} L${x0 + j(2)} ${y0 + r + j(2)} Q${x0 + j(1)} ${y0 + j(1)} ${x0 + r + 9} ${y0 - 1.8}`;
+    return (
+      <g>
+        <path className="pen-draw" style={draw} pathLength={1} d={d} fill="none" stroke="var(--redpen)" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" />
+        <Note x={x0 + 2} y={Math.max(11, y0 - 4)} anchor="start" text={mark.note} style={write} onClick={fix} size={12} />
+      </g>
+    );
+  }
+
+  if (mark.kind === "dimension") {
+    const [fx, fy] = scale(mark.from);
+    const [tx, ty] = scale(mark.to);
+    const len = Math.hypot(tx - fx, ty - fy) || 1;
+    const nx = -(ty - fy) / len;
+    const ny = (tx - fx) / len;
+    const tick = 5;
+    const vertical = Math.abs(ty - fy) > Math.abs(tx - fx);
+    const mx = (fx + tx) / 2;
+    const my = (fy + ty) / 2;
+    return (
+      <g>
+        <path
+          className="pen-draw"
+          style={draw}
+          pathLength={1}
+          d={`M${fx + nx * tick} ${fy + ny * tick} L${fx - nx * tick} ${fy - ny * tick} M${fx} ${fy} L${tx} ${ty} M${tx + nx * tick} ${ty + ny * tick} L${tx - nx * tick} ${ty - ny * tick}`}
+          fill="none"
+          stroke="var(--redpen)"
+          strokeWidth="1.3"
+          strokeLinecap="round"
+        />
+        {vertical ? (
+          <g transform={`rotate(-90 ${mx - 6} ${my})`}>
+            <Note x={mx - 6} y={my} anchor="middle" text={mark.note} style={write} onClick={fix} size={12} />
+          </g>
+        ) : (
+          <Note x={mx} y={my - 5} anchor="middle" text={mark.note} style={write} onClick={fix} size={12} />
+        )}
+      </g>
+    );
+  }
+
+  if (mark.kind === "callout") {
+    const [ax, ay] = scale(mark.anchor);
+    const [lx, ly] = scale(mark.label);
+    const toLeft = lx < ax;
+    return (
+      <g>
+        <circle className="pen-note" style={draw} cx={ax} cy={ay} r={2.2} fill="var(--redpen)" />
+        <path className="pen-draw" style={draw} pathLength={1} d={`M${ax} ${ay} L${lx} ${ly}`} fill="none" stroke="var(--redpen)" strokeWidth="1.2" strokeLinecap="round" />
+        <Note x={toLeft ? lx - 3 : lx + 3} y={ly + 4} anchor={toLeft ? "end" : "start"} text={mark.note} style={write} onClick={fix} size={13} />
+      </g>
+    );
+  }
+
   const points = mark.points.map(scale);
   if (points.length === 0) return null;
   const [lx, ly] = points[points.length - 1];
@@ -311,6 +414,7 @@ function Note({
   text,
   style,
   onClick,
+  size = 15,
 }: {
   x: number;
   y: number;
@@ -318,6 +422,7 @@ function Note({
   text: string;
   style: React.CSSProperties;
   onClick?: () => void;
+  size?: number;
 }) {
   return (
     <text
@@ -326,7 +431,7 @@ function Note({
       textAnchor={anchor}
       className={`pen-note font-hand ${onClick ? "pen-fix" : ""}`}
       style={style}
-      fontSize="15"
+      fontSize={size}
       fontWeight="700"
       fill="var(--redpen)"
       onClick={onClick}

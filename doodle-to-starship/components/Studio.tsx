@@ -579,6 +579,7 @@ export default function Studio() {
               }
             >
               <NapkinRender
+                reading={reviewed && !unreadable ? reading : null}
                 url={concept.url}
                 loading={concept.loading}
                 resetKey={strokes}
