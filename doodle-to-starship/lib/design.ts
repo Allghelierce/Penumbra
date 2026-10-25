@@ -207,8 +207,26 @@ export type DesignAction =
   | { type: "launch" }
   | { type: "review" };
 
-/** Which screen the app is on. */
-export type Phase = "draw" | "reading" | "reviewed" | "launch";
+/** Which screen the app is on. "poll" is the spoken GO/NO-GO poll between pressing Launch and liftoff. */
+export type Phase = "draw" | "reading" | "reviewed" | "poll" | "launch";
+
+/** One controller's answer in the pre-launch GO/NO-GO poll. */
+export interface PollCall {
+  role: "Propulsion" | "Structures" | "Trajectory" | "Landing" | "Flight";
+  go: boolean;
+  /** Spoken line with the real number, e.g. "Trajectory, NO-GO. We're 0.9 kilometers per second short of orbit." */
+  line: string;
+  /** For a NO-GO with a concrete remedy, the edit that clears it. */
+  fix?: DesignAction;
+}
+
+/** The whole poll. `go` is true only if every controller is GO. */
+export interface Poll {
+  calls: PollCall[];
+  go: boolean;
+  /** Flight director's closing line, e.g. "Flight, we are GO for launch." or "Hold, hold, hold. Two NO-GOs." */
+  summary: string;
+}
 
 /** One flight in the user's iteration history (attempt 1 is the first launch). */
 export interface Attempt {
