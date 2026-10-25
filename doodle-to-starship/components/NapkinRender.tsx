@@ -166,7 +166,8 @@ export default function NapkinRender({ url, loading, resetKey, reading = null, s
         </div>
       )}
       {sticker}
-      <div className={`absolute inset-0 transition-opacity duration-300 ${shown === "photo" ? "render-ink-faded opacity-30" : ""}`}>{children}</div>
+      {/* The red pen sits on top of every view at full strength: the markup over the render is the point. */}
+      <div className="absolute inset-0">{children}</div>
       {(hasClean || hasPhoto) && (
         <div role="group" aria-label="Napkin view" className="napkin-overlay pointer-events-auto absolute left-[4%] top-[3%] flex bg-black px-1 font-ui shadow-[0_2px_10px_rgba(0,0,0,0.35)]">
           {VIEWS.filter((v) => available[v]).map((v) => (
