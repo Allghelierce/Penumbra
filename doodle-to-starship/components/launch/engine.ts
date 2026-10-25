@@ -696,16 +696,17 @@ export function startLaunch(
 
     // --- Draw ---
     const night = ease((t - 0.15) / (T_NIGHT - 0.15));
-    const chalk = ease((t - 0.25) / (T_NIGHT - 0.05));
+    // On the studio's chalk-on-space napkin the strokes are already white; on paper they turn to chalk.
+    const chalk = input.napkinRect ? 1 : ease((t - 0.25) / (T_NIGHT - 0.05));
     const padK = easeOut((t - 0.6) / 0.9);
 
     c.globalAlpha = 1;
     c.globalCompositeOperation = "source-over";
     c.clearRect(0, 0, W, H);
     if (night < 1 && rect) {
-      // Lifting off the real napkin: the studio shows through until night falls, and the
-      // doodle peels off a blank napkin left where it was drawn.
-      c.fillStyle = rgba(pal.napkin, 1);
+      // Lifting off the real napkin: the studio shows through until night falls, and the chalk
+      // doodle lifts off its patch of space (blacked out so the studio's own strokes don't ghost).
+      c.fillStyle = "#000000";
       c.fillRect(rect.left, rect.top, rect.width, rect.height);
     } else if (night < 1) {
       // No napkin position: the napkin itself rides along from a plain table.
