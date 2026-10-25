@@ -5,10 +5,22 @@
 
 import { useEffect, useRef, useState } from "react";
 import type { ReplayPollResponse, ReplayStartResponse } from "@/app/api/replay/types";
+import { applyAction } from "@/lib/actions";
 import { DEMO_SKETCHES } from "@/lib/demo-sketches";
-import type { Analysis, ReadResponse, RenderResponse, ReviewResponse, SketchReading } from "@/lib/design";
+import type {
+  Analysis,
+  Design,
+  DesignAction,
+  ReadResponse,
+  RenderRequest,
+  RenderResponse,
+  ReviewResponse,
+  SketchReading,
+} from "@/lib/design";
 import { strokesToPng } from "@/lib/napkin";
 import { analyze } from "@/lib/physics";
+import { buildReview } from "@/lib/redpen";
+import { readFromGeometry } from "@/lib/sketch/geometry";
 
 const SKETCH = DEMO_SKETCHES.find((d) => d.id === "mars-ship")!;
 const POLL_MS = 3000;
@@ -56,8 +68,76 @@ async function post<T>(path: string, body?: unknown) {
   return { json, ms: since(t0), costUsd: cost === null ? null : Number(cost), ok: res.ok };
 }
 
+/** Poll a replay job until it's done or gives up. Returns the video URL or null. */
+async function waitForReplay(id: string): Promise<string | null> {
+  const t0 = now();
+  while (since(t0) < POLL_LIMIT_MS) {
+    await new Promise((resolve) => setTimeout(resolve, id.startsWith("cached-") ? 0 : POLL_MS));
+    const poll = (await fetch(`/api/replay/${id}`).then((r) => r.json())) as ReplayPollResponse;
+    if (poll.status === "done") return poll.url;
+    if (poll.status !== "pending") return null;
+  }
+  return null;
+}
+
+const isEdit = (fix: DesignAction | undefined): fix is DesignAction =>
+  Boolean(fix) && fix!.type !== "launch" && fix!.type !== "review";
+
+/**
+ * Renders everything the offline demo can ask for, so /api/render caches it under public/renders:
+ * for each demo sketch read by geometry (what an offline read produces), the concept, the patch and
+ * the outcome, then the outcome after each red-pen fix and after all of them (one per new verdict),
+ * plus one replay video. Cached items come back instantly and free.
+ */
+async function warmDemoCache(log: (line: string) => void) {
+  let replayed = false;
+  for (const demo of DEMO_SKETCHES) {
+    const sketch = strokesToPng(demo.strokes);
+    const reading = readFromGeometry(demo.strokes, demo.destination);
+    const base = analyze(reading.design);
+    const renderOne = async (label: string, design: Design, analysis: Analysis, kind: RenderRequest["kind"]) => {
+      const r = await post<RenderResponse>("/api/render", {
+        design,
+        analysis,
+        kind,
+        ...(kind === "patch" ? {} : { sketch }),
+      });
+      const cost = r.costUsd != null ? `$${r.costUsd.toFixed(3)}` : r.json.url ? "cached" : "-";
+      log(`${demo.id} · ${label}: ${r.json.url ?? "no image"} · ${r.ms} ms · ${cost}`);
+      return r.json.url;
+    };
+
+    const [, , outcomeUrl] = await Promise.all([
+      renderOne("concept", reading.design, base, "concept"),
+      renderOne("patch", reading.design, base, "patch"),
+      renderOne(`outcome ${base.verdict}`, reading.design, base, "outcome"),
+    ]);
+
+    // Outcome renders are keyed by sketch + verdict + destination, so one per new verdict covers every fix.
+    const fixes = buildReview(reading, base).marks.map((m) => m.fix).filter(isEdit);
+    const variants = [...fixes.map((f) => applyAction(reading.design, f)), fixes.reduce(applyAction, reading.design)];
+    const seen = new Set<string>([`${base.verdict}/${reading.design.destination}`]);
+    for (const design of variants) {
+      const analysis = analyze(design);
+      const id = `${analysis.verdict}/${design.destination}`;
+      if (seen.has(id)) continue;
+      seen.add(id);
+      await renderOne(`outcome after fix ${analysis.verdict}`, design, analysis, "outcome");
+    }
+
+    if (!replayed && outcomeUrl && demo.id === "two-stage-orbiter") {
+      replayed = true;
+      const start = await post<ReplayStartResponse>("/api/replay", { imageUrl: outcomeUrl, verdict: base.verdict });
+      const video = start.json.id ? await waitForReplay(start.json.id) : null;
+      log(`${demo.id} · replay: ${video ?? start.json.status}`);
+    }
+  }
+  log("done");
+}
+
 export default function XaiDevPage() {
   const [status, setStatus] = useState<Status | null>(null);
+  const [warmLog, setWarmLog] = useState<string[] | null>(null);
   const [results, setResults] = useState<Partial<Record<Step, Result>>>({});
   const reading = useRef<SketchReading | null>(null);
   const analysis = useRef<Analysis | null>(null);
@@ -208,8 +288,25 @@ export default function XaiDevPage() {
         <button className="rounded bg-neutral-900 px-3 py-1.5 text-white" onClick={runAll}>
           run all (≈$0.30)
         </button>
+        <button
+          className="rounded border border-neutral-900 px-3 py-1.5 disabled:opacity-40"
+          disabled={warmLog !== null && warmLog.at(-1) !== "done"}
+          onClick={() => {
+            setWarmLog([]);
+            void warmDemoCache((line) => setWarmLog((lines) => [...(lines ?? []), line])).catch((err) =>
+              setWarmLog((lines) => [...(lines ?? []), `error: ${err instanceof Error ? err.message : err}`, "done"]),
+            );
+          }}
+        >
+          warm demo cache (≈$1)
+        </button>
         <span className="text-neutral-600">spent this page: ${totalCost.toFixed(4)}</span>
       </div>
+      {warmLog && (
+        <pre className="mb-6 max-h-64 overflow-y-auto rounded border border-neutral-300 p-3 text-xs text-neutral-700">
+          {warmLog.join("\n") || "warming…"}
+        </pre>
+      )}
       <ul className="space-y-3">
         {STEPS.map(({ id, label, note }) => {
           const r = results[id];
