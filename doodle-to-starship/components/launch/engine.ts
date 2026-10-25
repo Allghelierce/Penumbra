@@ -22,8 +22,11 @@ import {
   drawBoundaries,
   drawGround,
   drawHorizonGlow,
+  drawBalloon,
   drawDeck,
   drawEarth,
+  drawPlane,
+  drawSatellite,
   earthTopY,
   drawISS,
   deckY,
@@ -786,6 +789,14 @@ export function startLaunch(
     // Decks the rocket isn't inside are scenery behind it; the one it's punching through is drawn again in front.
     const crossing = decks.filter((d) => Math.abs(deckY(d, altKm, layerCenter, H) - layerCenter) < d.thick * 0.55);
     for (const d of decks) drawDeck(c, W, H, d, altKm, downKm, layerCenter, t, deckAlpha);
+    // Layer props: an airliner at cruise, a weather balloon in the stratosphere, a satellite up high.
+    if (flying) {
+      const planeY = layerCenter + (altKm - 9.8) * H * 0.28;
+      if (planeY > -40 && planeY < H + 40) drawPlane(c, W, planeY, t, night);
+      const balloonY = layerCenter + (altKm - 30) * ((H * 2.6) / 30);
+      if (balloonY > -120 && balloonY < H + 40) drawBalloon(c, W * 0.72 + Math.sin(t * 0.4) * 8, balloonY, night, displayFont);
+      if (issK > 0) drawSatellite(c, W + 200 - ((t * 38) % (W + 400)), H * 0.3, t, issK);
+    }
 
     // Speed lines while it's fast and the air is thick enough to show it.
     const rush = flying && !exploded ? clamp01((s.speed - 200) / 600) * clamp01((60 - altKm) / 25) : 0;
