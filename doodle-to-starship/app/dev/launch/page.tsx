@@ -13,6 +13,7 @@ export default function LaunchDevPage() {
   const [log, setLog] = useState<string[]>([]);
   const timer = useRef<number | undefined>(undefined);
   const runs = useRef(0);
+  const [napkinRect, setNapkinRect] = useState<{ left: number; top: number; width: number; height: number } | null>(null);
 
   function play(fixture: LaunchFixture) {
     window.clearTimeout(timer.current);
@@ -24,10 +25,15 @@ export default function LaunchDevPage() {
 
   // ?play=<fixture id> starts a launch on load (handy for screenshots).
   useEffect(() => {
-    const id = new URLSearchParams(window.location.search).get("play");
-    const fixture = [...REAL_FIXTURES, ...FIXTURES].find((f) => f.id === id);
+    const params = new URLSearchParams(window.location.search);
+    const fixture = [...REAL_FIXTURES, ...FIXTURES].find((f) => f.id === params.get("play"));
     if (!fixture) return;
-    const h = window.setTimeout(() => play(fixture), 0);
+    // ?rect=left,top,width,height pretends the napkin sat there on screen.
+    const [left, top, width, height] = (params.get("rect") ?? "").split(",").map(Number);
+    const h = window.setTimeout(() => {
+      if (height > 0) setNapkinRect({ left, top, width, height });
+      play(fixture);
+    }, 0);
     return () => window.clearTimeout(h);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -94,6 +100,7 @@ export default function LaunchDevPage() {
           analysis={active.fixture.analysis}
           trace={active.fixture.trace}
           renderUrl={renderUrl}
+          napkinRect={napkinRect}
           onEvent={(e) => setLog((l) => [...l, `T+${Math.round(e.tS)}s  ${e.kind}  ${e.label}`])}
           onDone={close}
         />

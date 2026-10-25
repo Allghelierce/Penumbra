@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { Analysis, FlightEvent, FlightTrace, SketchReading, Stroke } from "@/lib/design";
 import EndCard from "./launch/EndCard";
-import { flightStats, startLaunch, type LaunchHandle } from "./launch/engine";
+import { flightStats, startLaunch, type LaunchHandle, type NapkinRect } from "./launch/engine";
 import type { CaptionCue, Finale, Tone } from "./launch/plan";
 import { useReplay, type ReplayState } from "./launch/useReplay";
 
@@ -21,6 +21,11 @@ export interface LaunchSceneProps {
   onEvent?: (e: FlightEvent) => void;
   /** "Back to the napkin". */
   onDone: () => void;
+  /**
+   * Optional: the napkin canvas's on-screen box (getBoundingClientRect()), so the doodle
+   * starts exactly where it was drawn. Without it the scene starts from a centered 3:4 box.
+   */
+  napkinRect?: NapkinRect | null;
 }
 
 const TONE: Record<Tone, string> = {
@@ -76,6 +81,7 @@ export default function LaunchScene(props: LaunchSceneProps) {
 
 function LaunchRun(props: LaunchSceneProps & { video: ReplayState; onVideo: () => void; onReplay: () => void }) {
   const [input] = useState(() => ({
+    napkinRect: props.napkinRect,
     strokes: props.strokes,
     reading: props.reading,
     analysis: props.analysis,

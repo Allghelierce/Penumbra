@@ -31,8 +31,17 @@ import {
   type RGB,
 } from "./scenery";
 
+export interface NapkinRect {
+  left: number;
+  top: number;
+  width: number;
+  height: number;
+}
+
 export interface LaunchInput {
   strokes: Stroke[];
+  /** Where the napkin sat on screen (viewport px), so the doodle starts exactly there. */
+  napkinRect?: NapkinRect | null;
   reading: SketchReading;
   analysis: Analysis;
   trace: FlightTrace;
@@ -469,12 +478,15 @@ export function startLaunch(
     const reentry = falling ? clamp01((100 - altKm) / 50) * clamp01((s.speed - 600) / 1200) : 0;
 
     // --- Camera ---
-    const boxH = Math.min(H * 0.86, (W * 0.86) / NAPKIN_ASPECT);
-    const nx = (W - boxH * NAPKIN_ASPECT) / 2 + doodle.origin[0] * boxH;
-    const ny = (H - boxH) / 2 + doodle.origin[1] * boxH;
-    const sL = Math.min(1.8, Math.max(0.12, Math.min((0.36 * H) / (Hn * boxH), (0.42 * W) / (Wn * boxH))));
+    const fit = Math.min(H * 0.86, (W * 0.86) / NAPKIN_ASPECT);
+    const rect = input.napkinRect && input.napkinRect.height > 0 ? input.napkinRect : null;
+    const boxH = rect ? rect.height : fit;
+    const nx = rect
+      ? rect.left + (doodle.origin[0] / NAPKIN_ASPECT) * rect.width
+      : (W - boxH * NAPKIN_ASPECT) / 2 + doodle.origin[0] * boxH;
+    const ny = (rect ? rect.top : (H - boxH) / 2) + doodle.origin[1] * boxH;
     const e = ease((t - T_CAM_FROM) / (T_FRAMED - T_CAM_FROM));
-    const Zl = sL * boxH;
+    const Zl = Math.min(1.8 * fit, Math.max(0.12 * fit, Math.min((0.36 * H) / Hn, (0.42 * W) / Wn)));
     const Z = lerp(boxH, Zl, e) * boost;
     const rsx = lerp(nx, W / 2, e);
     const rsy = lerp(ny, H * 0.8 - (Hn / 2) * Zl, e);
