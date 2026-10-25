@@ -17,10 +17,63 @@ const IMAGE_OPTIONS = { aspect_ratio: "4:3", resolution: "1k", quality: "low" };
 export const VIDEO_MODEL = "grok-imagine-video-1.5-lite";
 const VIDEO_OPTIONS = { duration: 6, resolution: "480p" };
 
-const VISION_TIMEOUT_MS = 30_000;
-const TEXT_TIMEOUT_MS = 20_000;
-const IMAGE_TIMEOUT_MS = 60_000;
-const VIDEO_TIMEOUT_MS = 20_000;
+/**
+ * Live-demo budgets in ms; a slow call is worse than a fallback. Override with XAI_VISION_TIMEOUT_MS,
+ * XAI_TEXT_TIMEOUT_MS, XAI_IMAGE_TIMEOUT_MS and XAI_VIDEO_TIMEOUT_MS. Read per call so .env edits apply.
+ */
+export function timeouts() {
+  return {
+    vision: envMs("XAI_VISION_TIMEOUT_MS", 12_000),
+    text: envMs("XAI_TEXT_TIMEOUT_MS", 6_000),
+    image: envMs("XAI_IMAGE_TIMEOUT_MS", 25_000),
+    video: envMs("XAI_VIDEO_TIMEOUT_MS", 15_000),
+  };
+}
+
+function envMs(name: string, fallback: number): number {
+  const value = Number(process.env[name]);
+  return Number.isFinite(value) && value > 0 ? value : fallback;
+}
+
+export type XaiErrorKind = "auth" | "rate-limit" | "server" | "bad-request" | "timeout" | "network";
+
+export interface XaiError {
+  kind: XaiErrorKind;
+  status: number | null;
+  path: string;
+  message: string;
+  at: string;
+}
+
+interface XaiHealth {
+  lastError: XaiError | null;
+  lastOkAt: string | null;
+}
+
+// On globalThis because dev bundles each route separately; /api/xai-status must see every route's calls.
+const health: XaiHealth = ((globalThis as { __xaiHealth?: XaiHealth }).__xaiHealth ??= {
+  lastError: null,
+  lastOkAt: null,
+});
+
+/** The most recent failure (any route) and the most recent success, for /api/xai-status. */
+export function xaiHealth(): XaiHealth {
+  return { ...health };
+}
+
+function recordError(path: string, status: number | null, kind: XaiErrorKind, message: string) {
+  // Never let anything key-shaped reach the status page.
+  const clean = message.replace(/xai-[A-Za-z0-9_-]{4,}/g, "xai-…").slice(0, 200);
+  health.lastError = { kind, status, path, message: clean, at: new Date().toISOString() };
+  console.warn(`[xai] ${path} -> ${status ?? kind}: ${clean}`);
+}
+
+function kindOf(status: number, detail: string): XaiErrorKind {
+  // xAI answers a wrong key with 400 "Incorrect API key provided", not 401.
+  if (status === 401 || status === 403 || /api key/i.test(detail)) return "auth";
+  if (status === 429) return "rate-limit";
+  return status >= 500 ? "server" : "bad-request";
+}
 
 /** Adds up usage.cost_in_usd_ticks for every xAI call made inside metered(). 1 USD = 1e10 ticks. */
 const costMeter = new AsyncLocalStorage<{ ticks: number; seen: boolean }>();
@@ -81,7 +134,7 @@ async function request<T>(method: "GET" | "POST", path: string, body: unknown, t
     });
     if (!res.ok) {
       const detail = await res.text().catch(() => "");
-      console.warn(`[xai] ${method} ${path} -> ${res.status}: ${detail.slice(0, 300)}`);
+      recordError(path, res.status, kindOf(res.status, detail), detail);
       return null;
     }
     const json = (await res.json()) as T & { usage?: { cost_in_usd_ticks?: number } };
@@ -91,9 +144,12 @@ async function request<T>(method: "GET" | "POST", path: string, body: unknown, t
       meter.ticks += ticks;
       meter.seen = true;
     }
+    health.lastOkAt = new Date().toISOString();
     return json;
   } catch (err) {
-    console.warn(`[xai] ${method} ${path} failed:`, err instanceof Error ? err.message : err);
+    const name = err instanceof Error ? err.name : "";
+    const kind = name === "TimeoutError" || name === "AbortError" ? "timeout" : "network";
+    recordError(path, null, kind, err instanceof Error ? err.message : String(err));
     return null;
   }
 }
@@ -146,7 +202,7 @@ export async function visionJson<T>(opts: {
       { type: "text", text: opts.prompt },
     ],
   });
-  const text = await chat(VISION_MODEL, VISION_REASONING, messages, VISION_TIMEOUT_MS, {
+  const text = await chat(VISION_MODEL, VISION_REASONING, messages, timeouts().vision, {
     name: opts.schemaName,
     schema: opts.schema,
   });
@@ -158,7 +214,7 @@ export async function chatText(opts: { system?: string; prompt: string }): Promi
   const messages: ChatMessage[] = [];
   if (opts.system) messages.push({ role: "system", content: opts.system });
   messages.push({ role: "user", content: opts.prompt });
-  return chat(TEXT_MODEL, TEXT_REASONING, messages, TEXT_TIMEOUT_MS);
+  return chat(TEXT_MODEL, TEXT_REASONING, messages, timeouts().text);
 }
 
 /** Text chat with structured JSON output matching `schema`. */
@@ -171,19 +227,19 @@ export async function chatJson<T>(opts: {
   const messages: ChatMessage[] = [];
   if (opts.system) messages.push({ role: "system", content: opts.system });
   messages.push({ role: "user", content: opts.prompt });
-  const text = await chat(TEXT_MODEL, TEXT_REASONING, messages, TEXT_TIMEOUT_MS, {
+  const text = await chat(TEXT_MODEL, TEXT_REASONING, messages, timeouts().text, {
     name: opts.schemaName,
     schema: opts.schema,
   });
   return parseJson<T>(text);
 }
 
-async function imagine(path: string, body: Record<string, unknown>): Promise<string | null> {
+async function imagine(path: string, body: Record<string, unknown>, timeoutMs: number): Promise<string | null> {
   const result = await request<ImageResult>(
     "POST",
     path,
     { model: IMAGE_MODEL, n: 1, response_format: "url", ...IMAGE_OPTIONS, ...body },
-    IMAGE_TIMEOUT_MS,
+    timeoutMs,
   );
   const image = result?.data?.[0];
   if (image?.url) return image.url;
@@ -192,13 +248,17 @@ async function imagine(path: string, body: Record<string, unknown>): Promise<str
 }
 
 /** Generate one image from a prompt. Returns a temporary URL (or a data URL if the API sends base64). */
-export function generateImage(prompt: string, options?: { aspect_ratio?: string }): Promise<string | null> {
-  return imagine("/images/generations", { prompt, ...options });
+export function generateImage(
+  prompt: string,
+  options?: { aspect_ratio?: string },
+  timeoutMs = timeouts().image,
+): Promise<string | null> {
+  return imagine("/images/generations", { prompt, ...options }, timeoutMs);
 }
 
 /** Re-imagine an existing image (a png/jpg data URL) following `prompt`. */
-export function editImage(prompt: string, image: string): Promise<string | null> {
-  return imagine("/images/edits", { prompt, image: { url: image } });
+export function editImage(prompt: string, image: string, timeoutMs = timeouts().image): Promise<string | null> {
+  return imagine("/images/edits", { prompt, image: { url: image } }, timeoutMs);
 }
 
 /** Start an image-to-video job. Returns its request id. There is no cancel, so only call this on a user's ask. */
@@ -207,7 +267,7 @@ export async function startVideo(imageUrl: string, prompt: string): Promise<stri
     "POST",
     "/videos/generations",
     { model: VIDEO_MODEL, image: { url: imageUrl }, prompt, ...VIDEO_OPTIONS },
-    VIDEO_TIMEOUT_MS,
+    timeouts().video,
   );
   return typeof job?.request_id === "string" ? job.request_id : null;
 }
@@ -218,7 +278,7 @@ export type VideoStatus = "pending" | "done" | "failed" | "expired";
 export async function getVideo(
   id: string,
 ): Promise<{ status: VideoStatus; progress: number | null; url: string | null } | null> {
-  const job = await request<VideoJob>("GET", `/videos/${encodeURIComponent(id)}`, undefined, VIDEO_TIMEOUT_MS);
+  const job = await request<VideoJob>("GET", `/videos/${encodeURIComponent(id)}`, undefined, timeouts().video);
   if (!job) return null;
   const known: VideoStatus[] = ["pending", "done", "failed", "expired"];
   const status = known.includes(job.status as VideoStatus)
