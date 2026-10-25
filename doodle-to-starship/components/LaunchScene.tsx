@@ -129,7 +129,7 @@ function LaunchRun(props: LaunchSceneProps & { video: ReplayState; onVideo: () =
         <div
           ref={hudRef}
           aria-live="off"
-          className="font-mono text-[12px] tracking-wide text-white/85 opacity-0 transition-opacity duration-500 sm:text-sm"
+          className="font-mono text-[11px] tracking-wide text-white/85 opacity-0 transition-opacity duration-500 sm:text-sm"
         />
         <div className="ls-fade mt-1 font-mono text-[11px] uppercase tracking-widest text-white/40 [animation-delay:1.4s]">
           {input.reading.design.name}
@@ -160,7 +160,7 @@ function LaunchRun(props: LaunchSceneProps & { video: ReplayState; onVideo: () =
         <button
           type="button"
           onClick={() => handle.current?.skip()}
-          className="absolute right-4 top-4 font-mono text-xs uppercase tracking-widest text-white/45 transition-colors hover:text-white sm:right-6 sm:top-5"
+          className="absolute bottom-5 right-4 font-mono text-xs uppercase tracking-widest text-white/45 transition-colors hover:text-white sm:bottom-auto sm:right-6 sm:top-5"
         >
           skip ›
         </button>

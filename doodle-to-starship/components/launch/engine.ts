@@ -373,6 +373,31 @@ export function startLaunch(
     c.restore();
   }
 
+  /** Plasma on the leading nose, streaming back along the body (rocket-local units). */
+  function drawReentry(k: number, nose: Vec, Z: number) {
+    const c = ctx!;
+    const r = Wn * (0.8 + 0.2 * Math.sin(t * 31)) * k;
+    c.save();
+    c.globalCompositeOperation = "lighter";
+    c.globalAlpha = 0.85 * k;
+    c.drawImage(sprites.hot, nose[0] - r, nose[1] - r, r * 2, r * 2);
+    c.globalAlpha = 0.45 * k;
+    c.drawImage(sprites.fire, nose[0] - r * 1.5, nose[1] - r * 0.5, r * 3, Hn * 0.9 * k + r);
+    const rand = seeded(Math.floor(t * 14));
+    c.strokeStyle = rgba(pal.flameHot, 1);
+    c.lineWidth = 1.5 / Z;
+    c.lineCap = "round";
+    for (let i = 0; i < 6; i++) {
+      const x = nose[0] + (rand() - 0.5) * Wn * 0.9;
+      c.globalAlpha = 0.7 * k * rand();
+      c.beginPath();
+      c.moveTo(x, nose[1] + rand() * Hn * 0.08);
+      c.lineTo(x + (x - nose[0]) * 0.4, nose[1] + Hn * (0.4 + rand() * 0.6));
+      c.stroke();
+    }
+    c.restore();
+  }
+
   function strokeDoodle(path: Path2D, alpha: number, chalk: number, Z: number) {
     const c = ctx!;
     const lw = Math.max(2 / Z, 0.0055 * NAPKIN_ASPECT);
@@ -438,6 +463,10 @@ export function startLaunch(
     });
 
     if (!exploded && plan.explodeAt !== null && t >= plan.explodeAt) explode(pose, focus, top);
+
+    // Falling back fast through the air: the nose glows.
+    const falling = flying && plan.outcome === "suborbital" && sampleAt(plan.points, sim - 2).alt > s.alt;
+    const reentry = falling ? clamp01((100 - altKm) / 50) * clamp01((s.speed - 600) / 1200) : 0;
 
     // --- Camera ---
     const boxH = Math.min(H * 0.86, (W * 0.86) / NAPKIN_ASPECT);
@@ -628,6 +657,7 @@ export function startLaunch(
       });
       drawParticles(local, (p) => [p.x, p.y, 1]);
       pieces.forEach((_, i) => withPiece(i, (a) => strokeDoodle(piecePaths[i], a, chalk, Z)));
+      if (reentry > 0.02) drawReentry(reentry, [focus[0], top], Z);
       c.restore();
     }
 
