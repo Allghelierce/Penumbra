@@ -188,6 +188,10 @@ export type RedPenMark =
 export interface SketchReading {
   design: Design;
   parts: Part[];
+  /** 0..1: how confidently this reads as a launch vehicle. Below 0.5 the studio coaches instead of analysing. */
+  confidence?: number;
+  /** When it doesn't read as a vehicle, why, in one sentence ("It's a scribble: I can't find a body with two walls"). */
+  problem?: string | null;
 }
 
 /** The red-pen markup drawn back onto the sketch. */
