@@ -6,7 +6,6 @@ import Link from "next/link";
 import LaunchScene, { unlockLaunchAudio } from "@/components/LaunchScene";
 import NapkinCanvas from "@/components/NapkinCanvas";
 import NapkinRender from "@/components/NapkinRender";
-import MissionClock from "@/components/MissionClock";
 import { PenumbraLockup } from "@/components/PenumbraLogo";
 import PollConsole from "@/components/PollConsole";
 import RedPenOverlay from "@/components/RedPenOverlay";
@@ -43,6 +42,7 @@ import { readFromGeometry } from "@/lib/sketch/geometry";
 import { recap } from "@/lib/recap";
 import { calloutFor, offerFor, pollRoom } from "@/lib/mission-control";
 import { analyze, DESTINATIONS, simulateFlight } from "@/lib/physics";
+import { diagnose, sensitivities } from "@/lib/diagnosis";
 import type { ReviewIssue, Trade } from "@/components/DesignReview";
 
 const DESTINATION_CHIPS: { id: DestinationId; label: string }[] = [
@@ -73,56 +73,6 @@ function safeAnalyze(design: Design | null): Analysis | null {
   } catch {
     return null;
   }
-}
-
-const km1 = (mps: number) => (Math.round(mps / 100) / 10).toFixed(1);
-const signed = (n: number, unit: string, digits = 0) => `${n >= 0 ? "+" : "−"}${Math.abs(n).toFixed(digits)} ${unit}`;
-
-/**
- * The design review, built from the red-pen marks and the analysis: one issue per mark, numbered the
- * same as the mark on the napkin, with the physics behind it and the fix the red pen offers.
- */
-function reviewIssues(design: Design, analysis: Analysis, review: Review | null): ReviewIssue[] {
-  if (!review) return [];
-  const target = DESTINATIONS[design.destination].name;
-  const effect =
-    analysis.liftoffTwr < 1
-      ? `Never leaves the pad: thrust/weight ${analysis.liftoffTwr.toFixed(2)} at liftoff.`
-      : analysis.marginMps < 0
-        ? `${km1(-analysis.marginMps)} km/s short of ${target} (${km1(analysis.totalDeltaVMps)} of ${km1(analysis.requiredDeltaVMps)} km/s).`
-        : `Reaches ${target} with ${km1(analysis.marginMps)} km/s to spare.`;
-  const failing = analysis.verdict !== "destination";
-  return review.marks.map((mark, i) => ({
-    id: `mark-${i}`,
-    severity: failing ? (mark.fix || i === 0 ? "critical" : "major") : "minor",
-    title: mark.note.charAt(0).toUpperCase() + mark.note.slice(1).replace(/[.!]+$/, ""),
-    why: analysis.findings[Math.min(i, analysis.findings.length - 1)] ?? "",
-    effect,
-    fix: mark.fix,
-    markIndex: i,
-  }));
-}
-
-/** What small changes buy: the physics re-run on +1 t payload, +10% first-stage tanks and one more engine. */
-function tradeNumbers(design: Design, analysis: Analysis): Trade[] {
-  const out: Trade[] = [];
-  const delta = (next: Design) => {
-    try {
-      return analyze(next);
-    } catch {
-      return null;
-    }
-  };
-  const payload = delta(applyAction(design, { type: "set-payload", payloadMassKg: design.payloadMassKg + 1000 }));
-  if (payload) out.push({ label: "+1 t payload", text: signed(payload.totalDeltaVMps - analysis.totalDeltaVMps, "m/s") });
-  const tanks = delta(applyAction(design, { type: "scale-tanks", stageIndex: 0, factor: 1.1 }));
-  if (tanks) out.push({ label: "+10% first-stage tanks", text: `${signed(tanks.totalDeltaVMps - analysis.totalDeltaVMps, "m/s")}, T/W ${signed(tanks.liftoffTwr - analysis.liftoffTwr, "", 2).trim()}` });
-  const cluster = design.stages[0]?.engines[0];
-  if (cluster) {
-    const engines = delta(applyAction(design, { type: "set-engines", stageIndex: 0, engine: cluster.engine, count: cluster.count + 1 }));
-    if (engines) out.push({ label: "+1 first-stage engine", text: `T/W ${signed(engines.liftoffTwr - analysis.liftoffTwr, "", 2).trim()}, ${signed(engines.totalDeltaVMps - analysis.totalDeltaVMps, "m/s")}` });
-  }
-  return out;
 }
 
 /** Search terms for NASA's Technical Reports Server, from what the sketch contains. */
@@ -184,8 +134,22 @@ export default function Studio() {
     () => (reading && (reading.confidence ?? 1) < 0.5 ? { problem: reading.problem ?? "These strokes don't form a vehicle outline." } : null),
     [reading],
   );
-  const issues = useMemo(() => (design && analysis && !unreadable ? reviewIssues(design, analysis, review) : []), [design, analysis, review, unreadable]);
-  const trades = useMemo(() => (design && analysis && !unreadable ? tradeNumbers(design, analysis) : []), [design, analysis, unreadable]);
+  const issues = useMemo<ReviewIssue[]>(() => {
+    if (!design || !analysis || unreadable || !review) return [];
+    try {
+      return diagnose(design, analysis, reading ?? undefined).map((issue) => ({ ...issue, id: `issue-${issue.n}` }));
+    } catch {
+      return [];
+    }
+  }, [design, analysis, reading, review, unreadable]);
+  const trades = useMemo<Trade[]>(() => {
+    if (!design || !analysis || unreadable) return [];
+    try {
+      return sensitivities(design).map((t) => ({ label: t.label, text: t.value }));
+    } catch {
+      return [];
+    }
+  }, [design, analysis, unreadable]);
   const markNumbers = (review?.marks ?? []).map((_, i) => {
     const n = issues.findIndex((issue) => issue.markIndex === i);
     return n >= 0 ? n + 1 : null;
@@ -543,52 +507,50 @@ export default function Studio() {
 
   return (
     <div className="flex h-dvh flex-col overflow-hidden bg-black text-white">
-      <header className="flex h-14 shrink-0 items-center gap-6 border-b border-rule bg-black px-6 min-[1400px]:gap-8">
+      <header className="relative z-30 flex h-14 shrink-0 items-center gap-6 border-b border-rule bg-black px-6">
         <h1 aria-label="Penumbra">
           <PenumbraLockup />
         </h1>
-        <div className="flex items-center gap-3">
-          <span id="target-label" className="text-[11px] uppercase tracking-[0.2em] text-haze">
-            Target
-          </span>
-          <div role="radiogroup" aria-labelledby="target-label" className="flex gap-1">
-            {DESTINATION_CHIPS.map((chip) => {
-              const selected = destination === chip.id;
-              return (
-                <button
-                  key={chip.id}
-                  type="button"
-                  role="radio"
-                  aria-checked={selected}
-                  onClick={() => (design ? handleAction({ type: "set-destination", destination: chip.id }) : setDestination(chip.id))}
-                  className={`relative px-2.5 py-1.5 text-[12px] font-semibold uppercase tracking-[0.16em] transition-colors after:absolute after:inset-x-2.5 after:-bottom-px after:h-[2px] after:bg-white after:transition-transform ${
-                    selected ? "text-white after:scale-x-100" : "text-haze after:scale-x-0 hover:text-white"
-                  }`}
-                >
-                  {chip.label}
-                </button>
-              );
-            })}
-          </div>
-        </div>
         <div className="ml-auto flex items-center gap-2">
-          <span className="mr-6 hidden min-[1400px]:inline">
-            <MissionClock />
-          </span>
-          <Link href="/about" className="mr-4 whitespace-nowrap text-[11px] uppercase tracking-[0.2em] text-haze underline-offset-4 transition-colors hover:text-white hover:underline">
-            How it works
-          </Link>
-          <span className="mr-1 hidden text-[11px] uppercase tracking-[0.2em] text-haze min-[1400px]:inline">Samples</span>
-          {DEMO_SKETCHES.map((sketch) => (
-            <button
-              key={sketch.id}
-              type="button"
-              onClick={() => loadDemo(sketch.id)}
-              className="whitespace-nowrap px-2 py-1 text-[11px] font-semibold uppercase tracking-[0.16em] text-white/80 underline-offset-4 transition-colors hover:text-white hover:underline"
-            >
-              {sketch.title}
-            </button>
-          ))}
+          <Dropdown label={`Target: ${DESTINATION_CHIPS.find((c) => c.id === destination)?.label ?? DESTINATIONS[destination].name}`}>
+            {(close) =>
+              DESTINATION_CHIPS.map((chip) => (
+                <MenuItem
+                  key={chip.id}
+                  active={destination === chip.id}
+                  onClick={() => {
+                    if (design) handleAction({ type: "set-destination", destination: chip.id });
+                    else setDestination(chip.id);
+                    close();
+                  }}
+                >
+                  {DESTINATIONS[chip.id].name}
+                </MenuItem>
+              ))
+            }
+          </Dropdown>
+          <Dropdown label="Menu">
+            {(close) => (
+              <>
+                <p className="px-3 pb-1 pt-2 text-[10px] uppercase tracking-[0.2em] text-haze">Example sketches</p>
+                {DEMO_SKETCHES.map((sketch) => (
+                  <MenuItem
+                    key={sketch.id}
+                    onClick={() => {
+                      loadDemo(sketch.id);
+                      close();
+                    }}
+                  >
+                    {sketch.title}
+                  </MenuItem>
+                ))}
+                <div className="my-1 border-t border-rule" />
+                <Link href="/about" className="block px-3 py-2 text-[13px] text-white hover:bg-white/[0.06]">
+                  How it works
+                </Link>
+              </>
+            )}
+          </Dropdown>
         </div>
       </header>
 
@@ -596,7 +558,25 @@ export default function Studio() {
         <section className="space-stage flex min-h-0 min-w-0 flex-col items-center gap-4 px-8 pb-4 pt-6">
           <SpaceBackdrop />
           <div ref={napkinArea} className="flex min-h-0 w-full flex-1 justify-center">
-            <NapkinCanvas strokes={strokes} onChange={changeStrokes} disabled={phase === "reading"}>
+            <NapkinCanvas
+              strokes={strokes}
+              onChange={changeStrokes}
+              disabled={phase === "reading"}
+              hint={
+                <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center gap-2 px-6 text-center">
+                  <p className="font-space text-[20px] font-semibold uppercase tracking-[0.14em] text-white/85">Draw your spacecraft here</p>
+                  <p className="text-[14px] text-haze">Chalk on the night sky. A rocket, a lander, a Mars ship. Rough is fine.</p>
+                  <p className="mt-6 text-[10px] uppercase tracking-[0.2em] text-haze">Or start from an example</p>
+                  <div className="pointer-events-auto flex flex-wrap justify-center gap-2">
+                    {DEMO_SKETCHES.map((sketch) => (
+                      <button key={sketch.id} type="button" onClick={() => loadDemo(sketch.id)} className="btn-outline h-8 px-3 text-[10px]">
+                        {sketch.title}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              }
+            >
               <NapkinRender
                 url={concept.url}
                 loading={concept.loading}
@@ -665,7 +645,7 @@ export default function Studio() {
                 type="button"
                 onClick={openPoll}
                 disabled={!reviewed || !analysis || Boolean(unreadable)}
-                className={`${issues.length > 0 && seenReview !== reviewKey ? "btn-outline" : "btn-solid"} h-11 px-8 text-[12px]`}
+                className={`${issues.some((issue) => issue.severity !== "ok") && seenReview !== reviewKey ? "btn-outline" : "btn-solid"} h-11 px-8 text-[12px]`}
               >
                 Launch
               </button>
@@ -746,5 +726,53 @@ export default function Studio() {
         />
       )}
     </div>
+  );
+}
+
+/** A header dropdown: a button that opens a small black menu; closes on pick, outside click or Escape. */
+function Dropdown({ label, children }: { label: string; children: (close: () => void) => React.ReactNode }) {
+  const [open, setOpen] = useState(false);
+  const box = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!open) return;
+    const away = (e: MouseEvent) => {
+      if (!box.current?.contains(e.target as Node)) setOpen(false);
+    };
+    const esc = (e: KeyboardEvent) => e.key === "Escape" && setOpen(false);
+    window.addEventListener("mousedown", away);
+    window.addEventListener("keydown", esc);
+    return () => {
+      window.removeEventListener("mousedown", away);
+      window.removeEventListener("keydown", esc);
+    };
+  }, [open]);
+  return (
+    <div ref={box} className="relative">
+      <button
+        type="button"
+        aria-expanded={open}
+        onClick={() => setOpen((o) => !o)}
+        className="flex h-9 items-center gap-2 border border-rule px-3 text-[11px] font-semibold uppercase tracking-[0.16em] text-white transition-colors hover:border-white/60"
+      >
+        {label}
+        <svg viewBox="0 0 10 6" className={`h-1.5 w-2.5 transition-transform ${open ? "rotate-180" : ""}`} aria-hidden>
+          <path d="M1 1l4 4 4-4" fill="none" stroke="currentColor" strokeWidth="1.4" />
+        </svg>
+      </button>
+      {open && <div className="absolute right-0 top-full z-40 mt-2 w-60 border border-rule bg-black py-1 shadow-[0_12px_30px_rgba(0,0,0,0.6)]">{children(() => setOpen(false))}</div>}
+    </div>
+  );
+}
+
+function MenuItem({ active, onClick, children }: { active?: boolean; onClick: () => void; children: React.ReactNode }) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={`flex w-full items-center justify-between px-3 py-2 text-left text-[13px] transition-colors hover:bg-white/[0.06] ${active ? "text-white" : "text-white/80"}`}
+    >
+      {children}
+      {active && <span className="h-1.5 w-1.5 rounded-full bg-white" aria-hidden />}
+    </button>
   );
 }

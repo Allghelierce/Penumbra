@@ -101,7 +101,8 @@ export default function NapkinRender({ url, loading, resetKey, sticker, children
         </div>
       )}
       {sticker}
-      <div className={`absolute inset-0 transition-opacity duration-300 ${onRender && !peek ? "render-ink-faded opacity-15" : ""}`}>{children}</div>
+      {/* The red pen stays at full strength over the render: the review is the point of the napkin. */}
+      <div className="absolute inset-0">{children}</div>
       {ready && (
         <div role="group" aria-label="Napkin view" className="pointer-events-auto absolute left-[4%] top-[3%] flex bg-black px-1 font-ui shadow-[0_2px_10px_rgba(0,0,0,0.35)]">
           {(["sketch", "render"] as const).map((v) => (

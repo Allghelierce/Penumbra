@@ -7,7 +7,7 @@ import type { DesignAction } from "@/lib/design";
 
 export interface ReviewIssue {
   id: string;
-  severity: "critical" | "major" | "minor";
+  severity: "no-go" | "warning" | "ok";
   title: string;
   /** The physics behind it, with the design's own numbers. */
   why: string;
@@ -24,9 +24,9 @@ export interface Trade {
 }
 
 const SEVERITY: Record<ReviewIssue["severity"], { label: string; chip: string }> = {
-  critical: { label: "Critical", chip: "border-nogo text-nogo" },
-  major: { label: "Major", chip: "border-flame text-flame" },
-  minor: { label: "Minor", chip: "border-white/30 text-haze" },
+  "no-go": { label: "No-go", chip: "border-nogo text-nogo" },
+  warning: { label: "Warning", chip: "border-flame text-flame" },
+  ok: { label: "OK", chip: "border-go-signal text-go-signal" },
 };
 
 /** A circled issue number, the same glyph the red pen writes on the napkin. */

@@ -112,6 +112,7 @@ export default function VerdictPanel(props: VerdictPanelProps) {
   }
 
   const go = analysis.verdict === "destination";
+  const problems = props.issues.filter((issue) => issue.severity !== "ok").length;
   const target = DESTINATIONS[design.destination];
   const ladder = Object.values(DESTINATIONS).sort((a, b) => a.deltaVFromSurfaceMps - b.deltaVFromSurfaceMps);
   const short = analysis.marginMps < 0;
@@ -122,8 +123,8 @@ export default function VerdictPanel(props: VerdictPanelProps) {
       <Module
         title="Design review"
         meta={
-          <span className={`text-[12px] ${props.issues.length ? "text-nogo" : "text-go-signal"}`}>
-            {props.issues.length ? `${props.issues.length} ${props.issues.length === 1 ? "issue" : "issues"}` : "Clean"}
+          <span className={`text-[12px] ${problems ? "text-nogo" : "text-go-signal"}`}>
+            {problems ? `${problems} ${problems === 1 ? "issue" : "issues"}` : "Clean"}
           </span>
         }
       >

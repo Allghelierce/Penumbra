@@ -7,7 +7,8 @@
   --napkin-edge: #e3dccb;
   --graphite: #2d2d2d;
   --ink-muted: #8a8170;
-  --redpen: #d62d20;
+  /* Bright enough to read on the night sky the user draws on. */
+  --redpen: #ff4b3e;
   --go: #2e7d32;
   --night: #05070d;
   --night-high: #0b1a33;
@@ -106,44 +107,27 @@ body {
 }
 
 /* The napkin: soft fold creases, an embossed dotted border and a paper shadow. */
+/* The drawing area: no paper, just chalk on the night sky inside four registration corners. */
 .napkin {
-  --fibre: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='180' height='180'%3E%3Cfilter id='f'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='3' stitchTiles='stitch'/%3E%3CfeColorMatrix values='0 0 0 0 0.5 0 0 0 0 0.48 0 0 0 0 0.44 0 0 0 0.2 0'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23f)'/%3E%3C/svg%3E");
-  background-color: #fdfcf8;
-  background-image:
-    /* fold creases: a valley with a lit ridge beside it */
-    linear-gradient(90deg, transparent calc(50% - 2px), rgba(110, 90, 50, 0.1) calc(50% - 0.5px), rgba(255, 255, 255, 0.9) calc(50% + 0.5px), transparent calc(50% + 3px)),
-    linear-gradient(0deg, transparent calc(50% - 2px), rgba(110, 90, 50, 0.09) calc(50% - 0.5px), rgba(255, 255, 255, 0.9) calc(50% + 0.5px), transparent calc(50% + 3px)),
-    /* the lamp catches the top-left of the ply */
-    radial-gradient(ellipse 70% 60% at 25% 20%, rgba(255, 255, 255, 0.7), transparent 70%),
-    radial-gradient(ellipse 60% 50% at 85% 95%, rgba(120, 110, 90, 0.05), transparent 70%),
-    /* quilted emboss across the ply */
-    radial-gradient(circle at 50% 50%, rgba(120, 100, 60, 0.055) 0.8px, transparent 1.4px),
-    radial-gradient(circle at 50% 50%, rgba(255, 255, 255, 0.9) 0.8px, transparent 1.4px),
-    var(--fibre);
-  background-size: auto, auto, auto, auto, 9px 9px, 9px 9px, 180px 180px;
-  background-position: 0 0, 0 0, 0 0, 0 0, 0 0, 0.6px 0.6px, 0 0;
-  box-shadow:
-    0 0 0 1px rgba(227, 220, 203, 0.55),
-    inset 0 0 18px rgba(120, 100, 60, 0.08),
-    0 2px 6px rgba(0, 0, 0, 0.35),
-    0 40px 80px -30px rgba(0, 0, 0, 0.85);
-  border-radius: 2px;
+  background: transparent;
+  outline: 1px dashed rgba(255, 255, 255, 0.1);
+  outline-offset: -1px;
 }
-/* The embossed border band every paper napkin has, pressed in a few millimetres from the edge. */
 .napkin::before {
   content: "";
   position: absolute;
-  inset: 9px;
-  padding: 7px;
-  border-radius: 2px;
-  background:
-    radial-gradient(circle at 50% 50%, rgba(120, 100, 60, 0.2) 1.1px, transparent 1.7px) 0 0 / 6px 6px,
-    radial-gradient(circle at 50% 50%, rgba(255, 255, 255, 0.95) 1.1px, transparent 1.7px) 0.7px 0.7px / 6px 6px;
-  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
-  -webkit-mask-composite: xor;
-  mask: linear-gradient(#000 0 0) content-box exclude, linear-gradient(#000 0 0);
-  box-shadow: inset 0 0 0 1px rgba(120, 100, 60, 0.1);
+  inset: 0;
   pointer-events: none;
+  --c: rgba(255, 255, 255, 0.55);
+  background:
+    linear-gradient(var(--c), var(--c)) top left / 22px 1.5px no-repeat,
+    linear-gradient(var(--c), var(--c)) top left / 1.5px 22px no-repeat,
+    linear-gradient(var(--c), var(--c)) top right / 22px 1.5px no-repeat,
+    linear-gradient(var(--c), var(--c)) top right / 1.5px 22px no-repeat,
+    linear-gradient(var(--c), var(--c)) bottom left / 22px 1.5px no-repeat,
+    linear-gradient(var(--c), var(--c)) bottom left / 1.5px 22px no-repeat,
+    linear-gradient(var(--c), var(--c)) bottom right / 22px 1.5px no-repeat,
+    linear-gradient(var(--c), var(--c)) bottom right / 1.5px 22px no-repeat;
 }
 
 /* The stage behind the napkin is open space. */
@@ -152,15 +136,6 @@ body {
   isolation: isolate;
   background: #000;
   overflow: hidden;
-}
-/* The napkin sits in a faint pool of its own light. */
-.space-stage::before {
-  content: "";
-  position: absolute;
-  inset: 0;
-  z-index: -1;
-  background: radial-gradient(ellipse 40% 50% at 50% 46%, rgba(255, 248, 235, 0.06), transparent 75%);
-  pointer-events: none;
 }
 /* Red pen: strokes draw themselves on, then the handwriting appears. */
 .pen-draw {
