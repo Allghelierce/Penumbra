@@ -6,6 +6,7 @@ import Link from "next/link";
 import LaunchScene, { unlockLaunchAudio } from "@/components/LaunchScene";
 import NapkinCanvas from "@/components/NapkinCanvas";
 import MissionClock from "@/components/MissionClock";
+import { PenumbraLockup } from "@/components/PenumbraLogo";
 import PollConsole from "@/components/PollConsole";
 import RedPenOverlay from "@/components/RedPenOverlay";
 import SpaceBackdrop from "@/components/SpaceBackdrop";
@@ -451,9 +452,8 @@ export default function Studio() {
   return (
     <div className="flex h-dvh flex-col overflow-hidden bg-black text-white">
       <header className="flex h-14 shrink-0 items-center gap-8 border-b border-rule bg-black px-6">
-        <h1 className="flex items-center gap-3 font-space text-[18px] font-semibold uppercase tracking-[0.34em]">
-          <EclipseMark />
-          Penumbra
+        <h1 aria-label="Penumbra">
+          <PenumbraLockup />
         </h1>
         <div className="flex items-center gap-3">
           <span id="target-label" className="text-[11px] uppercase tracking-[0.2em] text-haze">
@@ -632,16 +632,5 @@ export default function Studio() {
         />
       )}
     </div>
-  );
-}
-
-/** A disc partly in shadow: the umbra and the penumbra around it. */
-function EclipseMark() {
-  return (
-    <svg viewBox="0 0 24 24" className="h-5 w-5" aria-hidden>
-      <circle cx="12" cy="12" r="9" fill="#fff" />
-      <circle cx="16" cy="9.5" r="8" fill="var(--umbra)" opacity="0.55" />
-      <circle cx="17.5" cy="8.5" r="6.5" fill="var(--umbra)" />
-    </svg>
   );
 }
