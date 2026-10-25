@@ -1,196 +1,189 @@
-// A simple, deterministic flight profile for the launch animation. It isn't a trajectory
-// integrator: speed follows the rocket equation stage by stage, minus gravity and drag
-// losses, and altitude follows a gravity-turn curve that reaches orbit height at orbital speed.
+// Deterministic ascent trace driven by analyze(). Speed follows each stage's delta-v
+// minus a shared gravity and drag loss. It does not run a second rocket equation.
 
-import type { Analysis, Design, DestinationId, FlightEvent, FlightPoint, FlightTrace } from "../design";
-import { DESTINATIONS, G0, ORBITAL_SPEED_MPS } from "./data";
+import type { Analysis, Design, FlightEvent, FlightPoint, FlightTrace, Verdict } from "../design";
 
+const G0 = 9.80665;
+const LOSS_BUDGET_MPS = 1500;
+const ORBITAL_SPEED_MPS = 7800;
 const ORBIT_ALTITUDE_KM = 200;
+const POINT_COUNT = 300;
 const MAX_Q_S = 60;
-const BURN_POINTS = 240;
-const COAST_POINTS = 60;
-const ORBIT_COAST_S = 600;
-/** Gravity and drag losses on the way to orbit, built into LEO's delta-v. */
-const LOSS_MPS = DESTINATIONS.leo.deltaVFromSurfaceMps - ORBITAL_SPEED_MPS;
-/** Share of the losses the bottom stage takes; it fights gravity and air the longest. */
-const BOTTOM_LOSS_SHARE = 0.7;
-/** Speed added in low Earth orbit to leave for the destination (the first leg of the delta-v map). */
-const DEPARTURE_MPS: Record<DestinationId, number> = {
-  leo: 0,
-  gto: 2_440,
-  "moon-orbit": 3_260,
-  "moon-surface": 3_260,
-  "mars-transfer": 3_610,
-  "mars-surface": 3_610,
-  europa: 6_300,
-};
+const BURNOUT_FLIGHT_PATH_RAD = (25 * Math.PI) / 180;
 
 export function simulateFlight(design: Design, analysis: Analysis): FlightTrace {
   if (analysis.verdict === "stuck-on-pad") return padFailure(analysis);
 
+  const burnTimes = analysis.stages.map((stage) => Math.max(0, stage.burnTimeS));
+  const totalBurnS = burnTimes.reduce((sum, burn) => sum + burn, 0);
+  const losses = burnTimes.map((burn) => (totalBurnS > 0 ? (LOSS_BUDGET_MPS * burn) / totalBurnS : 0));
+  const poweredAt = (tS: number) => stateAt(analysis, burnTimes, losses, tS);
+
+  const burnout = poweredAt(totalBurnS);
+  const burnoutAltitudeKm = climbAltitudeKm(burnout.speedMps);
+  const verticalMps = burnout.speedMps * Math.sin(BURNOUT_FLIGHT_PATH_RAD);
+  const coastS =
+    analysis.verdict === "suborbital" ? coastDurationS(burnoutAltitudeKm * 1000, verticalMps) : 0;
+  const { nPowered, nCoast } = splitPoints(totalBurnS, coastS, analysis.verdict === "suborbital");
+
   const points: FlightPoint[] = [];
-  const events: FlightEvent[] = [
-    { tS: 0, kind: "liftoff", label: `Liftoff at thrust-to-weight ${analysis.liftoffTwr.toFixed(2)}` },
-  ];
-  const burning = analysis.stages.map((s, i) => ({ ...s, index: i })).filter((s) => s.burnTimeS > 0);
-  const totalBurnS = burning.reduce((sum, s) => sum + s.burnTimeS, 0);
-  const upperBurnS = totalBurnS - (burning[0]?.index === 0 ? burning[0].burnTimeS : 0);
-
-  // Engines cut off once the job is done: orbital speed for LEO (or when the destination is
-  // out of reach), or orbital speed plus the departure burn. Leftover delta-v is margin.
-  const targetSpeed =
-    analysis.verdict === "destination" ? ORBITAL_SPEED_MPS + DEPARTURE_MPS[design.destination] : ORBITAL_SPEED_MPS;
-
-  let t = 0;
-  let speed = 0;
-  let downrangeKm = 0;
-  let orbitAt: number | null = null;
-  let cutoff = false;
-
-  for (const [n, stage] of burning.entries()) {
-    // Mass at ignition: this stage and everything above it.
-    const m0 = analysis.stages.slice(stage.index).reduce((sum, s) => sum + s.wetMassKg, 0) + design.payloadMassKg;
-    const massFlow = stage.propellantMassKg / stage.burnTimeS;
-    const loss =
-      burning.length === 1
-        ? LOSS_MPS
-        : stage.index === 0
-          ? LOSS_MPS * BOTTOM_LOSS_SHARE
-          : (LOSS_MPS * (burning[0].index === 0 ? 1 - BOTTOM_LOSS_SHARE : 1) * stage.burnTimeS) / upperBurnS;
-    const startSpeed = speed;
-    const steps = Math.max(10, Math.round((BURN_POINTS * stage.burnTimeS) / totalBurnS));
-    const step = stage.burnTimeS / steps;
-    let burned = 0;
-    const speedAt = (dt: number) => {
-      const gained = stage.ispS * G0 * Math.log(m0 / (m0 - massFlow * dt));
-      return Math.max(0, startSpeed + gained - (loss * dt) / stage.burnTimeS);
-    };
-
-    for (let k = n === 0 ? 0 : 1; k <= steps; k++) {
-      let dt = step * k;
-      let next = speedAt(dt);
-      if (next >= targetSpeed && analysis.verdict !== "suborbital") {
-        // Bisect for the moment the target speed is reached within this step.
-        let lo = Math.max(0, dt - step);
-        let hi = dt;
-        for (let i = 0; i < 30; i++) {
-          const mid = (lo + hi) / 2;
-          if (speedAt(mid) >= targetSpeed) hi = mid;
-          else lo = mid;
-        }
-        dt = hi;
-        next = targetSpeed;
-        cutoff = true;
-      }
-      const tNow = t + dt;
-      if (orbitAt === null && next >= ORBITAL_SPEED_MPS) orbitAt = tNow;
-      downrangeKm += (((speed + next) / 2) * horizontalShare(next) * (dt - burned)) / 1000;
-      burned = dt;
-      speed = next;
-      points.push({ tS: tNow, altitudeKm: climbAltitude(speed), downrangeKm, speedMps: speed, stageIndex: stage.index });
-      if (cutoff) break;
+  let downrangeM = 0;
+  let prevT = 0;
+  let prevSpeed = 0;
+  for (let i = 0; i < nPowered; i++) {
+    const tS = nPowered === 1 ? 0 : (totalBurnS * i) / (nPowered - 1);
+    const state = poweredAt(tS);
+    if (i > 0) {
+      const dt = tS - prevT;
+      downrangeM += 0.5 * (horizontalMps(prevSpeed) + horizontalMps(state.speedMps)) * dt;
     }
-
-    t += burned;
-    const nextStage = burning[n + 1];
-    if (nextStage && !cutoff) {
-      events.push({ tS: t, kind: "stage-sep", label: `${stage.label} separates; ${nextStage.label} ignites` });
-    } else {
-      events.push({ tS: t, kind: "engine-cutoff", label: `${stage.label} engine cutoff at ${(speed / 1000).toFixed(1)} km/s` });
-      break;
-    }
-  }
-  if (totalBurnS > MAX_Q_S && (burning[0]?.burnTimeS ?? 0) > MAX_Q_S) {
-    events.push({ tS: MAX_Q_S, kind: "max-q", label: "Max-Q: peak aerodynamic pressure" });
+    points.push({
+      tS,
+      altitudeKm: climbAltitudeKm(state.speedMps),
+      downrangeKm: downrangeM / 1000,
+      speedMps: state.speedMps,
+      stageIndex: state.stageIndex,
+    });
+    prevT = tS;
+    prevSpeed = state.speedMps;
   }
 
-  const lastStage = points.at(-1)?.stageIndex ?? 0;
-  if (analysis.verdict === "suborbital") {
-    events.push({ tS: t, kind: "fuel-exhausted", label: `Out of propellant at ${(speed / 1000).toFixed(1)} km/s, short of orbital speed` });
-    coastBallistic(points, events, t, speed, downrangeKm, lastStage);
-  } else {
-    const at = orbitAt ?? t;
-    events.push({ tS: at, kind: "orbit", label: `Orbit: ${(ORBITAL_SPEED_MPS / 1000).toFixed(1)} km/s at ${ORBIT_ALTITUDE_KM} km` });
-    // In orbit the rocket holds its height; after a departure burn it climbs away from Earth.
-    const climbMps = Math.max(0, speed - ORBITAL_SPEED_MPS);
-    for (let k = 1; k <= COAST_POINTS; k++) {
-      const dt = (ORBIT_COAST_S * k) / COAST_POINTS;
+  if (nCoast > 0) {
+    const burnoutPoint = points[points.length - 1];
+    const vx = burnoutPoint.speedMps * Math.cos(BURNOUT_FLIGHT_PATH_RAD);
+    const vy0 = burnoutPoint.speedMps * Math.sin(BURNOUT_FLIGHT_PATH_RAD);
+    const h0 = burnoutPoint.altitudeKm * 1000;
+    for (let k = 1; k <= nCoast; k++) {
+      const dt = (coastS * k) / nCoast;
+      const vy = vy0 - G0 * dt;
+      const altitudeKm = k === nCoast ? 0 : Math.max(0, (h0 + vy0 * dt - 0.5 * G0 * dt * dt) / 1000);
       points.push({
-        tS: t + dt,
-        altitudeKm: ORBIT_ALTITUDE_KM + (climbMps * dt) / 1000,
-        downrangeKm: downrangeKm + (Math.min(speed, ORBITAL_SPEED_MPS) * dt) / 1000,
-        speedMps: speed,
-        stageIndex: lastStage,
+        tS: burnoutPoint.tS + dt,
+        altitudeKm,
+        downrangeKm: burnoutPoint.downrangeKm + (vx * dt) / 1000,
+        speedMps: Math.max(0, Math.hypot(vx, vy)),
+        stageIndex: burnoutPoint.stageIndex,
       });
     }
-    if (analysis.verdict === "destination") {
-      events.push({ tS: t + ORBIT_COAST_S, kind: "arrival", label: `Arrives: ${DESTINATIONS[design.destination].name}` });
+  }
+
+  const events = flightEvents(design, analysis, burnTimes, totalBurnS, coastS, verticalMps);
+  let maxAltitudeKm = 0;
+  for (const point of points) {
+    if (point.altitudeKm > maxAltitudeKm) maxAltitudeKm = point.altitudeKm;
+  }
+
+  return { points, events, outcome: analysis.verdict, maxAltitudeKm };
+}
+
+function stateAt(
+  analysis: Analysis,
+  burnTimes: number[],
+  losses: number[],
+  tS: number,
+): { speedMps: number; stageIndex: number } {
+  const stages = analysis.stages;
+  if (stages.length === 0) return { speedMps: 0, stageIndex: 0 };
+
+  let speed = 0;
+  let cursor = 0;
+  for (let i = 0; i < stages.length; i++) {
+    const burn = burnTimes[i];
+    const delta = stages[i].deltaVMps - losses[i];
+    const end = cursor + burn;
+    const last = i === stages.length - 1;
+    if (burn === 0) {
+      if (tS >= cursor) speed = Math.max(0, speed + delta);
+      if (last) return { speedMps: speed, stageIndex: i };
+      continue;
     }
+    if (tS < end || last) {
+      const frac = Math.min(1, Math.max(0, (tS - cursor) / burn));
+      return { speedMps: Math.max(0, speed + frac * delta), stageIndex: i };
+    }
+    speed = Math.max(0, speed + delta);
+    cursor = end;
+  }
+  return { speedMps: speed, stageIndex: stages.length - 1 };
+}
+
+function flightEvents(
+  design: Design,
+  analysis: Analysis,
+  burnTimes: number[],
+  totalBurnS: number,
+  coastS: number,
+  verticalMps: number,
+): FlightEvent[] {
+  const events: FlightEvent[] = [{ tS: 0, kind: "liftoff", label: `${design.name} lifts off.` }];
+  const firstBurn = burnTimes[0] ?? 0;
+  const maxQT = totalBurnS >= MAX_Q_S ? MAX_Q_S : firstBurn / 2;
+  events.push({ tS: maxQT, kind: "max-q", label: "Maximum dynamic pressure." });
+
+  let cursor = 0;
+  for (let i = 0; i < analysis.stages.length; i++) {
+    cursor += burnTimes[i];
+    const label = analysis.stages[i].label;
+    const last = i === analysis.stages.length - 1;
+    events.push({ tS: cursor, kind: "engine-cutoff", label: `${label} engine cutoff.` });
+    if (!last) {
+      events.push({ tS: cursor, kind: "stage-sep", label: `${label} separates.` });
+    } else if (analysis.verdict === "suborbital") {
+      events.push({ tS: cursor, kind: "fuel-exhausted", label: "Propellant exhausted." });
+    } else {
+      events.push({ tS: cursor, kind: "orbit", label: "Reached orbit." });
+    }
+  }
+
+  if (analysis.verdict === "suborbital") {
+    const apogeeS = cursor + (verticalMps > 0 ? verticalMps / G0 : 0);
+    events.push({ tS: apogeeS, kind: "apogee", label: "Apogee." });
+    events.push({ tS: cursor + coastS, kind: "impact", label: "Impact." });
   }
 
   events.sort((a, b) => a.tS - b.tS);
-  return {
-    points,
-    events,
-    outcome: analysis.verdict,
-    maxAltitudeKm: Math.max(0, ...points.map((p) => p.altitudeKm)),
-  };
+  return events;
 }
 
-/** Gravity turn: climbs steeply at first and levels off at orbit height as speed reaches orbital. */
-function climbAltitude(speedMps: number) {
-  const f = Math.min(1, speedMps / ORBITAL_SPEED_MPS);
-  return ORBIT_ALTITUDE_KM * (1 - (1 - f) ** 2);
+function splitPoints(totalBurnS: number, coastS: number, suborbital: boolean): { nPowered: number; nCoast: number } {
+  if (!suborbital || coastS <= 0) return { nPowered: POINT_COUNT, nCoast: 0 };
+  if (totalBurnS <= 0) return { nPowered: 1, nCoast: POINT_COUNT - 1 };
+  let nCoast = Math.round((POINT_COUNT * coastS) / (totalBurnS + coastS));
+  nCoast = Math.min(POINT_COUNT - 2, Math.max(2, nCoast));
+  return { nPowered: POINT_COUNT - nCoast, nCoast };
 }
 
-/** How much of the velocity is horizontal: none at liftoff, all of it at orbital speed. */
-function horizontalShare(speedMps: number) {
-  return Math.min(1, speedMps / ORBITAL_SPEED_MPS);
+/** Powered altitude: 200 km at orbital speed, and it stays there if the rocket is faster. */
+function climbAltitudeKm(speedMps: number): number {
+  const fraction = Math.min(1, Math.max(0, speedMps) / ORBITAL_SPEED_MPS);
+  return ORBIT_ALTITUDE_KM * fraction ** 1.15;
 }
 
-/** After burnout short of orbit: a ballistic arc up to apogee and back down to impact. */
-function coastBallistic(
-  points: FlightPoint[],
-  events: FlightEvent[],
-  burnoutS: number,
-  speed: number,
-  downrangeKm: number,
-  stageIndex: number,
-) {
-  const h0 = climbAltitude(speed) * 1000;
-  const vx = speed * horizontalShare(speed);
-  const vy = speed - vx;
-  const apogeeS = vy / G0;
-  const impactS = (vy + Math.sqrt(vy * vy + 2 * G0 * h0)) / G0;
-  const apogeeKm = (h0 + (vy * vy) / (2 * G0)) / 1000;
+function horizontalMps(speedMps: number): number {
+  const fraction = Math.min(1, Math.max(0, speedMps) / ORBITAL_SPEED_MPS);
+  return Math.max(0, speedMps) * fraction;
+}
 
-  for (let k = 1; k <= COAST_POINTS; k++) {
-    const dt = (impactS * k) / COAST_POINTS;
-    const vyNow = vy - G0 * dt;
-    points.push({
-      tS: burnoutS + dt,
-      altitudeKm: Math.max(0, (h0 + vy * dt - (G0 * dt * dt) / 2) / 1000),
-      downrangeKm: downrangeKm + (vx * dt) / 1000,
-      speedMps: Math.hypot(vx, vyNow),
-      stageIndex,
-    });
-  }
-  events.push({ tS: burnoutS + apogeeS, kind: "apogee", label: `Apogee at ${Math.round(apogeeKm)} km` });
-  events.push({ tS: burnoutS + impactS, kind: "impact", label: `Falls back ${Math.round(downrangeKm + (vx * impactS) / 1000)} km downrange` });
+/** Time from burnout until a 25° coast under constant gravity returns to the ground. */
+function coastDurationS(altitudeM: number, verticalMps: number): number {
+  const h0 = Math.max(0, altitudeM);
+  if (h0 <= 0 && verticalMps <= 0) return 0;
+  const disc = verticalMps * verticalMps + 2 * G0 * h0;
+  return (verticalMps + Math.sqrt(disc)) / G0;
 }
 
 function padFailure(analysis: Analysis): FlightTrace {
-  const tonnes = Math.round(analysis.liftoffMassKg / 1000).toLocaleString("en-US");
+  const outcome: Verdict = "stuck-on-pad";
   return {
-    points: [0, 2, 4, 6].map((tS) => ({ tS, altitudeKm: 0, downrangeKm: 0, speedMps: 0, stageIndex: 0 })),
+    points: [{ tS: 0, altitudeKm: 0, downrangeKm: 0, speedMps: 0, stageIndex: 0 }],
     events: [
       {
         tS: 0,
         kind: "pad-failure",
-        label: `Engines light, but thrust-to-weight ${analysis.liftoffTwr.toFixed(2)} can't lift ${tonnes} t`,
+        label: `Liftoff thrust-to-weight is ${analysis.liftoffTwr.toFixed(2)}, so it stays on the pad.`,
       },
     ],
-    outcome: "stuck-on-pad",
+    outcome,
     maxAltitudeKm: 0,
   };
 }

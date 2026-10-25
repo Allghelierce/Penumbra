@@ -1,32 +1,61 @@
-// Rocket-equation analysis of a design: mass, thrust-to-weight and delta-v per stage.
+// Rocket-equation analysis: masses, thrust-to-weight and delta-v per stage.
 
-import type { Analysis, Design, DestinationId, Stage, StageAnalysis, Verdict } from "../design";
-import { DESTINATIONS, ENGINES, G0, PROPELLANT_DENSITY_KG_M3, STRUCTURAL_FACTOR, TANK_FILL } from "./data";
-import { km, kmShort, kmSpare } from "./format";
+import type { Analysis, Design, DestinationId, PropellantId, Stage, StageAnalysis, Verdict } from "../design";
+import { DESTINATIONS, ENGINES, PROPELLANT_DENSITY_KG_M3 } from "./data";
+
+const G0 = 9.80665;
+const USABLE_FRACTION = 0.95;
+
+/** Structure as a fraction of propellant mass, only when a stage omits dryMassKg. */
+const STRUCTURAL_FACTOR: Record<PropellantId, number> = {
+  methalox: 0.06,
+  kerolox: 0.05,
+  hydrolox: 0.1,
+  solid: 0.12,
+  hypergolic: 0.08,
+};
+
+/** Easiest to hardest. Furthest reach is the latest entry this delta-v still covers. */
+const DESTINATION_ORDER: DestinationId[] = [
+  "leo",
+  "gto",
+  "moon-orbit",
+  "moon-surface",
+  "mars-transfer",
+  "mars-surface",
+  "europa",
+];
 
 export function analyze(design: Design): Analysis {
-  // Stack from the top down: everything above a stage is that stage's payload.
-  const stages: StageAnalysis[] = [];
-  let above = design.payloadMassKg;
-  for (let i = design.stages.length - 1; i >= 0; i--) {
-    const stage = stageAnalysis(design.stages[i], i === 0, above);
-    stages.unshift(stage);
-    above += stage.wetMassKg;
-  }
+  const built = design.stages.map((stage, index) => stageMasses(stage, index));
+  const stages: StageAnalysis[] = built.map((stage, index) => {
+    const payloadAbove =
+      design.payloadMassKg + built.slice(index + 1).reduce((sum, upper) => sum + upper.wetMassKg, 0);
+    return finishStage(stage, payloadAbove);
+  });
 
-  const liftoffMassKg = above;
-  const liftoffTwr = stages.length > 0 ? stages[0].thrustN / (liftoffMassKg * G0) : 0;
-  const stuck = !(liftoffTwr >= 1);
-  const totalDeltaVMps = stuck ? 0 : stages.reduce((sum, s) => sum + s.deltaVMps, 0);
+  const liftoffMassKg = stages.reduce((sum, stage) => sum + stage.wetMassKg, 0) + design.payloadMassKg;
+  const liftoffTwr =
+    stages.length === 0 || liftoffMassKg <= 0 ? 0 : stages[0].thrustN / (liftoffMassKg * G0);
   const requiredDeltaVMps = DESTINATIONS[design.destination].deltaVFromSurfaceMps;
+  const leoMps = DESTINATIONS.leo.deltaVFromSurfaceMps;
+  const stuck = liftoffTwr < 1;
+  const summedDeltaVMps = stages.reduce((sum, stage) => sum + stage.deltaVMps, 0);
+  const totalDeltaVMps = stuck ? 0 : summedDeltaVMps;
 
-  const verdict: Verdict = stuck
-    ? "stuck-on-pad"
-    : totalDeltaVMps < DESTINATIONS.leo.deltaVFromSurfaceMps
-      ? "suborbital"
-      : totalDeltaVMps < requiredDeltaVMps
-        ? "orbit"
-        : "destination";
+  let verdict: Verdict;
+  let furthestReachable: DestinationId | null = null;
+  if (stuck) {
+    verdict = "stuck-on-pad";
+  } else if (totalDeltaVMps < leoMps) {
+    verdict = "suborbital";
+  } else if (totalDeltaVMps < requiredDeltaVMps) {
+    verdict = "orbit";
+    furthestReachable = furthestWithin(totalDeltaVMps);
+  } else {
+    verdict = "destination";
+    furthestReachable = furthestWithin(totalDeltaVMps);
+  }
 
   const analysis: Analysis = {
     liftoffMassKg,
@@ -36,91 +65,126 @@ export function analyze(design: Design): Analysis {
     requiredDeltaVMps,
     marginMps: totalDeltaVMps - requiredDeltaVMps,
     verdict,
-    furthestReachable: furthestReachable(totalDeltaVMps),
+    furthestReachable,
     findings: [],
   };
   analysis.findings = findings(design, analysis);
   return analysis;
 }
 
-function stageAnalysis(stage: Stage, isBottom: boolean, payloadKg: number): StageAnalysis {
-  const propellantMassKg = Math.max(0, stage.tankVolumeM3) * PROPELLANT_DENSITY_KG_M3[stage.propellant] * TANK_FILL;
-  const engineMassKg = stage.engines.reduce((sum, c) => sum + ENGINES[c.engine].massKg * c.count, 0);
-  const dryMassKg = stage.dryMassKg ?? propellantMassKg * STRUCTURAL_FACTOR[stage.propellant] + engineMassKg;
+interface StageMasses {
+  label: string;
+  wetMassKg: number;
+  dryMassKg: number;
+  propellantMassKg: number;
+  ispS: number;
+  thrustN: number;
+}
 
-  // Bottom stage: sea-level thrust, and the mean of sea-level and vacuum Isp over the climb.
-  let thrustN = 0;
-  let ispWeighted = 0;
-  let ispWeight = 0;
-  for (const cluster of stage.engines) {
-    const engine = ENGINES[cluster.engine];
-    const count = Math.max(0, cluster.count);
-    thrustN += (isBottom ? engine.thrustSeaLevelN : engine.thrustVacuumN) * count;
-    const isp = isBottom ? (engine.ispSeaLevelS + engine.ispVacuumS) / 2 : engine.ispVacuumS;
-    ispWeighted += isp * engine.thrustVacuumN * count;
-    ispWeight += engine.thrustVacuumN * count;
-  }
-  const ispS = ispWeight > 0 ? ispWeighted / ispWeight : 0;
-
-  const wetMassKg = dryMassKg + propellantMassKg;
-  const m0 = payloadKg + wetMassKg;
-  const mf = payloadKg + dryMassKg;
-  const deltaVMps = ispS > 0 && mf > 0 ? ispS * G0 * Math.log(m0 / mf) : 0;
-  const massFlowKgS = ispS > 0 ? thrustN / (ispS * G0) : 0;
-
+function stageMasses(stage: Stage, stageIndex: number): StageMasses {
+  const propellantMassKg = stage.tankVolumeM3 * PROPELLANT_DENSITY_KG_M3[stage.propellant] * USABLE_FRACTION;
+  const engineMassKg = stage.engines.reduce((sum, cluster) => {
+    return sum + cluster.count * ENGINES[cluster.engine].massKg;
+  }, 0);
+  const dryMassKg =
+    typeof stage.dryMassKg === "number"
+      ? stage.dryMassKg
+      : propellantMassKg * STRUCTURAL_FACTOR[stage.propellant] + engineMassKg;
+  const { thrustN, ispS } = thrustAndIsp(stage, stageIndex);
   return {
     label: stage.label,
-    wetMassKg,
+    wetMassKg: dryMassKg + propellantMassKg,
     dryMassKg,
     propellantMassKg,
     ispS,
     thrustN,
-    deltaVMps,
-    burnTimeS: massFlowKgS > 0 ? propellantMassKg / massFlowKgS : 0,
-    twrAtIgnition: m0 > 0 ? thrustN / (m0 * G0) : 0,
   };
 }
 
-/** The hardest destination (by delta-v) within reach, or null if it can't make orbit. */
-function furthestReachable(deltaVMps: number): DestinationId | null {
-  let best: DestinationId | null = null;
-  for (const spec of Object.values(DESTINATIONS)) {
-    if (spec.deltaVFromSurfaceMps > deltaVMps) continue;
-    if (!best || spec.deltaVFromSurfaceMps > DESTINATIONS[best].deltaVFromSurfaceMps) best = spec.id;
+/** Stage 0 is sea level. Upper stages are vacuum. Isp is thrust-weighted across clusters. */
+function thrustAndIsp(stage: Stage, stageIndex: number): { thrustN: number; ispS: number } {
+  let thrustN = 0;
+  let weightedIsp = 0;
+  for (const cluster of stage.engines) {
+    const engine = ENGINES[cluster.engine];
+    const seaLevel = stageIndex === 0;
+    const thrustEach = seaLevel ? engine.thrustSeaLevelN : engine.thrustVacuumN;
+    const ispEach = seaLevel ? (engine.ispSeaLevelS + engine.ispVacuumS) / 2 : engine.ispVacuumS;
+    const clusterThrust = cluster.count * thrustEach;
+    thrustN += clusterThrust;
+    weightedIsp += clusterThrust * ispEach;
   }
-  return best;
+  return { thrustN, ispS: thrustN > 0 ? weightedIsp / thrustN : 0 };
 }
 
-function findings(design: Design, a: Analysis): string[] {
-  const out: string[] = [];
-  const tonnes = (kg: number) => Math.round(kg / 1000).toLocaleString("en-US");
-  const destination = DESTINATIONS[design.destination].name;
-  const bottom = design.stages[0];
+function finishStage(stage: StageMasses, payloadAbove: number): StageAnalysis {
+  const m0 = stage.wetMassKg + payloadAbove;
+  const mf = m0 - stage.propellantMassKg;
+  const deltaVMps = stage.ispS > 0 && m0 > mf && mf > 0 ? stage.ispS * G0 * Math.log(m0 / mf) : 0;
+  const burnTimeS = stage.thrustN > 0 ? (stage.propellantMassKg * stage.ispS * G0) / stage.thrustN : 0;
+  const twrAtIgnition = m0 > 0 ? stage.thrustN / (m0 * G0) : 0;
+  return {
+    label: stage.label,
+    wetMassKg: stage.wetMassKg,
+    dryMassKg: stage.dryMassKg,
+    propellantMassKg: stage.propellantMassKg,
+    ispS: stage.ispS,
+    thrustN: stage.thrustN,
+    deltaVMps,
+    burnTimeS,
+    twrAtIgnition,
+  };
+}
 
-  const vacuumOnly = bottom?.engines.filter((c) => ENGINES[c.engine].thrustSeaLevelN === 0) ?? [];
-  if (vacuumOnly.length > 0) {
-    out.push(`${ENGINES[vacuumOnly[0].engine].name} is a vacuum engine and can't push at sea level; the bottom stage needs sea-level engines.`);
+function furthestWithin(totalDeltaVMps: number): DestinationId | null {
+  let furthest: DestinationId | null = null;
+  for (const id of DESTINATION_ORDER) {
+    if (DESTINATIONS[id].deltaVFromSurfaceMps <= totalDeltaVMps) furthest = id;
+  }
+  return furthest;
+}
+
+function findings(design: Design, analysis: Analysis): string[] {
+  const destination = DESTINATIONS[design.destination];
+  const twr = formatTwr(analysis.liftoffTwr);
+  const total = formatNumber(analysis.totalDeltaVMps);
+  const required = formatNumber(analysis.requiredDeltaVMps);
+  const margin = formatNumber(analysis.marginMps);
+  const lines: string[] = [];
+
+  if (analysis.verdict === "stuck-on-pad") {
+    lines.push(`Liftoff thrust-to-weight is ${twr}, so it stays on the pad.`);
+    lines.push(`Total delta-v is ${total} m/s because it never lifts off.`);
+    lines.push(`${destination.name} needs ${required} m/s, so the margin is ${margin} m/s.`);
+    return lines;
   }
 
-  if (a.verdict === "stuck-on-pad") {
-    out.push(`Liftoff thrust-to-weight is ${a.liftoffTwr.toFixed(2)}, so it never leaves the pad: ${tonnes(a.liftoffMassKg)} t needs more than ${tonnes((a.stages[0]?.thrustN ?? 0) / G0)} t of thrust.`);
-    return out.slice(0, 5);
-  }
+  lines.push(`Liftoff thrust-to-weight is ${twr} at ${formatNumber(analysis.liftoffMassKg)} kg.`);
+  lines.push(`Total delta-v is ${total} m/s against ${required} m/s for ${destination.name}.`);
 
-  out.push(`Liftoff thrust-to-weight is ${a.liftoffTwr.toFixed(2)} with ${tonnes(a.liftoffMassKg)} t on the pad.`);
-  out.push(`Total delta-v is ${km(a.totalDeltaVMps)} km/s against ${km(a.requiredDeltaVMps)} km/s needed for ${destination}.`);
-
-  if (a.verdict === "destination") {
-    out.push(`It reaches ${destination} with ${kmSpare(a.totalDeltaVMps, a.requiredDeltaVMps)} km/s to spare.`);
-  } else if (a.verdict === "orbit") {
-    const reach = a.furthestReachable ? DESTINATIONS[a.furthestReachable].name : "low Earth orbit";
-    out.push(`It makes orbit but falls ${kmShort(a.totalDeltaVMps, a.requiredDeltaVMps)} km/s short of ${destination}; the furthest it gets is ${reach}.`);
+  if (analysis.verdict === "destination") {
+    lines.push(`The margin is ${margin} m/s, enough to reach ${destination.name}.`);
+  } else if (analysis.verdict === "orbit") {
+    const reach = analysis.furthestReachable ? DESTINATIONS[analysis.furthestReachable].name : "low Earth orbit";
+    lines.push(`It makes orbit, but the margin is ${margin} m/s, short of ${destination.name}.`);
+    lines.push(`The furthest it can reach is ${reach}.`);
   } else {
-    out.push(`It's ${kmShort(a.totalDeltaVMps, DESTINATIONS.leo.deltaVFromSurfaceMps)} km/s short of orbit, so it's a suborbital hop.`);
+    const leo = formatNumber(DESTINATIONS.leo.deltaVFromSurfaceMps);
+    lines.push(`That is short of low Earth orbit at ${leo} m/s, so the flight is suborbital.`);
+    lines.push(`The margin versus ${destination.name} is ${margin} m/s.`);
   }
 
-  if (a.stages.length > 1) {
-    out.push(a.stages.map((s) => `${s.label} ${km(s.deltaVMps)} km/s`).join(", ") + ".");
-  }
-  return out.slice(0, 5);
+  return lines.slice(0, 5);
+}
+
+function formatTwr(twr: number): string {
+  if (twr !== 0 && Math.abs(twr) < 0.01) return twr.toFixed(4);
+  return twr.toFixed(2);
+}
+
+function formatNumber(value: number): string {
+  const rounded = Math.round(value);
+  const sign = rounded < 0 ? "-" : "";
+  const digits = Math.abs(rounded).toString();
+  return sign + digits.replace(/\B(?=(\d{3})+(?!\d))/g, ",");
 }
