@@ -3,7 +3,7 @@
 // The GO/NO-GO poll as a flight-control loop: one tile per controller, the one on the loop
 // lit with a live voice meter, its line typed out under the board, finished tiles snapping
 // to GO or NO-GO with the number that decided it, and Flight's call as a full-width banner.
-// Big GO / SCRUB / APPLY FIX buttons keep the launch independent of the microphone.
+// Big GO / SCRUB buttons keep the launch independent of the microphone.
 
 import { useEffect, useRef, useState } from "react";
 import type { DesignAction, Poll, PollCall } from "@/lib/design";
@@ -56,7 +56,8 @@ export function keyFigure(line: string): string | null {
   return twr ? `TWR ${twr[1]}` : null;
 }
 
-export default function PollConsole({ poll, revealed, onGo, onScrub, onFix }: PollConsoleProps) {
+// onFix stays in the props contract, but the board no longer offers a fix button (users scrub or GO anyway).
+export default function PollConsole({ poll, revealed, onGo, onScrub }: PollConsoleProps) {
   const n = poll.calls.length;
   // The voice loop: which poll line is playing and how loud. Level goes straight to the meter
   // (60×/s); only a change of speaker or line re-renders. VoiceDock drives `revealed`, also when muted.
@@ -79,7 +80,6 @@ export default function PollConsole({ poll, revealed, onGo, onScrub, onFix }: Po
   const shown = Math.min(n, revealed);
 
   const done = shown >= n;
-  const fix = poll.calls.find((c) => !c.go && c.fix)?.fix;
   const speakingIndex = activity?.role ? (activity.index ?? shown - 1) : shown - 1;
   const current: PollCall | undefined = poll.calls[Math.max(0, Math.min(speakingIndex, n - 1))];
   const captionText = activity?.role ? activity.text : shown > 0 ? (current?.line ?? "") : "Flight, conduct the poll.";
@@ -192,11 +192,6 @@ export default function PollConsole({ poll, revealed, onGo, onScrub, onFix }: Po
         <button type="button" onClick={onScrub} className="btn-outline h-11 px-6 text-[12px]">
           Scrub
         </button>
-        {fix && (
-          <button type="button" onClick={() => onFix(fix)} className="btn-outline h-11 px-6 text-[12px]">
-            Apply fix
-          </button>
-        )}
         {/* Disabled until every controller has reported, so a NO-GO can't fly before it's heard (Esc skips). */}
         <button
           type="button"
