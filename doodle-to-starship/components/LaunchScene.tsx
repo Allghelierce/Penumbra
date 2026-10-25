@@ -12,6 +12,7 @@ import type {
   Stroke,
 } from "@/lib/design";
 import { BOUNDARIES, FAR_MARKS, LAYERS, ladderPos, ladderTop } from "./launch/atmosphere";
+import { PenumbraLockup } from "@/components/PenumbraLogo";
 import { createLaunchAudio, isLaunchAudioMuted, setLaunchAudioMuted, unlockLaunchAudio } from "./launch/audio";
 import EndCard from "./launch/EndCard";
 import { flightStats, planFor, startLaunch, type LaunchHandle, type NapkinRect } from "./launch/engine";
@@ -278,7 +279,7 @@ function LaunchRun(props: RunProps) {
       <canvas ref={canvasRef} className="absolute inset-0 h-full w-full" />
 
       <div className="ls-fade pointer-events-none absolute left-4 top-4 flex items-center gap-3 [animation-delay:1.3s] sm:left-6 sm:top-5">
-        <span className="font-display text-sm font-semibold uppercase tracking-[0.22em]">Penumbra</span>
+        <PenumbraLockup size={13} />
         <span className="h-3 w-px bg-white/25" />
         <span className="max-w-[40vw] truncate text-[11px] font-semibold uppercase tracking-[0.18em] text-haze">
           {input.reading.design.name}
