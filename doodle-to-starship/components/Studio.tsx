@@ -40,6 +40,7 @@ import type {
 import { strokesToPng } from "@/lib/napkin";
 import { buildReview } from "@/lib/redpen";
 import { readFromGeometry } from "@/lib/sketch/geometry";
+import { cutoutBlack } from "@/lib/cutout";
 import { recap } from "@/lib/recap";
 import { calloutFor, offerFor, pollRoom } from "@/lib/mission-control";
 import { analyze, DESTINATIONS, simulateFlight } from "@/lib/physics";
@@ -216,7 +217,11 @@ export default function Studio() {
     try {
       const body: RenderRequest = { design: nextDesign, analysis: nextAnalysis, kind: "concept", sketch };
       const { url } = await postJson<RenderResponse>("/api/render", body);
-      if (id === runs.current.concept) setConcept({ url, loading: false });
+      if (id === runs.current.concept) {
+        setConcept({ url, loading: false });
+        // Cut the vehicle out now, so the launch can fly the render without a pop.
+        if (url) void cutoutBlack(url);
+      }
     } catch {
       if (id === runs.current.concept) setConcept({ url: null, loading: false });
     }
@@ -713,6 +718,7 @@ export default function Studio() {
           trace={flight.trace}
           renderUrl={flight.renderUrl}
           renderState={flight.renderState}
+          vehicleImageUrl={concept.url}
           napkinRect={flight.napkinRect}
           onEvent={(event) => setNarration(calloutFor(event, design, flight.trace))}
           onDone={() => {
