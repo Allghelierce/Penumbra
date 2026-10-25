@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import type { ReactNode } from "react";
+import { PenumbraLockup, PenumbraWordmark } from "@/components/PenumbraLogo";
 import { REAL_VEHICLES } from "@/lib/analogs";
 import type { PropellantId } from "@/lib/design";
 import {
@@ -47,8 +48,8 @@ export default function About() {
     <div className="min-h-dvh bg-umbra text-starlight">
       <header className="sticky top-0 z-10 border-b border-rule bg-umbra/95 backdrop-blur">
         <div className="mx-auto flex max-w-[1180px] items-center justify-between px-8 py-3">
-          <Link href="/" className="font-display text-[20px] font-semibold tracking-[0.04em]">
-            Penumbra
+          <Link href="/" aria-label="Penumbra studio">
+            <PenumbraLockup size={14} />
           </Link>
           <Link href="/" className="text-[14px] text-haze transition-colors hover:text-starlight">
             ← Back to the studio
@@ -58,6 +59,7 @@ export default function About() {
 
       <main className="mx-auto max-w-[1180px] px-8">
         <section className="py-16">
+          <PenumbraWordmark className="mb-10 w-[520px] max-w-full" />
           <p className="text-[15px] text-haze">How it works</p>
           <h1 className="mt-3 max-w-[960px] font-display text-[46px] font-semibold leading-[1.08]">
             An engineer sketches a vehicle idea and instantly gets delta-v and thrust-to-weight, red-pen fixes computed
