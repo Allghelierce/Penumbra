@@ -22,16 +22,16 @@ The live demo takes two minutes, and there is a 30-second cut and a backup plan 
 | 0:10–0:30 | Hand over the mouse and leave the destination on **Orbit**. When they finish, click **check my napkin ✎**. | "Draw any rocket. Fins, engines, whatever you'd put on a napkin." While it reads: "Grok vision is reading your napkin into a real design: how many stages, which engines, how much propellant fits in those tanks." | Grok API (vision) |
 | 0:30–0:45 | Point at the red pen as it draws, then at the verdict panel. | "Here comes the red pen. That's not an opinion. It ran the rocket equation on published engine data: Raptor, Merlin, RS-25 thrust and Isp. You have [X] of the [Y] km/s you need, so it says: [read the biggest red note, for example 'stretch +34%']." | Real datasets: engine specs and delta-v maps |
 | 0:45–1:00 | 🎙 "Send it to Mars." Let the engineer answer. | "That's Grok Voice: a propulsion engineer who edits your design when you talk. It just retargeted us to Mars, and the red pen redrew for the new target." | **Grok Voice API (required)** |
-| 1:00–1:15 | Click **LAUNCH**. | "Now your doodle flies. Those are your actual strokes, on real physics." When it fails: "Out of propellant at [altitude] km. It failed exactly where the math said it would." | Physics on real data |
-| 1:15–1:35 | 🎙 "Add a stage and stretch the tanks forty percent." Wait for the red pen to redraw, then 🎙 "Light it up." | "So let's fix it the way SpaceX would: another stage, more propellant." When it arrives: "That's Mars. Same napkin, two sentences later." | Grok Voice API, physics |
+| 1:00–1:15 | Click **LAUNCH**. | "Now your doodle flies. Those are your actual strokes, on real physics." When it stops: "It ran dry [X] km/s short of Mars, exactly where the math said it would." | Physics on real data |
+| 1:15–1:35 | 🎙 "Add a stage." Wait for the red pen to redraw, then 🎙 "Light it up." | "So let's fix it the way SpaceX would: put a bigger booster under it." When it arrives: "That's Mars. Same napkin, two sentences later." | Grok Voice API, physics |
 | 1:35–1:50 | Point at the polaroid in the verdict panel, then at the outcome image at the end of the flight. | "Grok Imagine turned the napkin into this concept render, and the outcome shot is drawn from how the flight actually went." | **Grok Imagine API (required)** |
 | 1:50–2:00 | Point at the **NASA PRIOR ART** cards. | "And nothing in rocketry is really new. These are real NASA technical reports on what you just drew. [Read the top title and year.] Your napkin, 70 years of NASA and SpaceX. That's Doodle to Starship." | NASA literature no human can read all of |
 
 **If the fix in 1:15–1:35 isn't enough,** don't improvise numbers. Try these in order:
 
 1. 🎙 "What do you think?" Then say whatever the engineer suggests back to it.
-2. 🎙 "Give it thirty three raptors."
-3. 🎙 "Add another stage."
+2. 🎙 "Add another stage."
+3. 🎙 "Give it fifty raptors and add a stage."
 
 Then say "Light it up." A second failure still makes the point, because the red pen shows exactly how far short it is.
 
@@ -52,7 +52,7 @@ Then say "Light it up." A second failure still makes the point, because the red 
 | 0:00–0:05 | Empty napkin, destination **Orbit**. | "Every spacecraft in history started as a sketch. We give yours 70 years of NASA and SpaceX experience in 60 seconds." |
 | 0:05–0:12 | Click **Napkin Hopper**, then **check my napkin ✎**. | "Grok vision reads the doodle, real engine physics judges it, and the red pen marks what's wrong." |
 | 0:12–0:18 | Click **LAUNCH**. | "It falls short, exactly where the math says." |
-| 0:18–0:25 | 🎙 "Add a stage and stretch the tanks forty percent, then light it up." | "Grok Voice fixes it by conversation… and it makes orbit." |
+| 0:18–0:25 | 🎙 "Add a stage, then light it up." | "The red pen said add a stage. Grok Voice does it… and it makes orbit." |
 | 0:25–0:30 | Point at the polaroid, then the NASA cards. | "Grok Imagine renders it, NASA's archive shows who tried it first. Doodle to Starship." |
 
 ## How the demo covers the judging criteria
@@ -80,8 +80,11 @@ Then say "Light it up." A second failure still makes the point, because the red 
 
 Use this path when there's no internet and no key. Type the 🎙 lines into the command box.
 
-1. Click **Napkin Hopper**, then **check my napkin ✎**. The geometry reader finds one stage, one engine bell and big fins. The red pen marks it short of orbit.
-2. Click **LAUNCH**. It falls back to Earth.
-3. Type "add a stage and stretch the tanks forty percent", then click **LAUNCH**. It reaches orbit.
-4. Click **Mars Ship**. The **Mars** chip lights up. Click **check my napkin ✎** and the red pen marks what it needs to land.
-5. Type "what do you think?", follow the advice, then type "light it up".
+These outcomes were checked against the physics engine and the geometry reader.
+
+1. Click **Napkin Hopper**, then **check my napkin ✎**. It reads as one stage, one big engine bell and fins, with 8.5 of the 9.4 km/s needed for orbit. The red pen writes "add a stage".
+2. Click **LAUNCH**. It climbs to about 230 km, runs dry and falls back.
+3. Type "add a stage", then click **LAUNCH**. It reaches orbit with 12.4 km/s.
+4. Click **Mars Ship**. The **Mars** chip lights up. Click **check my napkin ✎**. The reader finds two stages, the heat shield and the landing legs. It has 12.2 of the 15.1 km/s needed to land on Mars, and the red pen writes "add a stage".
+5. Click **LAUNCH**. It makes orbit and stops there.
+6. Type "add a stage", then click **LAUNCH**. It lands on Mars with 15.4 km/s.

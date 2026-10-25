@@ -95,7 +95,7 @@ npx tsc --noEmit    # type check
 ```
 doodle-to-starship/
 ├── app/
-│   ├── page.tsx                 studio: napkin, destination chips, check, launch
+│   ├── page.tsx                 renders the studio
 │   ├── layout.tsx, globals.css  fonts and the napkin & red-pen palette
 │   ├── api/read/                POST: sketch → SketchReading (Grok vision or geometry)
 │   ├── api/review/              POST: reading + analysis → red-pen Review
@@ -104,16 +104,16 @@ doodle-to-starship/
 │   ├── api/prior-art/           GET: NASA Technical Reports Server search
 │   └── dev/                     dev-only pages for the launch scene and voice dock
 ├── components/
+│   ├── Studio.tsx               studio: napkin, destination chips, check, launch
 │   ├── NapkinCanvas.tsx         pencil drawing surface (3:4)
 │   ├── RedPenOverlay.tsx        animated red-pen marks and part labels
 │   ├── VerdictPanel.tsx         verdict, numbers, Imagine polaroid, NASA prior art
 │   ├── VoiceDock.tsx            hold-to-talk engineer, transcript, typed commands
 │   ├── LaunchScene.tsx          your strokes flying the simulated trace
-│   └── launch/                  launch-scene pieces (sky, exhaust, camera)
+│   └── launch/                  flight plan, rocket geometry, scenery, end card
 └── lib/
     ├── design.ts                shared contract: types, HTTP shapes, NAPKIN_ASPECT
     ├── physics/                 analyze(), simulateFlight(), ENGINES, DESTINATIONS
-    ├── presets.ts               ready-made designs
     ├── sketch/                  vision prompt and schema, geometry fallback reader
     ├── redpen.ts                deterministic red-pen rules
     ├── actions.ts               pure Design edits (one per DesignAction)
