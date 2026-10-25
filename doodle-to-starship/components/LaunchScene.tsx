@@ -1,7 +1,16 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState, type Ref } from "react";
-import type { Analysis, FlightEvent, FlightEventKind, FlightTrace, SketchReading, Stroke } from "@/lib/design";
+import type {
+  Analysis,
+  DesignAction,
+  FlightEvent,
+  FlightEventKind,
+  FlightTrace,
+  Recap,
+  SketchReading,
+  Stroke,
+} from "@/lib/design";
 import { BOUNDARIES, FAR_MARKS, LAYERS, ladderPos, ladderTop } from "./launch/atmosphere";
 import { createLaunchAudio, isLaunchAudioMuted, setLaunchAudioMuted, unlockLaunchAudio } from "./launch/audio";
 import EndCard from "./launch/EndCard";
@@ -32,6 +41,10 @@ export interface LaunchSceneProps {
    * starts exactly where it was drawn. Without it the scene starts from a centered 3:4 box.
    */
   napkinRect?: NapkinRect | null;
+  /** Optional: what to try next, shown on the end card. Read live, so it can arrive late. */
+  recap?: Recap | null;
+  /** Optional: apply an improvement's fix, re-check and relaunch (the studio remounts the scene). */
+  onImprove?: (fix: DesignAction) => void;
 }
 
 const TONE: Record<Tone, string> = {
@@ -380,6 +393,8 @@ function LaunchRun(props: RunProps) {
           onVideo={props.onVideo}
           onDone={props.onDone}
           onReplay={props.onReplay}
+          recap={props.recap}
+          onImprove={props.onImprove}
         />
       )}
     </div>

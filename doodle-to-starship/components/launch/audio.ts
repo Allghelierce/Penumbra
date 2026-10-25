@@ -193,7 +193,6 @@ export interface LaunchAudio {
   chime: () => void;
   /** Rapid unscheduled disassembly. */
   boom: () => void;
-  quindar: () => void;
   stop: () => void;
 }
 
@@ -410,10 +409,6 @@ export function createLaunchAudio(): LaunchAudio {
       const tail = source(c, "pink", true);
       tail.connect(filter(c, "lowpass", 260)).connect(longTail(c, t + 0.2, 0.55, 0.5, 7)).connect(out);
       play(tail, t + 0.2, 9);
-    },
-
-    quindar() {
-      if (!stopped) playQuindar();
     },
 
     stop() {

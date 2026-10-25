@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import LaunchScene from "@/components/LaunchScene";
-import { FIXTURES, FIXTURE_RENDER, REAL_FIXTURES, type LaunchFixture } from "./fixtures";
+import { FIXTURES, FIXTURE_RENDER, REAL_FIXTURES, SAMPLE_RECAP, type LaunchFixture } from "./fixtures";
 
 type RenderMode = "late" | "now" | "none";
 
@@ -101,6 +101,11 @@ export default function LaunchDevPage() {
           trace={active.fixture.trace}
           renderUrl={renderUrl}
           napkinRect={napkinRect}
+          recap={SAMPLE_RECAP}
+          onImprove={(fix) => {
+            setLog((l) => [...l, `onImprove ${JSON.stringify(fix)}`]);
+            close();
+          }}
           onEvent={(e) => setLog((l) => [...l, `T+${Math.round(e.tS)}s  ${e.kind}  ${e.label}`])}
           onDone={close}
         />

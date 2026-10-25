@@ -102,6 +102,9 @@ export interface LaunchHandle {
   skip: () => void;
 }
 
+/** Minimum real seconds between two onEvent calls, so spoken callouts never overlap. */
+export const EVENT_GAP = 1.2;
+
 /** The ground sits this many rocket heights below the pad deck. */
 const GROUND = 0.05;
 const CHALK_GLOW: RGB = [190, 215, 255];
@@ -226,6 +229,8 @@ export function startLaunch(
   /** Mesosphere meteors, in screen px. */
   const meteors: { x: number; y: number; vx: number; vy: number; age: number; life: number; len: number }[] = [];
   let crossIdx = 0;
+  const callouts: FlightEvent[] = [];
+  let lastCallout = -Infinity;
   const wobbleRand = seeded(23);
   const horizon = Array.from({ length: 48 }, () => (wobbleRand() - 0.5) * 3);
   const sprites: Record<SpriteId, HTMLCanvasElement> = {
@@ -891,11 +896,15 @@ export function startLaunch(
       const kind = cue.event.kind;
       if (kind === "max-q") sound?.maxQ();
       if (kind === "stage-sep") sound?.separation();
-      if (!cue.real) continue;
-      // Mission-control tones before each callout the narrator will speak.
-      if (kind !== "impact") sound?.quindar();
+      if (cue.real) callouts.push(cue.event);
+    }
+    // The narrator speaks each event (Quindar tones, then a short callout), so events that
+    // land together go out at least EVENT_GAP apart, in order, never dropped.
+    if (callouts.length && t - lastCallout >= EVENT_GAP) {
+      lastCallout = t;
+      const e = callouts.shift() as FlightEvent;
       try {
-        hooks.onEvent(cue.event);
+        hooks.onEvent(e);
       } catch (err) {
         console.error(err);
       }
@@ -926,6 +935,7 @@ export function startLaunch(
       cueIdx = plan.cues.length;
       capIdx = plan.captions.length;
       crossIdx = plan.crossings.length;
+      callouts.length = 0;
       finaleShown = true;
       t = Math.max(t, plan.endAt);
     },

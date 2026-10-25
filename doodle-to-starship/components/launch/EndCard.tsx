@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import type { Analysis, Design, DestinationId, Verdict } from "@/lib/design";
+import type { Analysis, Design, DesignAction, DestinationId, Improvement, Recap, Verdict } from "@/lib/design";
 import { fmtKm } from "./plan";
 import type { ReplayState } from "./useReplay";
 
@@ -16,6 +16,10 @@ interface EndCardProps {
   onVideo: () => void;
   onDone: () => void;
   onReplay: () => void;
+  /** What to try next; the studio computes it from the attempt history. */
+  recap?: Recap | null;
+  /** Applies an improvement's fix, re-checks and relaunches. */
+  onImprove?: (fix: DesignAction) => void;
 }
 
 /** Same names the studio's "Where it can go" list uses. */
@@ -72,9 +76,12 @@ function verdictCopy({ outcome, design, analysis, maxAltKm }: EndCardProps): { g
 }
 
 export default function EndCard(props: EndCardProps) {
-  const { design, analysis, maxAltKm, maxSpeedMps, renderUrl, video, onVideo, onDone, onReplay } = props;
+  const { design, analysis, maxAltKm, maxSpeedMps, renderUrl, video, onVideo, onDone, onReplay, recap, onImprove } = props;
   const { go, headline, line } = verdictCopy(props);
   const findings = (analysis.findings ?? []).slice(0, 3);
+  const improvements = (recap?.improvements ?? []).slice(0, 3);
+  const fixable = (i: Improvement): i is Improvement & { fix: DesignAction } => !!i.fix && !!onImprove;
+  const lead = improvements.find(fixable);
 
   return (
     <div className="ls-fade absolute inset-0 flex items-start justify-center overflow-y-auto bg-umbra/70 px-4 py-8 backdrop-blur-[3px] sm:items-center">
@@ -90,7 +97,7 @@ export default function EndCard(props: EndCardProps) {
               </span>
               <span className="text-sm text-haze">Target: {TARGET[design.destination] ?? design.destination}</span>
             </div>
-            <h2 className="mt-3 font-display text-[32px] font-semibold leading-tight">{headline}</h2>
+            <h2 className="mt-3 font-display text-[32px] font-semibold uppercase leading-tight tracking-[0.04em]">{headline}</h2>
             <p className="mt-1 text-sm text-haze">{line}</p>
           </div>
         </div>
@@ -102,7 +109,44 @@ export default function EndCard(props: EndCardProps) {
           <Stat label="Thrust-to-weight" value={analysis.liftoffTwr.toFixed(2)} />
         </dl>
 
-        {findings.length > 0 && (
+        {recap ? (
+          <section className="border-t border-rule px-5 py-4 sm:px-7" aria-label="Recap">
+            <div className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1">
+              <h3 className="font-display text-base font-semibold uppercase tracking-[0.08em]">{recap.headline}</h3>
+              {recap.delta && <span className="text-sm text-haze">{recap.delta}</span>}
+            </div>
+            {improvements.length > 0 && (
+              <ul className="mt-3 space-y-2">
+                {improvements.map((imp) =>
+                  fixable(imp) ? (
+                    <li key={imp.text}>
+                      <button
+                        type="button"
+                        autoFocus={imp === lead}
+                        onClick={() => onImprove?.(imp.fix)}
+                        className={`group flex w-full items-center justify-between gap-4 rounded-[3px] border px-4 py-2.5 text-left text-sm font-semibold transition-colors ${
+                          imp === lead
+                            ? "border-starlight bg-starlight text-umbra hover:opacity-90"
+                            : "border-rule text-starlight hover:border-starlight"
+                        }`}
+                      >
+                        <span>{imp.text}</span>
+                        <span className="shrink-0 font-display text-xs uppercase tracking-[0.14em] opacity-80">
+                          Apply &amp; fly again →
+                        </span>
+                      </button>
+                    </li>
+                  ) : (
+                    <li key={imp.text} className="flex gap-2 text-sm text-haze">
+                      <span className="text-rule">—</span>
+                      <span>{imp.text}</span>
+                    </li>
+                  ),
+                )}
+              </ul>
+            )}
+          </section>
+        ) : findings.length > 0 && (
           <ul className="space-y-1 border-t border-rule px-5 py-4 text-sm leading-snug text-haze sm:px-7">
             {findings.map((f) => (
               <li key={f} className="flex gap-2">
@@ -116,16 +160,20 @@ export default function EndCard(props: EndCardProps) {
         <div className="flex flex-wrap items-center gap-3 border-t border-rule px-5 py-4 sm:px-7">
           <button
             type="button"
-            autoFocus
+            autoFocus={!lead}
             onClick={onDone}
-            className="rounded-[3px] bg-starlight px-4 py-2 text-sm font-semibold text-umbra transition-opacity hover:opacity-90"
+            className={
+              lead
+                ? "rounded-[3px] border border-rule px-4 py-2 text-sm font-semibold text-starlight transition-colors hover:border-starlight"
+                : "rounded-[3px] border border-starlight bg-starlight px-4 py-2 text-sm font-semibold text-umbra transition-opacity hover:opacity-90"
+            }
           >
             Back to the napkin
           </button>
           <button
             type="button"
             onClick={onReplay}
-            className="rounded-[3px] border border-rule px-4 py-2 text-sm font-semibold text-starlight transition-colors hover:border-haze"
+            className="rounded-[3px] border border-rule px-4 py-2 text-sm font-semibold text-starlight transition-colors hover:border-starlight"
           >
             Fly again
           </button>
