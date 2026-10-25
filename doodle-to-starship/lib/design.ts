@@ -154,6 +154,8 @@ export const NAPKIN_ASPECT = 3 / 4;
 /** One pencil stroke on the napkin. */
 export interface Stroke {
   points: Point[];
+  /** Added by "Add detail" (welds, bell outlines...). Drawn like any stroke, but never read as structure. */
+  detail?: boolean;
 }
 
 export type PartKind =
