@@ -38,7 +38,10 @@ function badgeAt(mark: RedPenMark): Point {
     case "dimension":
       return mark.from;
     case "circle":
-      return [mark.center[0] - mark.radius * 0.72, mark.center[1] - mark.radius * 0.62];
+      return [
+        mark.center[0] - mark.radius * 0.72,
+        mark.center[1] - mark.radius * 0.62,
+      ];
     case "outline":
       return [mark.box[0], mark.box[1]];
     case "callout":
@@ -49,18 +52,38 @@ function badgeAt(mark: RedPenMark): Point {
 }
 
 /** The engineer marks up in order: outlines around the parts, then dimensions, then spec callouts, then the issues. */
-const MARKUP_ORDER: Record<RedPenMark["kind"], number> = { outline: 0, dimension: 1, callout: 2, circle: 3, arrow: 3, "ghost-line": 3 };
+const MARKUP_ORDER: Record<RedPenMark["kind"], number> = {
+  outline: 0,
+  dimension: 1,
+  callout: 2,
+  circle: 3,
+  arrow: 3,
+  "ghost-line": 3,
+};
 
 /** Each mark's start time: stable-sorted by kind, staggered so the whole sheet is marked up in about 3 s. */
 function markDelays(marks: RedPenMark[], start: number): number[] {
-  const order = marks.map((m, i) => ({ i, rank: MARKUP_ORDER[m.kind] })).sort((a, b) => a.rank - b.rank || a.i - b.i);
+  const order = marks
+    .map((m, i) => ({ i, rank: MARKUP_ORDER[m.kind] }))
+    .sort((a, b) => a.rank - b.rank || a.i - b.i);
   const step = Math.min(0.55, 2.6 / Math.max(1, marks.length));
   const delays = new Array<number>(marks.length);
   order.forEach(({ i }, k) => (delays[i] = start + k * step));
   return delays;
 }
 
-export default function RedPenOverlay({ parts, marks, playKey, scanning, onFix, numbers, selectedMark = null, onSelectMark, problem, hidden }: RedPenOverlayProps) {
+export default function RedPenOverlay({
+  parts,
+  marks,
+  playKey,
+  scanning,
+  onFix,
+  numbers,
+  selectedMark = null,
+  onSelectMark,
+  problem,
+  hidden,
+}: RedPenOverlayProps) {
   const penStart = 0.3;
   const delays = markDelays(marks, penStart);
   return (
@@ -86,7 +109,9 @@ export default function RedPenOverlay({ parts, marks, playKey, scanning, onFix, 
       >
         {/* Part tags explain the read; once the red pen starts they step back (hover the napkin to see them). */}
         <g
-          className={marks.length > 0 && !scanning ? "part-tags retire" : "part-tags"}
+          className={
+            marks.length > 0 && !scanning ? "part-tags retire" : "part-tags"
+          }
           style={{ "--retire-delay": `${penStart}s` } as React.CSSProperties}
         >
           {marks.length === 0 &&
@@ -95,11 +120,22 @@ export default function RedPenOverlay({ parts, marks, playKey, scanning, onFix, 
             ))}
         </g>
         <g>
-          {marks.map((mark, i) => hidden?.[i] ? null : (
-            <g key={i} className="transition-opacity duration-200" opacity={selectedMark !== null && selectedMark !== i ? 0.3 : 1}>
-              <Mark mark={mark} seed={i + 1} delay={delays[i]} onFix={onFix} />
-            </g>
-          ))}
+          {marks.map((mark, i) =>
+            hidden?.[i] ? null : (
+              <g
+                key={i}
+                className="transition-opacity duration-200"
+                opacity={selectedMark !== null && selectedMark !== i ? 0.3 : 1}
+              >
+                <Mark
+                  mark={mark}
+                  seed={i + 1}
+                  delay={delays[i]}
+                  onFix={onFix}
+                />
+              </g>
+            ),
+          )}
         </g>
         {/* Issue numbers: the same numbers as the design review, so each note can be found in the list. */}
         <g>
@@ -112,11 +148,31 @@ export default function RedPenOverlay({ parts, marks, playKey, scanning, onFix, 
               <g
                 key={i}
                 className={`pen-note ${active ? "mark-pulse" : ""}`}
-                style={{ animationDelay: `${delays[i] + 0.3}s`, transformOrigin: `${bx}px ${by}px`, cursor: onSelectMark ? "pointer" : undefined, pointerEvents: "auto" }}
+                style={{
+                  animationDelay: `${delays[i] + 0.3}s`,
+                  transformOrigin: `${bx}px ${by}px`,
+                  cursor: onSelectMark ? "pointer" : undefined,
+                  pointerEvents: "auto",
+                }}
                 onClick={() => onSelectMark?.(i)}
               >
-                <circle cx={bx} cy={by} r={8.5} fill={active ? "var(--redpen)" : "#fffdf8"} stroke="var(--redpen)" strokeWidth={1.6} />
-                <text x={bx} y={by + 3.6} textAnchor="middle" fontSize="10.5" fontWeight="700" fill={active ? "#fff" : "var(--redpen)"} fontFamily="var(--font-barlow)">
+                <circle
+                  cx={bx}
+                  cy={by}
+                  r={8.5}
+                  fill={active ? "var(--redpen)" : "#fffdf8"}
+                  stroke="var(--redpen)"
+                  strokeWidth={1.6}
+                />
+                <text
+                  x={bx}
+                  y={by + 3.6}
+                  textAnchor="middle"
+                  fontSize="10.5"
+                  fontWeight="700"
+                  fill={active ? "#fff" : "var(--redpen)"}
+                  fontFamily="var(--font-barlow)"
+                >
                   {n}
                 </text>
               </g>
@@ -125,11 +181,35 @@ export default function RedPenOverlay({ parts, marks, playKey, scanning, onFix, 
         </g>
         {problem !== undefined && problem !== null && (
           <g className="pen-note" style={{ animationDelay: "0.2s" }}>
-            <text x={W / 2} y={H * 0.5} textAnchor="middle" fontSize="150" fill="var(--redpen)" fontFamily="var(--font-caveat)" fontWeight="700">
+            <text
+              x={W / 2}
+              y={H * 0.5}
+              textAnchor="middle"
+              fontSize="150"
+              fill="var(--redpen)"
+              fontFamily="var(--font-caveat)"
+              fontWeight="700"
+            >
               ?
             </text>
-            <foreignObject x={W * 0.1} y={H * 0.56} width={W * 0.8} height={H * 0.3}>
-              <p style={{ fontFamily: "var(--font-caveat)", fontSize: 19, lineHeight: 1.15, color: "var(--redpen)", textAlign: "center", margin: 0 }}>{problem}</p>
+            <foreignObject
+              x={W * 0.1}
+              y={H * 0.56}
+              width={W * 0.8}
+              height={H * 0.3}
+            >
+              <p
+                style={{
+                  fontFamily: "var(--font-caveat)",
+                  fontSize: 19,
+                  lineHeight: 1.15,
+                  color: "var(--redpen)",
+                  textAlign: "center",
+                  margin: 0,
+                }}
+              >
+                {problem}
+              </p>
             </foreignObject>
           </g>
         )}
@@ -142,7 +222,13 @@ interface Tag {
   /** Every box of this kind gets corner brackets. */
   boxes: [number, number, number, number][];
   /** Where the label goes, or null when it would collide with another label. */
-  label: { text: string; x: number; y: number; anchor: "start" | "end"; fromX: number } | null;
+  label: {
+    text: string;
+    x: number;
+    y: number;
+    anchor: "start" | "end";
+    fromX: number;
+  } | null;
 }
 
 const TAG_FONT = 6.2;
@@ -161,15 +247,42 @@ function layoutTags(parts: Part[]): Tag[] {
   }
   const placed: [number, number, number, number][] = [];
   const overlaps = (b: [number, number, number, number]) =>
-    b[0] < 2 || b[0] + b[2] > W - 2 || placed.some((p) => b[0] < p[0] + p[2] && p[0] < b[0] + b[2] && b[1] < p[1] + p[3] && p[1] < b[1] + b[3]);
+    b[0] < 2 ||
+    b[0] + b[2] > W - 2 ||
+    placed.some(
+      (p) =>
+        b[0] < p[0] + p[2] &&
+        p[0] < b[0] + b[2] &&
+        b[1] < p[1] + p[3] &&
+        p[1] < b[1] + b[3],
+    );
 
   const tags = [...groups.values()].map((group) => {
-    const boxes = group.map((p) => [p.box[0] * W, p.box[1] * H, p.box[2] * W, p.box[3] * H] as [number, number, number, number]);
+    const boxes = group.map(
+      (p) =>
+        [p.box[0] * W, p.box[1] * H, p.box[2] * W, p.box[3] * H] as [
+          number,
+          number,
+          number,
+          number,
+        ],
+    );
     // Label the box furthest out on its side, so the leader doesn't cross the drawing.
     const centre = (b: [number, number, number, number]) => b[0] + b[2] / 2;
-    const left = boxes.reduce((n, b) => n + (centre(b) < W / 2 ? 1 : 0), 0) > boxes.length / 2;
-    const anchorBox = boxes.reduce((best, b) => (left ? (b[0] < best[0] ? b : best) : b[0] + b[2] > best[0] + best[2] ? b : best));
-    const text = group.length > 1 ? `${group[0].label} ×${group.length}` : group[0].label;
+    const left =
+      boxes.reduce((n, b) => n + (centre(b) < W / 2 ? 1 : 0), 0) >
+      boxes.length / 2;
+    const anchorBox = boxes.reduce((best, b) =>
+      left
+        ? b[0] < best[0]
+          ? b
+          : best
+        : b[0] + b[2] > best[0] + best[2]
+          ? b
+          : best,
+    );
+    const text =
+      group.length > 1 ? `${group[0].label} ×${group.length}` : group[0].label;
     return { boxes, left, anchorBox, text: text.toUpperCase() };
   });
 
@@ -179,12 +292,28 @@ function layoutTags(parts: Part[]): Tag[] {
     .map(({ boxes, left, anchorBox: [x, y, w, h], text }) => {
       const width = tagWidth(text);
       const labelY = y + h / 2;
-      for (const side of left ? (["left", "right"] as const) : (["right", "left"] as const)) {
+      for (const side of left
+        ? (["left", "right"] as const)
+        : (["right", "left"] as const)) {
         const lx = side === "left" ? x - 7 : x + w + 7;
-        const box: [number, number, number, number] = [side === "left" ? lx - width : lx, labelY - 5, width, 8];
+        const box: [number, number, number, number] = [
+          side === "left" ? lx - width : lx,
+          labelY - 5,
+          width,
+          8,
+        ];
         if (overlaps(box)) continue;
         placed.push(box);
-        return { boxes, label: { text, x: lx, y: labelY, anchor: side === "left" ? "end" : "start", fromX: side === "left" ? x - 1 : x + w + 1 } };
+        return {
+          boxes,
+          label: {
+            text,
+            x: lx,
+            y: labelY,
+            anchor: side === "left" ? "end" : "start",
+            fromX: side === "left" ? x - 1 : x + w + 1,
+          },
+        };
       }
       return { boxes, label: null };
     }) as Tag[];
@@ -200,7 +329,16 @@ function PartTag({ tag, delay }: { tag: Tag; delay: number }) {
           ` M${x + w - c} ${y} L${x + w} ${y} L${x + w} ${y + c}` +
           ` M${x + w} ${y + h - c} L${x + w} ${y + h} L${x + w - c} ${y + h}` +
           ` M${x + c} ${y + h} L${x} ${y + h} L${x} ${y + h - c}`;
-        return <path key={i} d={corners} fill="none" stroke="var(--ink-muted)" strokeWidth="0.9" opacity="0.7" />;
+        return (
+          <path
+            key={i}
+            d={corners}
+            fill="none"
+            stroke="var(--ink-muted)"
+            strokeWidth="0.9"
+            opacity="0.7"
+          />
+        );
       })}
       {tag.label && (
         <>
@@ -243,7 +381,17 @@ function wobble(seed: number): () => number {
   };
 }
 
-function Mark({ mark, seed, delay, onFix }: { mark: RedPenMark; seed: number; delay: number; onFix?: OnFix }) {
+function Mark({
+  mark,
+  seed,
+  delay,
+  onFix,
+}: {
+  mark: RedPenMark;
+  seed: number;
+  delay: number;
+  onFix?: OnFix;
+}) {
   const draw = { animationDelay: `${delay}s` };
   const write = { animationDelay: `${delay + 0.55}s` };
   const fix = mark.fix && onFix ? () => onFix(mark.fix!) : undefined;
@@ -256,7 +404,8 @@ function Mark({ mark, seed, delay, onFix }: { mark: RedPenMark; seed: number; de
     const cx = (fx + tx) / 2 + (-(ty - fy) / len) * len * 0.12;
     const cy = (fy + ty) / 2 + ((tx - fx) / len) * len * 0.12;
     const angle = Math.atan2(ty - cy, tx - cx);
-    const head = (a: number) => `M${tx} ${ty} L${tx - 9 * Math.cos(angle + a)} ${ty - 9 * Math.sin(angle + a)}`;
+    const head = (a: number) =>
+      `M${tx} ${ty} L${tx - 9 * Math.cos(angle + a)} ${ty - 9 * Math.sin(angle + a)}`;
     const awayX = (fx - tx) / len;
     return (
       <g>
@@ -327,17 +476,29 @@ function Mark({ mark, seed, delay, onFix }: { mark: RedPenMark; seed: number; de
       `Q${x0 + j(1)} ${y1 + j(1)} ${x0 + j(1.5)} ${y1 - r + j(2)} L${x0 + j(2)} ${y0 + r + j(2)} Q${x0 + j(1)} ${y0 + j(1)} ${x0 + r + 9} ${y0 - 1.8}`;
     return (
       <g>
-        <path className="pen-draw" style={draw} pathLength={1} d={d} fill="none" stroke="var(--redpen)" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" />
-        {/* Label the part beside its box (callouts take the other margin), not above it, where the box above would be. */}
-        <Note
-          x={x1 > W * 0.8 ? x0 - 5 : x1 + 5}
-          y={Math.min(H - 4, y0 + 12)}
-          anchor={x1 > W * 0.8 ? "end" : "start"}
-          text={mark.note}
-          style={write}
-          onClick={fix}
-          size={12}
+        <path
+          className="pen-draw"
+          style={draw}
+          pathLength={1}
+          d={d}
+          fill="none"
+          stroke="var(--redpen)"
+          strokeWidth="1.7"
+          strokeLinecap="round"
+          strokeLinejoin="round"
         />
+        {/* Label the part beside its box (callouts take the other margin), not above it, where the box above would be. */}
+        {mark.note && (
+          <Note
+            x={x1 > W * 0.8 ? x0 - 5 : x1 + 5}
+            y={Math.min(H - 4, y0 + 12)}
+            anchor={x1 > W * 0.8 ? "end" : "start"}
+            text={mark.note}
+            style={write}
+            onClick={fix}
+            size={12}
+          />
+        )}
       </g>
     );
   }
@@ -366,10 +527,26 @@ function Mark({ mark, seed, delay, onFix }: { mark: RedPenMark; seed: number; de
         />
         {vertical ? (
           <g transform={`rotate(-90 ${mx - 6} ${my})`}>
-            <Note x={mx - 6} y={my} anchor="middle" text={mark.note} style={write} onClick={fix} size={12} />
+            <Note
+              x={mx - 6}
+              y={my}
+              anchor="middle"
+              text={mark.note}
+              style={write}
+              onClick={fix}
+              size={12}
+            />
           </g>
         ) : (
-          <Note x={mx} y={my - 5} anchor="middle" text={mark.note} style={write} onClick={fix} size={12} />
+          <Note
+            x={mx}
+            y={my - 5}
+            anchor="middle"
+            text={mark.note}
+            style={write}
+            onClick={fix}
+            size={12}
+          />
         )}
       </g>
     );
@@ -381,9 +558,33 @@ function Mark({ mark, seed, delay, onFix }: { mark: RedPenMark; seed: number; de
     const toLeft = lx < ax;
     return (
       <g>
-        <circle className="pen-note" style={draw} cx={ax} cy={ay} r={2.2} fill="var(--redpen)" />
-        <path className="pen-draw" style={draw} pathLength={1} d={`M${ax} ${ay} L${lx} ${ly}`} fill="none" stroke="var(--redpen)" strokeWidth="1.2" strokeLinecap="round" />
-        <Note x={toLeft ? lx - 3 : lx + 3} y={ly + 4} anchor={toLeft ? "end" : "start"} text={mark.note} style={write} onClick={fix} size={13} />
+        <circle
+          className="pen-note"
+          style={draw}
+          cx={ax}
+          cy={ay}
+          r={2.2}
+          fill="var(--redpen)"
+        />
+        <path
+          className="pen-draw"
+          style={draw}
+          pathLength={1}
+          d={`M${ax} ${ay} L${lx} ${ly}`}
+          fill="none"
+          stroke="var(--redpen)"
+          strokeWidth="1.2"
+          strokeLinecap="round"
+        />
+        <Note
+          x={toLeft ? lx - 3 : lx + 3}
+          y={ly + 4}
+          anchor={toLeft ? "end" : "start"}
+          text={mark.note}
+          style={write}
+          onClick={fix}
+          size={13}
+        />
       </g>
     );
   }
