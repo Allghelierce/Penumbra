@@ -2,6 +2,7 @@
 
 import type { ReactNode } from "react";
 import CountUp from "@/components/CountUp";
+import DesignReview, { CantRead, type ReviewIssue, type Trade } from "@/components/DesignReview";
 import SpecimenDrawing from "@/components/SpecimenDrawing";
 import TypeOut from "@/components/TypeOut";
 import type { Analysis, Attempt, Design, DesignAction, DestinationId, FlightTrace, Phase, PriorArtResult, Recap, Review, Verdict } from "@/lib/design";
@@ -11,6 +12,15 @@ import { km, kmShort, kmSpare } from "@/lib/physics/format";
 import { closestAnalogs, historyLine } from "@/lib/analogs";
 
 interface VerdictPanelProps {
+  /** What's wrong with the design and how to fix it, numbered like the red-pen marks. */
+  issues: ReviewIssue[];
+  trades: Trade[];
+  selectedIssue: number | null;
+  onSelectIssue: (index: number | null) => void;
+  /** Set when the sketch couldn't be read as a vehicle; then no physics is shown. */
+  unreadable: { problem: string | null } | null;
+  samples: { id: string; title: string }[];
+  onSample: (id: string) => void;
   /** Every launch of this sketch so far, oldest first. */
   attempts: Attempt[];
   /** What to try next after the latest flight. */
@@ -91,6 +101,16 @@ export default function VerdictPanel(props: VerdictPanelProps) {
     );
   }
 
+  if (props.unreadable) {
+    return (
+      <aside className="flex flex-col gap-3 p-3">
+        <Module title="Design review" meta={<span className="text-[12px] text-nogo">Sketch not readable</span>}>
+          <CantRead problem={props.unreadable.problem} samples={props.samples} onSample={props.onSample} />
+        </Module>
+      </aside>
+    );
+  }
+
   const go = analysis.verdict === "destination";
   const target = DESTINATIONS[design.destination];
   const ladder = Object.values(DESTINATIONS).sort((a, b) => a.deltaVFromSurfaceMps - b.deltaVFromSurfaceMps);
@@ -99,6 +119,23 @@ export default function VerdictPanel(props: VerdictPanelProps) {
 
   return (
     <aside className="flex flex-col gap-3 p-3">
+      <Module
+        title="Design review"
+        meta={
+          <span className={`text-[12px] ${props.issues.length ? "text-nogo" : "text-go-signal"}`}>
+            {props.issues.length ? `${props.issues.length} ${props.issues.length === 1 ? "issue" : "issues"}` : "Clean"}
+          </span>
+        }
+      >
+        <DesignReview
+          issues={props.issues}
+          trades={props.trades}
+          selected={props.selectedIssue}
+          onSelect={props.onSelectIssue}
+          onFix={props.onFix}
+        />
+      </Module>
+
       <Module
         title="Flight readiness"
         meta={

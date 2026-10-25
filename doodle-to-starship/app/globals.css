@@ -511,3 +511,19 @@ details > summary::-webkit-details-marker {
   }
 }
 /* ---- end NapkinRender ---- */
+
+/* The selected design-review issue's number pulses on the napkin. */
+.mark-pulse {
+  animation: mark-pulse 1.1s ease-in-out infinite !important;
+  opacity: 1 !important;
+}
+@keyframes mark-pulse {
+  50% {
+    transform: scale(1.25);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .mark-pulse {
+    animation: none !important;
+  }
+}

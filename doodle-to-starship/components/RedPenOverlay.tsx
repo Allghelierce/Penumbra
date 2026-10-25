@@ -19,9 +19,24 @@ interface RedPenOverlayProps {
   scanning?: boolean;
   /** Called when a note that carries a fix is tapped. */
   onFix?: OnFix;
+  /** Design-review issue number for each mark (1-based), or null when a mark has no issue. */
+  numbers?: (number | null)[];
+  /** Mark index of the selected issue: it pulses and the others step back. */
+  selectedMark?: number | null;
+  /** Tapping a mark's number selects its issue in the review. */
+  onSelectMark?: (markIndex: number) => void;
+  /** The sketch couldn't be read as a vehicle: the red pen writes a big "?" and this sentence. */
+  problem?: string | null;
 }
 
-export default function RedPenOverlay({ parts, marks, playKey, scanning, onFix }: RedPenOverlayProps) {
+/** Where a mark's issue number sits: at the start of an arrow, the top-left of a circle, the start of a ghost line. */
+function badgeAt(mark: RedPenMark): Point {
+  if (mark.kind === "arrow") return mark.from;
+  if (mark.kind === "circle") return [mark.center[0] - mark.radius * 0.72, mark.center[1] - mark.radius * 0.62];
+  return mark.points[0] ?? [0.5, 0.5];
+}
+
+export default function RedPenOverlay({ parts, marks, playKey, scanning, onFix, numbers, selectedMark = null, onSelectMark, problem }: RedPenOverlayProps) {
   const penStart = 0.4 + parts.length * 0.08;
   return (
     <>
@@ -55,9 +70,43 @@ export default function RedPenOverlay({ parts, marks, playKey, scanning, onFix }
         </g>
         <g>
           {marks.map((mark, i) => (
-            <Mark key={i} mark={mark} seed={i + 1} delay={penStart + i * 0.9} onFix={onFix} />
+            <g key={i} className="transition-opacity duration-200" opacity={selectedMark !== null && selectedMark !== i ? 0.3 : 1}>
+              <Mark mark={mark} seed={i + 1} delay={penStart + i * 0.9} onFix={onFix} />
+            </g>
           ))}
         </g>
+        {/* Issue numbers: the same numbers as the design review, so each note can be found in the list. */}
+        <g>
+          {marks.map((mark, i) => {
+            const n = numbers?.[i];
+            if (!n) return null;
+            const [bx, by] = scale(badgeAt(mark));
+            const active = selectedMark === i;
+            return (
+              <g
+                key={i}
+                className={`pen-note ${active ? "mark-pulse" : ""}`}
+                style={{ animationDelay: `${penStart + i * 0.9 + 0.3}s`, transformOrigin: `${bx}px ${by}px`, cursor: onSelectMark ? "pointer" : undefined, pointerEvents: "auto" }}
+                onClick={() => onSelectMark?.(i)}
+              >
+                <circle cx={bx} cy={by} r={8.5} fill={active ? "var(--redpen)" : "#fffdf8"} stroke="var(--redpen)" strokeWidth={1.6} />
+                <text x={bx} y={by + 3.6} textAnchor="middle" fontSize="10.5" fontWeight="700" fill={active ? "#fff" : "var(--redpen)"} fontFamily="var(--font-barlow)">
+                  {n}
+                </text>
+              </g>
+            );
+          })}
+        </g>
+        {problem !== undefined && problem !== null && (
+          <g className="pen-note" style={{ animationDelay: "0.2s" }}>
+            <text x={W / 2} y={H * 0.5} textAnchor="middle" fontSize="150" fill="var(--redpen)" fontFamily="var(--font-caveat)" fontWeight="700">
+              ?
+            </text>
+            <foreignObject x={W * 0.1} y={H * 0.56} width={W * 0.8} height={H * 0.3}>
+              <p style={{ fontFamily: "var(--font-caveat)", fontSize: 19, lineHeight: 1.15, color: "var(--redpen)", textAlign: "center", margin: 0 }}>{problem}</p>
+            </foreignObject>
+          </g>
+        )}
       </svg>
     </>
   );

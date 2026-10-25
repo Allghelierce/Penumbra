@@ -42,7 +42,8 @@ import { buildReview } from "@/lib/redpen";
 import { readFromGeometry } from "@/lib/sketch/geometry";
 import { recap } from "@/lib/recap";
 import { calloutFor, offerFor, pollRoom } from "@/lib/mission-control";
-import { analyze, simulateFlight } from "@/lib/physics";
+import { analyze, DESTINATIONS, simulateFlight } from "@/lib/physics";
+import type { ReviewIssue, Trade } from "@/components/DesignReview";
 
 const DESTINATION_CHIPS: { id: DestinationId; label: string }[] = [
   { id: "leo", label: "Orbit" },
@@ -72,6 +73,56 @@ function safeAnalyze(design: Design | null): Analysis | null {
   } catch {
     return null;
   }
+}
+
+const km1 = (mps: number) => (Math.round(mps / 100) / 10).toFixed(1);
+const signed = (n: number, unit: string, digits = 0) => `${n >= 0 ? "+" : "−"}${Math.abs(n).toFixed(digits)} ${unit}`;
+
+/**
+ * The design review, built from the red-pen marks and the analysis: one issue per mark, numbered the
+ * same as the mark on the napkin, with the physics behind it and the fix the red pen offers.
+ */
+function reviewIssues(design: Design, analysis: Analysis, review: Review | null): ReviewIssue[] {
+  if (!review) return [];
+  const target = DESTINATIONS[design.destination].name;
+  const effect =
+    analysis.liftoffTwr < 1
+      ? `Never leaves the pad: thrust/weight ${analysis.liftoffTwr.toFixed(2)} at liftoff.`
+      : analysis.marginMps < 0
+        ? `${km1(-analysis.marginMps)} km/s short of ${target} (${km1(analysis.totalDeltaVMps)} of ${km1(analysis.requiredDeltaVMps)} km/s).`
+        : `Reaches ${target} with ${km1(analysis.marginMps)} km/s to spare.`;
+  const failing = analysis.verdict !== "destination";
+  return review.marks.map((mark, i) => ({
+    id: `mark-${i}`,
+    severity: failing ? (mark.fix || i === 0 ? "critical" : "major") : "minor",
+    title: mark.note.charAt(0).toUpperCase() + mark.note.slice(1).replace(/[.!]+$/, ""),
+    why: analysis.findings[Math.min(i, analysis.findings.length - 1)] ?? "",
+    effect,
+    fix: mark.fix,
+    markIndex: i,
+  }));
+}
+
+/** What small changes buy: the physics re-run on +1 t payload, +10% first-stage tanks and one more engine. */
+function tradeNumbers(design: Design, analysis: Analysis): Trade[] {
+  const out: Trade[] = [];
+  const delta = (next: Design) => {
+    try {
+      return analyze(next);
+    } catch {
+      return null;
+    }
+  };
+  const payload = delta(applyAction(design, { type: "set-payload", payloadMassKg: design.payloadMassKg + 1000 }));
+  if (payload) out.push({ label: "+1 t payload", text: signed(payload.totalDeltaVMps - analysis.totalDeltaVMps, "m/s") });
+  const tanks = delta(applyAction(design, { type: "scale-tanks", stageIndex: 0, factor: 1.1 }));
+  if (tanks) out.push({ label: "+10% first-stage tanks", text: `${signed(tanks.totalDeltaVMps - analysis.totalDeltaVMps, "m/s")}, T/W ${signed(tanks.liftoffTwr - analysis.liftoffTwr, "", 2).trim()}` });
+  const cluster = design.stages[0]?.engines[0];
+  if (cluster) {
+    const engines = delta(applyAction(design, { type: "set-engines", stageIndex: 0, engine: cluster.engine, count: cluster.count + 1 }));
+    if (engines) out.push({ label: "+1 first-stage engine", text: `T/W ${signed(engines.liftoffTwr - analysis.liftoffTwr, "", 2).trim()}, ${signed(engines.totalDeltaVMps - analysis.totalDeltaVMps, "m/s")}` });
+  }
+  return out;
 }
 
 /** Search terms for NASA's Technical Reports Server, from what the sketch contains. */
@@ -124,6 +175,26 @@ export default function Studio() {
   const [error, setError] = useState<string | null>(null);
 
   const analysis = useMemo(() => safeAnalyze(design), [design]);
+  // The design review: which issue is selected (its mark pulses on the napkin), and whether this
+  // review has been looked at; Launch stays secondary until it has.
+  const [selectedIssue, setSelectedIssue] = useState<number | null>(null);
+  const [seenReview, setSeenReview] = useState(-1);
+  // A scribble that doesn't read as a vehicle gets coaching, not physics.
+  const unreadable = useMemo(
+    () => (reading && (reading.confidence ?? 1) < 0.5 ? { problem: reading.problem ?? "These strokes don't form a vehicle outline." } : null),
+    [reading],
+  );
+  const issues = useMemo(() => (design && analysis && !unreadable ? reviewIssues(design, analysis, review) : []), [design, analysis, review, unreadable]);
+  const trades = useMemo(() => (design && analysis && !unreadable ? tradeNumbers(design, analysis) : []), [design, analysis, unreadable]);
+  const markNumbers = (review?.marks ?? []).map((_, i) => {
+    const n = issues.findIndex((issue) => issue.markIndex === i);
+    return n >= 0 ? n + 1 : null;
+  });
+  const selectedMark = selectedIssue !== null ? (issues[selectedIssue]?.markIndex ?? null) : null;
+  function selectIssue(index: number | null) {
+    setSelectedIssue(index);
+    if (index !== null) setSeenReview(reviewKey);
+  }
   // The flight the launch will show, previewed in the report before anyone presses Launch.
   const predicted = useMemo(() => {
     if (!design || !analysis) return null;
@@ -321,6 +392,8 @@ export default function Studio() {
   /** Launch goes through mission control: every controller reports GO or NO-GO first. */
   function openPoll() {
     if (checking.current) return; // the read in flight would replace the design under the poll
+    const read0 = latest.current.reading;
+    if (read0 && (read0.confidence ?? 1) < 0.5) return; // nothing to fly: the sketch isn't a vehicle yet
     const { design: current, reading: read, review: latestReview } = latest.current;
     const currentAnalysis = safeAnalyze(current);
     if (!current || !read || !currentAnalysis) return;
@@ -545,7 +618,14 @@ export default function Studio() {
                     marks={reviewed ? (review?.marks ?? []) : []}
                     playKey={String(reviewKey)}
                     scanning={phase === "reading"}
-                    onFix={handleAction}
+                    onFix={(fix) => {
+                      setSeenReview(reviewKey);
+                      handleAction(fix);
+                    }}
+                    numbers={markNumbers}
+                    selectedMark={selectedMark}
+                    onSelectMark={(markIndex) => selectIssue(issues.findIndex((issue) => issue.markIndex === markIndex))}
+                    problem={reviewed && unreadable ? unreadable.problem : null}
                   />
                 </div>
               </NapkinRender>
@@ -584,8 +664,8 @@ export default function Studio() {
               <button
                 type="button"
                 onClick={openPoll}
-                disabled={!reviewed || !analysis}
-                className="btn-solid h-11 px-8 text-[12px]"
+                disabled={!reviewed || !analysis || Boolean(unreadable)}
+                className={`${issues.length > 0 && seenReview !== reviewKey ? "btn-outline" : "btn-solid"} h-11 px-8 text-[12px]`}
               >
                 Launch
               </button>
@@ -599,6 +679,13 @@ export default function Studio() {
 
         <section className="min-h-0 overflow-y-auto border-l border-rule bg-black">
           <VerdictPanel
+            issues={issues}
+            trades={trades}
+            selectedIssue={selectedIssue}
+            onSelectIssue={selectIssue}
+            unreadable={unreadable}
+            samples={DEMO_SKETCHES.map((d) => ({ id: d.id, title: d.title }))}
+            onSample={loadDemo}
             trace={predicted}
             onLaunch={openPoll}
             canLaunch={Boolean(reviewed && analysis)}
