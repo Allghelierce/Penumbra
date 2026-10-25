@@ -96,8 +96,6 @@ body {
   .part-tag,
   .sticker-in,
   .scanline,
-  .twinkle,
-  .satellite,
   .bar-grow,
   .live-dot,
   .caret::after {
@@ -164,50 +162,6 @@ body {
   background: radial-gradient(ellipse 40% 50% at 50% 46%, rgba(255, 248, 235, 0.06), transparent 75%);
   pointer-events: none;
 }
-.twinkle {
-  animation: twinkle ease-in-out infinite;
-}
-@keyframes twinkle {
-  50% {
-    opacity: 0.9;
-  }
-}
-/* A satellite crosses the field now and then: a steady point on a straight line. */
-.satellite {
-  position: absolute;
-  top: 18%;
-  left: -2%;
-  width: 2px;
-  height: 2px;
-  border-radius: 50%;
-  background: #fff;
-  box-shadow: 0 0 4px rgba(255, 255, 255, 0.8);
-  opacity: 0;
-  animation: satellite 34s linear 3s infinite;
-}
-.satellite-late {
-  top: 64%;
-  animation-delay: 21s;
-  animation-duration: 41s;
-}
-@keyframes satellite {
-  0% {
-    transform: translate(0, 0);
-    opacity: 0;
-  }
-  2% {
-    opacity: 0.85;
-  }
-  40% {
-    opacity: 0.85;
-  }
-  42%,
-  100% {
-    transform: translate(104vw, 9vh);
-    opacity: 0;
-  }
-}
-
 /* Red pen: strokes draw themselves on, then the handwriting appears. */
 .pen-draw {
   stroke-dasharray: 1;

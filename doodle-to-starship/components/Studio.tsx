@@ -6,8 +6,9 @@ import Link from "next/link";
 import LaunchScene, { unlockLaunchAudio } from "@/components/LaunchScene";
 import NapkinCanvas from "@/components/NapkinCanvas";
 import MissionClock from "@/components/MissionClock";
+import PollConsole from "@/components/PollConsole";
 import RedPenOverlay from "@/components/RedPenOverlay";
-import Sky from "@/components/Sky";
+import SpaceBackdrop from "@/components/SpaceBackdrop";
 import VerdictPanel from "@/components/VerdictPanel";
 import VoiceDock from "@/components/VoiceDock";
 import type { NapkinRect } from "@/components/launch/engine";
@@ -22,6 +23,7 @@ import type {
   DestinationId,
   FlightTrace,
   Phase,
+  Poll,
   PriorArtResult,
   ReadRequest,
   ReadResponse,
@@ -37,6 +39,7 @@ import { strokesToPng } from "@/lib/napkin";
 import { buildReview } from "@/lib/redpen";
 import { readFromGeometry } from "@/lib/sketch/geometry";
 import { recap } from "@/lib/recap";
+import { calloutFor, offerFor, pollRoom } from "@/lib/mission-control";
 import { analyze, simulateFlight } from "@/lib/physics";
 
 const DESTINATION_CHIPS: { id: DestinationId; label: string }[] = [
@@ -106,7 +109,12 @@ export default function Studio() {
   const [concept, setConcept] = useState<{ url: string | null; loading: boolean }>({ url: null, loading: false });
   const [priorArt, setPriorArt] = useState<PriorArtResult[]>([]);
   const [patchUrl, setPatchUrl] = useState<string | null>(null);
-  const [flight, setFlight] = useState<{ trace: FlightTrace; renderUrl: string | null; napkinRect: NapkinRect | null } | null>(null);
+  const [flight, setFlight] = useState<{
+    trace: FlightTrace;
+    renderUrl: string | null;
+    renderState: "loading" | "done" | "none";
+    napkinRect: NapkinRect | null;
+  } | null>(null);
   const [narration, setNarration] = useState<string | null>(null);
   // Every launch of this sketch, oldest first: the visible record of iterating on it.
   const [attempts, setAttempts] = useState<Attempt[]>([]);
@@ -125,10 +133,14 @@ export default function Studio() {
   }, [design, analysis]);
 
   // Latest values for callbacks that outlive a render (voice tool calls, async responses).
-  const latest = useRef({ reading, design, strokes, destination });
+  const latest = useRef({ reading, design, strokes, destination, review });
   useEffect(() => {
-    latest.current = { reading, design, strokes, destination };
-  }, [reading, design, strokes, destination]);
+    latest.current = { reading, design, strokes, destination, review };
+  }, [reading, design, strokes, destination, review]);
+  // Mission control: the GO/NO-GO poll before launch, and the spoken offer after a flight.
+  const [poll, setPoll] = useState<Poll | null>(null);
+  const [revealed, setRevealed] = useState(0);
+  const [offer, setOffer] = useState<{ line: string; fix?: DesignAction } | null>(null);
   // The sample on the napkin, if one is loaded untouched, so its design keeps the sample's name.
   const sampleTitle = useRef<string | null>(null);
   // One counter per async stream: a response only lands if no newer request (or Clear) superseded it.
@@ -257,7 +269,7 @@ export default function Studio() {
     const box = napkinArea.current?.querySelector(".napkin")?.getBoundingClientRect();
     const napkinRect = box ? { left: box.left, top: box.top, width: box.width, height: box.height } : null;
     const trace = simulateFlight(current, currentAnalysis);
-    setFlight({ trace, renderUrl: null, napkinRect });
+    setFlight({ trace, renderUrl: null, renderState: "loading", napkinRect });
     setAttempts((prev) => [...prev, { n: prev.length + 1, design: current, analysis: currentAnalysis, maxAltitudeKm: trace.maxAltitudeKm }]);
     setPhase("launch");
     const body: RenderRequest = {
@@ -269,18 +281,24 @@ export default function Studio() {
     const id = ++runs.current.launch;
     postJson<RenderResponse>("/api/render", body)
       .then(({ url }) => {
-        if (id === runs.current.launch) setFlight((f) => (f ? { ...f, renderUrl: url } : f));
+        if (id === runs.current.launch) setFlight((f) => (f ? { ...f, renderUrl: url, renderState: url ? "done" : "none" } : f));
       })
-      .catch(() => {});
+      .catch(() => {
+        if (id === runs.current.launch) setFlight((f) => (f ? { ...f, renderState: "none" } : f));
+      });
   }, []);
+
+  // handleAction is memoized; it reaches the latest openPoll (defined below) through this ref.
+  const openPollRef = useRef<() => void>(() => {});
 
   /** Voice commands and destination chips both edit the design, then the red pen re-checks it. */
   const handleAction = useCallback(
     (action: DesignAction) => {
       if (action.type === "launch") {
-        startLaunch();
+        openPollRef.current();
         return;
       }
+      setOffer(null);
       const { design: current, reading: read } = latest.current;
       if (action.type === "set-destination") setDestination(action.destination);
       if (!current || !read) return;
@@ -292,18 +310,56 @@ export default function Studio() {
       setReading(nextReading);
       if (nextAnalysis) void requestReview(nextReading, nextAnalysis);
     },
-    [requestReview, startLaunch],
+    [requestReview],
   );
 
-  /** From the end card: apply the fix, let the red pen re-mark the napkin, then fly again. */
+  /** Launch goes through mission control: every controller reports GO or NO-GO first. */
+  function openPoll() {
+    const { design: current, reading: read, review: latestReview } = latest.current;
+    const currentAnalysis = safeAnalyze(current);
+    if (!current || !read || !currentAnalysis) return;
+    unlockLaunchAudio(); // inside the click, for Safari
+    setOffer(null);
+    setPoll(pollRoom(current, currentAnalysis, latestReview, read.parts));
+    setRevealed(0);
+    setPhase("poll");
+  }
+  useEffect(() => {
+    openPollRef.current = openPoll;
+  });
+
+  function goForLaunch() {
+    setPoll(null);
+    startLaunch();
+  }
+  function scrub() {
+    setPoll(null);
+    setPhase("reviewed");
+  }
+  function fixAndRepoll(fix: DesignAction) {
+    handleAction(fix);
+    // handleAction has already moved latest.current to the fixed design.
+    openPoll();
+  }
+  function pollReply(reply: "go" | "scrub" | "fix") {
+    if (reply === "go") goForLaunch();
+    else if (reply === "scrub") scrub();
+    else {
+      const fix = poll?.calls.find((c) => !c.go && c.fix)?.fix;
+      if (fix) fixAndRepoll(fix);
+    }
+  }
+
+  /** From the end card or the spoken offer: apply the fix, let the red pen re-mark the napkin, then poll again. */
   const relaunch = useRef<ReturnType<typeof setTimeout> | null>(null);
-  function improveAndFly(fix: DesignAction) {
+  function improveAndFly(fix?: DesignAction) {
     unlockLaunchAudio(); // still inside the click, for Safari
     setFlight(null);
     setPhase("reviewed");
-    handleAction(fix);
+    if (fix) handleAction(fix);
+    setOffer(null);
     if (relaunch.current) clearTimeout(relaunch.current);
-    relaunch.current = setTimeout(startLaunch, 1500);
+    relaunch.current = setTimeout(() => openPollRef.current(), 1200);
   }
 
   function changeStrokes(next: Stroke[]) {
@@ -323,6 +379,8 @@ export default function Studio() {
     rendered.current = null;
     sampleTitle.current = null;
     setAttempts([]);
+    setPoll(null);
+    setOffer(null);
     setStrokes([]);
     setReading(null);
     setDesign(null);
@@ -444,7 +502,7 @@ export default function Studio() {
 
       <main className="grid min-h-0 flex-1 grid-cols-[minmax(0,1fr)_460px]">
         <section className="space-stage flex min-h-0 min-w-0 flex-col items-center gap-4 px-8 pb-4 pt-6">
-          <Sky />
+          <SpaceBackdrop />
           <div ref={napkinArea} className="flex min-h-0 w-full flex-1 justify-center">
             <NapkinCanvas strokes={strokes} onChange={changeStrokes} disabled={phase === "reading"}>
               {patchUrl && (
@@ -467,6 +525,9 @@ export default function Studio() {
             </NapkinCanvas>
           </div>
 
+          {phase === "poll" && poll ? (
+            <PollConsole poll={poll} revealed={revealed} onGo={goForLaunch} onScrub={scrub} onFix={fixAndRepoll} />
+          ) : (
           <div className="flex w-full items-center justify-center">
             <div className="flex shrink-0 items-center gap-2">
               <button
@@ -495,7 +556,7 @@ export default function Studio() {
               </button>
               <button
                 type="button"
-                onClick={startLaunch}
+                onClick={openPoll}
                 disabled={!reviewed || !analysis}
                 className="btn-solid h-11 px-8 text-[12px]"
               >
@@ -503,6 +564,7 @@ export default function Studio() {
               </button>
             </div>
           </div>
+          )}
           <p className={`h-5 text-[13px] ${error ? "text-nogo" : "text-haze"}`} aria-live="polite">
             {error ?? (reviewed && review?.marks.some((m) => m.fix) ? "Tap a red note on the sketch to apply its fix." : "")}
           </p>
@@ -511,7 +573,7 @@ export default function Studio() {
         <section className="min-h-0 overflow-y-auto border-l border-rule bg-black">
           <VerdictPanel
             trace={predicted}
-            onLaunch={startLaunch}
+            onLaunch={openPoll}
             canLaunch={Boolean(reviewed && analysis)}
             attempts={attempts}
             recap={flightRecap}
@@ -543,6 +605,11 @@ export default function Studio() {
         review={review}
         narration={narration}
         onAction={handleAction}
+        poll={phase === "poll" ? poll : null}
+        onPollReveal={setRevealed}
+        onPollReply={pollReply}
+        offer={offer}
+        onImprove={improveAndFly}
       />
 
       {phase === "launch" && flight && reading && design && analysis && (
@@ -552,11 +619,13 @@ export default function Studio() {
           analysis={analysis}
           trace={flight.trace}
           renderUrl={flight.renderUrl}
+          renderState={flight.renderState}
           napkinRect={flight.napkinRect}
-          onEvent={(event) => setNarration(event.label)}
+          onEvent={(event) => setNarration(calloutFor(event, design, flight.trace))}
           onDone={() => {
             setFlight(null);
             setPhase("reviewed");
+            if (flightRecap) setOffer(offerFor(flightRecap));
           }}
           recap={flightRecap}
           onImprove={improveAndFly}
