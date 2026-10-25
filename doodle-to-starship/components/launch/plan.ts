@@ -18,8 +18,10 @@ export const T_FRAMED = 1.7;
 export const T_IGNITE = 1.55;
 export const T_LIFTOFF = 3.3;
 
-/** Playback time runs faster than linear as the flight goes on: slow, heavy liftoff, quick coast. */
-const WARP = 1.6;
+/** Real seconds the flight itself gets, liftoff to the final event, before the outcome plays. */
+const FLIGHT_PLAY = 10;
+/** Minimum real seconds between two callouts. */
+const CAPTION_GAP = 1.2;
 
 export type Tone = "chalk" | "flame" | "red" | "go";
 
@@ -117,7 +119,6 @@ export const DEST_NAME: Record<DestinationId, string> = {
 const OFF_KINDS = new Set<FlightEventKind>(["engine-cutoff", "fuel-exhausted", "orbit", "arrival", "impact"]);
 
 export const clamp01 = (x: number) => (x < 0 ? 0 : x > 1 ? 1 : x);
-const clamp = (x: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, x));
 
 export function fmtKm(km: number): string {
   return km >= 100 ? Math.round(km).toLocaleString("en-US") : km.toFixed(1);
@@ -143,17 +144,17 @@ export function buildPlan(trace: FlightTrace, analysis: Analysis, design: Design
 }
 
 function padPlan(points: FlightPoint[], events: FlightEvent[], analysis: Analysis, design: Design): Plan {
-  const tipAt = T_IGNITE + 3.9;
-  const explodeAt = tipAt + 1.15;
+  const tipAt = T_IGNITE + 2.9;
+  const explodeAt = tipAt + 1;
   const cues: Cue[] = [];
   let j = 0;
   for (const e of events) {
-    cues.push({ at: e.kind === "impact" ? explodeAt : T_IGNITE + 1.5 + 0.9 * j++, event: e, real: true });
+    cues.push({ at: e.kind === "impact" ? explodeAt : T_IGNITE + 1.1 + 0.8 * j++, event: e, real: true });
   }
   if (!cues.some((c) => c.event.kind === "pad-failure")) {
     const twr = analysis.liftoffTwr;
     cues.push({
-      at: T_IGNITE + 1.5,
+      at: T_IGNITE + 1.1,
       event: { tS: 0, kind: "pad-failure", label: `Liftoff thrust-to-weight is ${twr.toFixed(2)}; it has to beat 1.` },
       real: false,
     });
@@ -174,7 +175,7 @@ function padPlan(points: FlightPoint[], events: FlightEvent[], analysis: Analysi
     finale: finaleFor("stuck-on-pad", design, explodeAt + 0.15),
     tipAt,
     explodeAt,
-    endAt: explodeAt + 3.2,
+    endAt: explodeAt + 1.8,
     maxAltKm: 0,
     maxSpeedMps: 0,
     hasDownrange: false,
@@ -228,16 +229,22 @@ function flightPlan(
     }
   }
 
-  const flightDur = clamp(8 + T / 30, 10, 23);
+  // Time warp: the dramatic beats get real seconds, the long burns and coasts between them
+  // fast-forward. Built from the event timestamps, so it follows whatever the trace says.
+  const karmanSims = crossingsFor(points, T, (sim) => sim)
+    .filter((c) => c.hero)
+    .map((c) => c.simT);
+  const warp = warpFor(T, [...events, ...synthetic], karmanSims, outcome);
+  const flightDur = warp.duration;
   const liftoffAt = T_LIFTOFF;
   const finaleAt = liftoffAt + flightDur;
-  const playOf = (sim: number) => liftoffAt + flightDur * Math.pow(clamp01(sim / T), 1 / WARP);
-  const simAt = (t: number) => (t <= liftoffAt ? 0 : T * Math.pow(clamp01((t - liftoffAt) / flightDur), WARP));
+  const simAt = (t: number) => (t <= liftoffAt ? 0 : warp.sim(Math.min(t - liftoffAt, flightDur)));
+  const playOf = (sim: number) => liftoffAt + warp.play(sim);
 
   const cues: Cue[] = [];
   let late = 0;
   const schedule = (e: FlightEvent, real: boolean) => {
-    const at = e.tS > T + 1e-6 ? finaleAt + 1.4 + 0.8 * late++ : playOf(e.tS);
+    const at = e.tS > T + 1e-6 ? finaleAt + 0.6 + 0.5 * late++ : playOf(e.tS);
     cues.push({ at, event: e, real });
   };
   events.forEach((e) => schedule(e, true));
@@ -260,17 +267,17 @@ function flightPlan(
       }
       on = c.at + 0.6;
     } else if (OFF_KINDS.has(k) && on !== null) {
-      const cut = k === "orbit" || k === "arrival" ? Math.max(c.at, finaleAt) + 0.7 : c.at;
+      const cut = k === "orbit" || k === "arrival" ? Math.max(c.at, finaleAt) + 0.45 : c.at;
       burns.push({ from: on, to: cut, piece });
       on = null;
     }
   }
-  if (on !== null) burns.push({ from: on, to: finaleAt + 0.7, piece });
+  if (on !== null) burns.push({ from: on, to: finaleAt + 0.45, piece });
 
   const crossings = crossingsFor(points, T, playOf);
   const sepsSeen = { n: 0 };
   const failed = outcome === "suborbital";
-  const finale = finaleFor(outcome, design, failed ? finaleAt + 0.15 : finaleAt + 1.1);
+  const finale = finaleFor(outcome, design, failed ? finaleAt + 0.15 : finaleAt + 0.35);
   const maxDown = Math.max(...points.map((p) => Math.abs(p.downrangeKm)));
 
   return {
@@ -292,11 +299,146 @@ function flightPlan(
     finale,
     tipAt: null,
     explodeAt: failed ? finaleAt : null,
-    endAt: failed ? finaleAt + 3.4 : finaleAt + 4.6,
+    // The end card follows the outcome closely: no long linger.
+    endAt: finaleAt + 1.8,
     maxAltKm,
     maxSpeedMps: Math.max(0, ...points.filter((p) => p.tS <= T).map((p) => p.speedMps)),
     hasDownrange: maxDown > Math.max(0.5, maxAltKm * 0.02),
     simAt,
+  };
+}
+
+interface Beat {
+  from: number;
+  to: number;
+  /** Real seconds this stretch of sim time plays in. */
+  play: number;
+}
+
+/**
+ * Maps playback seconds (from liftoff) to sim seconds and back. Beats around each event
+ * play slowly; the gaps between them share what's left of FLIGHT_PLAY and fast-forward.
+ * A monotone cubic through the knots keeps the speed changes smooth.
+ */
+function warpFor(T: number, events: FlightEvent[], karmanSims: number[], outcome: Verdict) {
+  const beat = (s: number, before: number, after: number, play: number): Beat => ({
+    from: Math.max(0, s - before),
+    to: Math.min(T, s + after),
+    play,
+  });
+  const lift = Math.min(T * 0.05, 10);
+  const beats: Beat[] = [
+    { from: 0, to: lift, play: 1.5 },
+    { from: lift, to: Math.max(lift, Math.min(T * 0.12, 32)), play: 1.2 },
+  ];
+  for (const e of events) {
+    if (e.tS <= 0 || e.tS > T) continue;
+    if (e.kind === "max-q") beats.push(beat(e.tS, 6, 6, 0.9));
+    else if (e.kind === "stage-sep") beats.push(beat(e.tS, 3, 6, 1.5));
+    else if (e.kind === "engine-cutoff") beats.push(beat(e.tS, 3, 3, 0.6));
+    else if (e.kind === "fuel-exhausted") beats.push(beat(e.tS, 3, 4, 0.9));
+    else if (e.kind === "apogee") beats.push(beat(e.tS, 10, 10, 1));
+  }
+  for (const k of karmanSims) beats.push(beat(k, 4, 4, 0.8));
+  // The approach to the outcome: the fall and reentry before impact, or the last push to orbit.
+  beats.push(outcome === "suborbital" ? beat(T, 30, 0, 1.5) : beat(T, 12, 0, 0.6));
+
+  beats.sort((a, b) => a.from - b.from);
+  const merged: Beat[] = [];
+  for (const b of beats) {
+    if (b.to <= b.from) continue;
+    const last = merged[merged.length - 1];
+    if (last && b.from < last.to) {
+      last.to = Math.max(last.to, b.to);
+      last.play = Math.min(3, last.play + 0.6 * b.play);
+    } else {
+      merged.push({ ...b });
+    }
+  }
+  const beatPlay = merged.reduce((n, b) => n + b.play, 0);
+  const squeeze = Math.min(1, (FLIGHT_PLAY * 0.8) / Math.max(beatPlay, 1e-6));
+  merged.forEach((b) => (b.play *= squeeze));
+
+  // Lay out beats and the gaps between them over [0, T].
+  const segs: { from: number; to: number; play: number | null }[] = [];
+  let cursor = 0;
+  for (const b of merged) {
+    if (b.from > cursor) segs.push({ from: cursor, to: b.from, play: null });
+    segs.push(b);
+    cursor = b.to;
+  }
+  if (cursor < T) segs.push({ from: cursor, to: T, play: null });
+  const gaps = segs.filter((g) => g.play === null);
+  const left = Math.max(0.5, FLIGHT_PLAY - merged.reduce((n, b) => n + b.play, 0));
+  const weight = gaps.reduce((n, g) => n + Math.pow(g.to - g.from, 0.6), 0) || 1;
+  gaps.forEach((g) => (g.play = Math.max(0.12, (left * Math.pow(g.to - g.from, 0.6)) / weight)));
+
+  const xs = [0];
+  const ys = [0];
+  for (const g of segs) {
+    xs.push(xs[xs.length - 1] + (g.play ?? 0.12));
+    ys.push(g.to);
+  }
+  const map = monotoneCubic(xs, ys);
+  const duration = xs[xs.length - 1];
+  return {
+    duration,
+    sim: map,
+    /** Inverse of sim(): the playback second (from liftoff) at which sim time `s` plays. */
+    play(s: number): number {
+      if (s <= 0) return 0;
+      if (s >= T) return duration;
+      let lo = 0;
+      let hi = duration;
+      for (let i = 0; i < 40; i++) {
+        const mid = (lo + hi) / 2;
+        if (map(mid) < s) lo = mid;
+        else hi = mid;
+      }
+      return (lo + hi) / 2;
+    },
+  };
+}
+
+/** Fritsch–Carlson monotone cubic through (xs, ys): never runs backwards, no overshoot. */
+function monotoneCubic(xs: number[], ys: number[]): (x: number) => number {
+  const n = xs.length;
+  if (n < 2) return () => ys[0] ?? 0;
+  const d: number[] = [];
+  for (let i = 0; i < n - 1; i++) d.push((ys[i + 1] - ys[i]) / (xs[i + 1] - xs[i] || 1e-9));
+  const m: number[] = [d[0]];
+  for (let i = 1; i < n - 1; i++) m.push(d[i - 1] * d[i] <= 0 ? 0 : (d[i - 1] + d[i]) / 2);
+  m.push(d[n - 2]);
+  for (let i = 0; i < n - 1; i++) {
+    if (d[i] === 0) {
+      m[i] = 0;
+      m[i + 1] = 0;
+      continue;
+    }
+    const a = m[i] / d[i];
+    const b = m[i + 1] / d[i];
+    const h = a * a + b * b;
+    if (h > 9) {
+      const tau = 3 / Math.sqrt(h);
+      m[i] = tau * a * d[i];
+      m[i + 1] = tau * b * d[i];
+    }
+  }
+  return (x: number) => {
+    if (x <= xs[0]) return ys[0];
+    if (x >= xs[n - 1]) return ys[n - 1];
+    let i = 0;
+    while (i < n - 2 && x > xs[i + 1]) i++;
+    const h = xs[i + 1] - xs[i];
+    const t = (x - xs[i]) / h;
+    const t2 = t * t;
+    const t3 = t2 * t;
+    return (
+      (2 * t3 - 3 * t2 + 1) * ys[i] +
+      (t3 - 2 * t2 + t) * h * m[i] +
+      (-2 * t3 + 3 * t2) * ys[i + 1] +
+      (t3 - t2) * h * m[i + 1]
+    );
   };
 }
 
@@ -326,7 +468,7 @@ function withKarman(captions: CaptionCue[], crossings: Crossing[]): CaptionCue[]
   all.sort((a, b) => a.at - b.at);
   let lastAt = -Infinity;
   for (const c of all) {
-    c.at = Math.max(c.at, lastAt + 1.6);
+    c.at = Math.max(c.at, lastAt + CAPTION_GAP);
     lastAt = c.at;
   }
   return all;
@@ -382,10 +524,14 @@ function captionsFor(cues: Cue[], maxAltKm: number, onPad: boolean, sepsSeen = {
     const dryAtCutoff =
       c.event.kind === "engine-cutoff" &&
       cues.some((o) => o.event.kind === "fuel-exhausted" && Math.abs(o.event.tS - c.event.tS) < 2);
-    if (dryAtCutoff) continue;
+    // A cutoff right before separation is one moment; "Stage separation!" says it.
+    const cutAtSep =
+      c.event.kind === "engine-cutoff" &&
+      cues.some((o) => o.event.kind === "stage-sep" && o.event.tS >= c.event.tS && o.event.tS - c.event.tS < 8);
+    if (dryAtCutoff || cutAtSep) continue;
     const label = c.event.label?.trim();
     const sub = label && normalize(label) !== normalize(base.text) ? label : undefined;
-    const at = Math.max(c.at, lastAt + 1.6);
+    const at = Math.max(c.at, lastAt + CAPTION_GAP);
     lastAt = at;
     out.push({ at, text: base.text, sub, tone: base.tone });
   }

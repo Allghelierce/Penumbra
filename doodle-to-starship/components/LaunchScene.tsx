@@ -51,7 +51,7 @@ const KEYFRAMES = `
   80% { opacity: 1; transform: translate(-50%, -2px); }
   100% { opacity: 0; transform: translate(-50%, -8px); }
 }
-.ls-caption { animation: ls-caption 2.6s ease-out forwards; }
+.ls-caption { animation: ls-caption 1.9s ease-out forwards; }
 @keyframes ls-write {
   from { clip-path: inset(-30% 100% -30% -5%); }
   to { clip-path: inset(-30% -5% -30% -5%); }
@@ -65,6 +65,8 @@ const KEYFRAMES = `
 @keyframes ls-fade { from { opacity: 0; } to { opacity: 1; } }
 .ls-fade { animation: ls-fade 0.6s ease-out both; }
 @keyframes ls-pending { 0%, 100% { opacity: 0.45; } 50% { opacity: 0.9; } }
+@keyframes ls-hint { 0%, 80% { opacity: 1; } 100% { opacity: 0; } }
+.ls-hint { animation: ls-hint 9s ease-in both; }
 .ls-pending { animation: ls-pending 1.8s ease-in-out infinite; }
 `;
 
@@ -108,8 +110,27 @@ function milestones(plan: Plan): Mark[] {
  * physics trace, failing exactly where the trace says. Reads its data once on mount;
  * remount it (change `key`) to fly a different trace.
  */
+const HINT_KEY = "penumbra-skip-hint-seen";
+
+function hintSeen(): boolean {
+  try {
+    return window.localStorage.getItem(HINT_KEY) === "1";
+  } catch {
+    return false;
+  }
+}
+
 export default function LaunchScene(props: LaunchSceneProps) {
   const [run, setRun] = useState(0);
+  // The first launch in this browser says out loud that Esc skips.
+  const [hint] = useState(() => typeof window !== "undefined" && !hintSeen());
+  useEffect(() => {
+    try {
+      window.localStorage.setItem(HINT_KEY, "1");
+    } catch {
+      // Private mode: the hint just shows again next time.
+    }
+  }, []);
   const [muted, setMuted] = useState(isLaunchAudioMuted);
   // Lives out here so a paid video job survives "fly again".
   const replay = useReplay(props.renderUrl, props.trace.outcome ?? props.analysis.verdict);
@@ -121,6 +142,7 @@ export default function LaunchScene(props: LaunchSceneProps) {
       onVideo={replay.start}
       onReplay={() => setRun((r) => r + 1)}
       muted={muted}
+      hint={hint && run === 0}
       onMute={() => {
         unlockLaunchAudio();
         setLaunchAudioMuted(!muted);
@@ -136,6 +158,7 @@ interface RunProps extends LaunchSceneProps {
   onReplay: () => void;
   muted: boolean;
   onMute: () => void;
+  hint: boolean;
 }
 
 function LaunchRun(props: RunProps) {
@@ -157,6 +180,7 @@ function LaunchRun(props: RunProps) {
   const speedRef = useRef<HTMLSpanElement>(null);
   const altRef = useRef<HTMLSpanElement>(null);
   const stageRef = useRef<HTMLDivElement>(null);
+  const warpRef = useRef<HTMLSpanElement>(null);
   const fillRef = useRef<HTMLDivElement>(null);
   const timelineRef = useRef<HTMLDivElement>(null);
   const ladderRef = useRef<HTMLDivElement>(null);
@@ -180,6 +204,7 @@ function LaunchRun(props: RunProps) {
       speed: speedRef.current,
       alt: altRef.current,
       stage: stageRef.current,
+      warp: warpRef.current,
       fill: fillRef.current,
       marks: [...(timelineRef.current?.querySelectorAll<HTMLElement>("[data-at]") ?? [])],
       ladder: {
@@ -262,6 +287,11 @@ function LaunchRun(props: RunProps) {
           <button type="button" onClick={props.onMute} aria-pressed={props.muted} className={control}>
             {props.muted ? "Sound off" : "Sound on"}
           </button>
+          {props.hint && (
+            <span className="ls-hint hidden rounded-[3px] border border-white/20 px-2 py-0.5 normal-case tracking-normal text-starlight/80 sm:inline">
+              Esc to skip
+            </span>
+          )}
           <button type="button" onClick={() => handle.current?.skip()} className={control}>
             Skip ›
           </button>
@@ -294,7 +324,14 @@ function LaunchRun(props: RunProps) {
             </div>
           )}
           <div className="ml-auto text-right">
-            <div ref={clockRef} className={`font-display text-2xl font-semibold tracking-wide sm:text-3xl ${LIFT}`} />
+            <div className="flex items-baseline justify-end gap-3">
+              <span
+                ref={warpRef}
+                className="font-display text-sm font-semibold tracking-wide text-flame-hot opacity-0 transition-opacity duration-300"
+                title="Fast-forwarding a long stretch of the flight"
+              />
+              <div ref={clockRef} className={`font-display text-2xl font-semibold tracking-wide sm:text-3xl ${LIFT}`} />
+            </div>
             <div ref={stageRef} className="text-[11px] font-semibold uppercase tracking-[0.18em] text-haze" />
           </div>
         </div>

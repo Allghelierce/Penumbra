@@ -74,6 +74,8 @@ export interface HudRefs {
   speed: HTMLElement | null;
   alt: HTMLElement | null;
   stage: HTMLElement | null;
+  /** Fast-forward readout ("▸▸ 40×"), shown while the warp is skipping a long stretch. */
+  warp?: HTMLElement | null;
   /** Timeline fill, scaled 0..1 along x. */
   fill: HTMLElement | null;
   /** Timeline milestones with data-at (0..1); the engine sets data-passed as they go by. */
@@ -509,7 +511,7 @@ export function startLaunch(
     let pose: Pose = { x: 0, y: Hn / 2, rot: 0 };
     if (flying) pose = { x: s.down * nuPerKm, y: s.alt * nuPerKm + Hn / 2, rot: pitch };
     if (plan.tipAt !== null && t >= plan.tipAt) {
-      const th = 1.5 * Math.pow(clamp01((t - plan.tipAt) / 1.15), 2);
+      const th = 1.5 * Math.pow(clamp01((t - plan.tipAt) / ((plan.explodeAt ?? plan.tipAt + 1) - plan.tipAt)), 2);
       const [px, py] = tipPivot;
       pose = { x: px - px * Math.cos(th) + py * Math.sin(th), y: px * Math.sin(th) + py * Math.cos(th), rot: th };
     }
@@ -554,7 +556,7 @@ export function startLaunch(
       const fw = toWorld(pose, focus);
       camX += fw[0];
       // Keep the rocket just above center; in orbit drop it lower to leave room for the verdict.
-      const followY = 0.47 + (orbitish ? 0.15 * ease((t - plan.finaleAt) / 1.5) : 0);
+      const followY = 0.47 + (orbitish ? 0.15 * ease((t - plan.finaleAt) / 1) : 0);
       camY = Math.max(camY, fw[1] - ((0.5 - followY) * H) / Z);
     }
     const quake = exploded ? 14 * Math.exp(-3 * (t - explodedAt)) : 0;
@@ -704,7 +706,7 @@ export function startLaunch(
 
     // The layers of the atmosphere, passing by at a readable pace.
     const layerCenter = H * 0.47;
-    const limbRise = orbitish ? easeOut((t - plan.finaleAt + 0.3) / 2.6) : 0;
+    const limbRise = orbitish ? easeOut((t - plan.finaleAt + 0.3) / 1.6) : 0;
     drawOzone(c, W, H, altKm, layerCenter);
     drawAurora(c, W, H, clamp01((altKm - 85) / 25) * (1 - limbRise) * night, t);
     const meteorK = flying ? clamp01((altKm - 45) / 8) * clamp01((88 - altKm) / 8) : 0;
@@ -749,7 +751,7 @@ export function startLaunch(
     const groundY = SY(groundLevel);
     drawHorizonGlow(c, W, H, Math.min(groundY, H * 1.02), padK * (1 - clamp01(altKm / 150)), 1 - clamp01(altKm / 15));
     if (orbitish) drawLimb(c, W, H, limbRise, pal.chalk);
-    if (body) drawTargetBody(c, W, H, body, easeOutBack((t - plan.finaleAt - 1.3) / 1.2), pal);
+    if (body) drawTargetBody(c, W, H, body, easeOutBack((t - plan.finaleAt - 0.5) / 0.9), pal);
     drawGround(c, W, H, groundY, padK, horizon, pal.chalk);
     if (padK > 0.01 && groundY > -H && groundY < H * 3) {
       c.save();
@@ -849,6 +851,16 @@ export function startLaunch(
       hudSet(hud.clock, "clock", `T${neg ? "−" : "+"} ${two(Math.floor(secs / 3600))}:${two(Math.floor(secs / 60) % 60)}:${two(secs % 60)}`);
       hudSet(hud.speed, "speed", Math.round(flying ? s.speed : 0).toLocaleString("en-US"));
       hudSet(hud.alt, "alt", altKm < 100 ? altKm.toFixed(1) : Math.round(altKm).toLocaleString("en-US"));
+      if (hud.warp) {
+        const rate = flying && t < plan.finaleAt ? (plan.simAt(t + 0.05) - plan.simAt(t - 0.05)) / 0.1 : 0;
+        const fast = rate >= 25;
+        if (fast) hudSet(hud.warp, "warp", `▸▸ ${Math.round(rate / 5) * 5}×`);
+        const op = fast ? "1" : "0";
+        if (hudShown.warpOp !== op) {
+          hudShown.warpOp = op;
+          hud.warp.style.opacity = op;
+        }
+      }
       hudSet(hud.stage, "stage", `Stage ${(flying ? s.stage : 0) + 1} · ${layerAt(altKm).name}`);
       const lad = hud.ladder;
       if (lad?.box && lad.marker) {
