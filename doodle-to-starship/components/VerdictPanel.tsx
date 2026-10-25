@@ -4,6 +4,7 @@ import SpecimenDrawing from "@/components/SpecimenDrawing";
 import type { Analysis, Design, DestinationId, Phase, PriorArtResult, Review, Verdict } from "@/lib/design";
 import { DESTINATIONS, ENGINES } from "@/lib/physics";
 import { km, kmShort, kmSpare } from "@/lib/physics/format";
+import { closestAnalogs, historyLine } from "@/lib/analogs";
 
 interface VerdictPanelProps {
   phase: Phase;
@@ -132,6 +133,29 @@ export default function VerdictPanel(props: VerdictPanelProps) {
         <Figure label="Payload" value={tonnes(design.payloadMassKg)} />
       </section>
 
+      <ClosestRocket design={design} analysis={analysis} />
+
+      {/* Reach */}
+      <section className="px-6 py-4">
+        <h3 className="font-display text-[18px] font-semibold text-starlight">Where it can go</h3>
+        <ul className="mt-2 grid grid-cols-2 gap-x-6 gap-y-1">
+          {ladder.map((d) => {
+            const ok = analysis.liftoffTwr >= 1 && analysis.totalDeltaVMps >= d.deltaVFromSurfaceMps;
+            const isTarget = d.id === design.destination;
+            return (
+              <li key={d.id} className={`flex items-center gap-2 text-[13px] ${isTarget ? "text-starlight" : "text-haze"}`}>
+                <Mark ok={ok} />
+                <span className={`min-w-0 flex-1 truncate ${isTarget ? "font-semibold" : ""}`}>
+                  {d.name}
+                  {isTarget && <span className="ml-1.5 text-[11px] font-normal text-haze">target</span>}
+                </span>
+                <span className="text-haze">{km(d.deltaVFromSurfaceMps)}</span>
+              </li>
+            );
+          })}
+        </ul>
+      </section>
+
       {/* Stages */}
       <section className="px-6 py-4">
         <h3 className="font-display text-[18px] font-semibold text-starlight">Stages</h3>
@@ -159,27 +183,6 @@ export default function VerdictPanel(props: VerdictPanelProps) {
         </table>
       </section>
 
-      {/* Reach */}
-      <section className="px-6 py-4">
-        <h3 className="font-display text-[18px] font-semibold text-starlight">Where it can go</h3>
-        <ul className="mt-2 grid grid-cols-2 gap-x-6 gap-y-1">
-          {ladder.map((d) => {
-            const ok = analysis.liftoffTwr >= 1 && analysis.totalDeltaVMps >= d.deltaVFromSurfaceMps;
-            const isTarget = d.id === design.destination;
-            return (
-              <li key={d.id} className={`flex items-center gap-2 text-[13px] ${isTarget ? "text-starlight" : "text-haze"}`}>
-                <Mark ok={ok} />
-                <span className={`min-w-0 flex-1 truncate ${isTarget ? "font-semibold" : ""}`}>
-                  {d.name}
-                  {isTarget && <span className="ml-1.5 text-[11px] font-normal text-haze">target</span>}
-                </span>
-                <span className="text-haze">{km(d.deltaVFromSurfaceMps)}</span>
-              </li>
-            );
-          })}
-        </ul>
-      </section>
-
       {props.priorArt.length > 0 && (
         <section className="px-6 py-4">
           <h3 className="font-display text-[18px] font-semibold text-starlight">NASA prior art</h3>
@@ -196,6 +199,47 @@ export default function VerdictPanel(props: VerdictPanelProps) {
         </section>
       )}
     </aside>
+  );
+}
+
+/** The real vehicle this design most resembles, and the history it echoes. */
+function ClosestRocket({ design, analysis }: { design: Design; analysis: Analysis }) {
+  const [best, ...others] = closestAnalogs(design, analysis, 3);
+  if (!best) return null;
+  return (
+    <section className="px-6 py-4">
+      <div className="flex items-baseline justify-between gap-3">
+        <h3 className="font-display text-[18px] font-semibold text-starlight">Closest real rocket</h3>
+        <span className="text-[13px] text-haze">{Math.round(best.similarity * 100)}% match</span>
+      </div>
+      <p className="mt-1 flex items-baseline gap-2">
+        <a
+          href={best.vehicle.source}
+          target="_blank"
+          rel="noreferrer"
+          className="font-display text-[22px] font-semibold leading-tight text-starlight hover:underline"
+        >
+          {best.name}
+        </a>
+        <span className="text-[12px] text-haze">first flew {best.vehicle.firstFlight}</span>
+      </p>
+      <p className="mt-0.5 line-clamp-2 text-[13px] leading-snug text-starlight/85">{capitalize(best.why)}.</p>
+      <p className="mt-1 line-clamp-2 text-[13px] leading-snug text-haze">{historyLine(design, analysis)}</p>
+      {others.length > 0 && (
+        <p className="mt-1.5 text-[12px] text-haze">
+          Also close:{" "}
+          {others.map((a, i) => (
+            <span key={a.name}>
+              {i > 0 && ", "}
+              <a href={a.vehicle.source} target="_blank" rel="noreferrer" className="text-starlight/80 hover:underline">
+                {a.name}
+              </a>{" "}
+              {Math.round(a.similarity * 100)}%
+            </span>
+          ))}
+        </p>
+      )}
+    </section>
   );
 }
 

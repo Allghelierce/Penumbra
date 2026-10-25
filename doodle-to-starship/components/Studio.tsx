@@ -48,8 +48,23 @@ async function postJson<T>(url: string, body: unknown): Promise<T> {
     headers: { "content-type": "application/json" },
     body: JSON.stringify(body),
   });
-  if (!res.ok) throw new Error(`${url} responded ${res.status}`);
+  if (!res.ok) throw new RequestError(url, res.status);
   return (await res.json()) as T;
+}
+
+class RequestError extends Error {
+  constructor(
+    url: string,
+    readonly status: number,
+  ) {
+    super(`${url} responded ${status}`);
+  }
+}
+
+/** What to tell the user when a request fails; a 429 means wait, anything else means retry. */
+function failure(err: unknown, what: string): string {
+  if (err instanceof RequestError && err.status === 429) return `Too many requests right now. Wait a few seconds, then ${what}.`;
+  return `That didn't go through. ${what.charAt(0).toUpperCase()}${what.slice(1)}.`;
 }
 
 function safeAnalyze(design: Design | null): Analysis | null {
@@ -120,8 +135,8 @@ export default function Studio() {
       setReview(next);
       setReviewKey((k) => k + 1);
       setNarration(next.summary);
-    } catch {
-      setError("The red pen ran out of ink. Try checking again.");
+    } catch (err) {
+      setError(failure(err, "press Check again for the red-pen review"));
     }
   }, []);
 
@@ -177,15 +192,15 @@ export default function Studio() {
       setStale(false);
       setPhase("reviewed");
       if (!nextAnalysis) {
-        setError("That one broke the physics engine. Try a clearer sketch?");
+        setError("The physics engine couldn't size this design. Redraw the tanks and engines more clearly, then check again.");
         return;
       }
       void fetchConcept(nextDesign, nextAnalysis, image);
       void fetchPatch(nextDesign, nextAnalysis);
       void fetchPriorArt(nextDesign);
       await requestReview(nextReading, nextAnalysis);
-    } catch {
-      setError("Couldn't read the napkin. Try again?");
+    } catch (err) {
+      setError(failure(err, "press Check design to read the sketch again"));
       setPhase("draw");
     }
   }
