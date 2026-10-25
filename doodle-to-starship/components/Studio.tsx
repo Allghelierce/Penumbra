@@ -2,7 +2,8 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import AttractMode from "@/components/AttractMode";
-import LaunchScene from "@/components/LaunchScene";
+import Link from "next/link";
+import LaunchScene, { unlockLaunchAudio } from "@/components/LaunchScene";
 import NapkinCanvas from "@/components/NapkinCanvas";
 import RedPenOverlay from "@/components/RedPenOverlay";
 import VerdictPanel from "@/components/VerdictPanel";
@@ -230,6 +231,8 @@ export default function Studio() {
   }
 
   const startLaunch = useCallback(() => {
+    // Inside the click or key press that launched, so Safari lets the launch audio play.
+    unlockLaunchAudio();
     const { design: current, reading: read, strokes: drawn } = latest.current;
     const currentAnalysis = safeAnalyze(current);
     if (!current || !read || !currentAnalysis) return;
@@ -383,6 +386,9 @@ export default function Studio() {
           </div>
         </div>
         <div className="ml-auto flex items-center gap-2">
+          <Link href="/about" className="mr-4 text-[13px] text-haze underline-offset-4 transition-colors hover:text-starlight hover:underline">
+            How it works
+          </Link>
           <span className="mr-1 text-[13px] text-haze">Sample sketches</span>
           {DEMO_SKETCHES.map((sketch) => (
             <button

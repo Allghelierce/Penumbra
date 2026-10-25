@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState, type FormEvent } from "react";
+import { unlockLaunchAudio } from "@/components/LaunchScene";
 import type { Analysis, Design, DesignAction, Phase, Review } from "@/lib/design";
 import { canRecognize, listen, openMicMeter, speak, stopSpeaking, type Listener, type MicMeter } from "@/lib/voice/browser";
 import { parseCommand } from "@/lib/voice/intent";
@@ -270,6 +271,8 @@ export default function VoiceDock({ phase, design, analysis, review, narration, 
     if (holdingRef.current || mode === "checking") return;
     holdingRef.current = true;
     setHolding(true);
+    // A spoken "launch it" lands later, outside this gesture; unlock launch audio now (Safari).
+    unlockLaunchAudio();
     setError(null);
     setTalker("user");
     setUserCaption("");

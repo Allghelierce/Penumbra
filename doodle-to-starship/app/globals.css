@@ -171,35 +171,7 @@ body {
   }
 }
 
-/* Desk props around the napkin. */
-.index-card {
-  background-color: #fffdf8;
-  background-image:
-    linear-gradient(90deg, transparent 30px, rgba(214, 45, 32, 0.35) 30px, rgba(214, 45, 32, 0.35) 31px, transparent 31px),
-    repeating-linear-gradient(180deg, transparent 0 27px, rgba(70, 120, 200, 0.18) 27px 28px);
-  background-position: 0 0, 0 14px;
-  box-shadow: 0 1px 2px rgba(70, 50, 20, 0.12), 0 14px 28px -18px rgba(70, 50, 20, 0.45);
-}
-.polaroid {
-  background: #fff;
-  padding: 10px 10px 34px;
-  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1), 0 16px 30px -16px rgba(0, 0, 0, 0.45);
-}
-.tape {
-  position: absolute;
-  top: -10px;
-  left: 50%;
-  width: 70px;
-  height: 20px;
-  margin-left: -35px;
-  background: rgba(245, 235, 200, 0.75);
-  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.08);
-  transform: rotate(-3deg);
-}
-.sticky {
-  background: linear-gradient(180deg, #fff6a8, #fdeb74);
-  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.08), 0 12px 20px -14px rgba(90, 70, 0, 0.6);
-}
+/* Shimmer while a Grok Imagine render develops. */
 .developing {
   background: linear-gradient(110deg, #23262d 30%, #3a3f49 50%, #23262d 70%);
   background-size: 200% 100%;
