@@ -30,6 +30,8 @@ import type {
   Stroke,
 } from "@/lib/design";
 import { strokesToPng } from "@/lib/napkin";
+import { buildReview } from "@/lib/redpen";
+import { readFromGeometry } from "@/lib/sketch/geometry";
 import { analyze, DESTINATIONS, simulateFlight } from "@/lib/physics";
 
 const DESTINATION_CHIPS: { id: DestinationId; label: string }[] = [
@@ -48,23 +50,9 @@ async function postJson<T>(url: string, body: unknown): Promise<T> {
     headers: { "content-type": "application/json" },
     body: JSON.stringify(body),
   });
-  if (!res.ok) throw new RequestError(url, res.status);
+  // Any failure, a 429 from the rate limiter included, throws; callers fall back locally.
+  if (!res.ok) throw new Error(`${url} responded ${res.status}`);
   return (await res.json()) as T;
-}
-
-class RequestError extends Error {
-  constructor(
-    url: string,
-    readonly status: number,
-  ) {
-    super(`${url} responded ${status}`);
-  }
-}
-
-/** What to tell the user when a request fails; a 429 means wait, anything else means retry. */
-function failure(err: unknown, what: string): string {
-  if (err instanceof RequestError && err.status === 429) return `Too many requests right now. Wait a few seconds, then ${what}.`;
-  return `That didn't go through. ${what.charAt(0).toUpperCase()}${what.slice(1)}.`;
 }
 
 function safeAnalyze(design: Design | null): Analysis | null {
@@ -120,73 +108,101 @@ export default function Studio() {
   const analysis = useMemo(() => safeAnalyze(design), [design]);
 
   // Latest values for callbacks that outlive a render (voice tool calls, async responses).
-  const latest = useRef({ reading, design, strokes });
+  const latest = useRef({ reading, design, strokes, destination });
   useEffect(() => {
-    latest.current = { reading, design, strokes };
-  }, [reading, design, strokes]);
-  const conceptRequest = useRef(0);
+    latest.current = { reading, design, strokes, destination };
+  }, [reading, design, strokes, destination]);
+  // One counter per async stream: a response only lands if no newer request (or Clear) superseded it.
+  const runs = useRef({ check: 0, review: 0, concept: 0, patch: 0, priorArt: 0, launch: 0 });
+  const checking = useRef(false);
+  // The sketch the current concept and patch renders came from, so re-checking it doesn't pay for new ones.
+  const rendered = useRef<{ strokes: Stroke[]; destination: DestinationId } | null>(null);
   // Wraps the napkin so the launch can lift off from exactly where the doodle sits on screen.
   const napkinArea = useRef<HTMLDivElement>(null);
 
   const requestReview = useCallback(async (nextReading: SketchReading, nextAnalysis: Analysis) => {
+    const id = ++runs.current.review;
+    let next: Review;
     try {
       const body: ReviewRequest = { reading: nextReading, analysis: nextAnalysis };
-      const { review: next } = await postJson<ReviewResponse>("/api/review", body);
-      setReview(next);
-      setReviewKey((k) => k + 1);
-      setNarration(next.summary);
-    } catch (err) {
-      setError(failure(err, "press Check again for the red-pen review"));
+      ({ review: next } = await postJson<ReviewResponse>("/api/review", body));
+    } catch {
+      // The rules-based red pen runs locally, so a failed or rate-limited request still gets a review.
+      try {
+        next = buildReview(nextReading, nextAnalysis);
+      } catch {
+        if (id === runs.current.review) setError("The red-pen review didn't load. Press Check again.");
+        return;
+      }
     }
+    if (id !== runs.current.review) return;
+    setReview(next);
+    setReviewKey((k) => k + 1);
+    setNarration(next.summary);
   }, []);
 
   const fetchConcept = useCallback(async (nextDesign: Design, nextAnalysis: Analysis, sketch: string) => {
-    const id = ++conceptRequest.current;
+    const id = ++runs.current.concept;
     setConcept({ url: null, loading: true });
     try {
       const body: RenderRequest = { design: nextDesign, analysis: nextAnalysis, kind: "concept", sketch };
       const { url } = await postJson<RenderResponse>("/api/render", body);
-      if (id === conceptRequest.current) setConcept({ url, loading: false });
+      if (id === runs.current.concept) setConcept({ url, loading: false });
     } catch {
-      if (id === conceptRequest.current) setConcept({ url: null, loading: false });
+      if (id === runs.current.concept) setConcept({ url: null, loading: false });
     }
   }, []);
 
   const fetchPatch = useCallback(async (nextDesign: Design, nextAnalysis: Analysis) => {
+    const id = ++runs.current.patch;
     try {
       const body: RenderRequest = { design: nextDesign, analysis: nextAnalysis, kind: "patch" };
       const { url } = await postJson<RenderResponse>("/api/render", body);
-      setPatchUrl(url);
+      if (id === runs.current.patch) setPatchUrl(url);
     } catch {
-      setPatchUrl(null);
+      if (id === runs.current.patch) setPatchUrl(null);
     }
   }, []);
 
   const fetchPriorArt = useCallback(async (nextDesign: Design) => {
+    const id = ++runs.current.priorArt;
     try {
       const res = await fetch(`/api/prior-art?q=${encodeURIComponent(priorArtQuery(nextDesign))}&limit=3`);
       const { results } = (await res.json()) as { results?: PriorArtResult[] };
-      setPriorArt(results ?? []);
+      if (id === runs.current.priorArt) setPriorArt(results ?? []);
     } catch {
-      setPriorArt([]);
+      if (id === runs.current.priorArt) setPriorArt([]);
     }
   }, []);
 
   async function check() {
-    if (strokes.length === 0 || phase === "reading") return;
+    // A ref, not `phase`: a click, ?check=1 and attract mode can all ask within one render.
+    if (strokes.length === 0 || checking.current) return;
+    checking.current = true;
+    const id = ++runs.current.check;
     setPhase("reading");
     setError(null);
     setReview(null);
     try {
       const started = Date.now();
       const image = strokesToPng(strokes);
-      const body: ReadRequest = { image, strokes, destination };
-      const { reading: read } = await postJson<ReadResponse>("/api/read", body);
+      let read: SketchReading;
+      try {
+        const body: ReadRequest = { image, strokes, destination: latest.current.destination };
+        ({ reading: read } = await postJson<ReadResponse>("/api/read", body));
+      } catch {
+        // Read the outline locally when the route fails or is rate-limited, so the demo never dead-ends.
+        read = readFromGeometry(strokes, latest.current.destination);
+      }
       // Let the scanner sweep at least once so the read feels deliberate.
       await wait(Math.max(0, 1300 - (Date.now() - started)));
-      const nextDesign: Design = { ...read.design, destination };
+      if (id !== runs.current.check) return;
+      // The target may have changed while reading; the latest pick wins.
+      const target = latest.current.destination;
+      const nextDesign: Design = { ...read.design, destination: target };
       const nextReading: SketchReading = { ...read, design: nextDesign };
       const nextAnalysis = safeAnalyze(nextDesign);
+      latest.current = { ...latest.current, reading: nextReading, design: nextDesign };
       setReading(nextReading);
       setDesign(nextDesign);
       setStale(false);
@@ -195,13 +211,21 @@ export default function Studio() {
         setError("The physics engine couldn't size this design. Redraw the tanks and engines more clearly, then check again.");
         return;
       }
-      void fetchConcept(nextDesign, nextAnalysis, image);
-      void fetchPatch(nextDesign, nextAnalysis);
+      const same = rendered.current?.strokes === strokes && rendered.current.destination === target;
+      if (!same) {
+        rendered.current = { strokes, destination: target };
+        void fetchConcept(nextDesign, nextAnalysis, image);
+        void fetchPatch(nextDesign, nextAnalysis);
+      }
       void fetchPriorArt(nextDesign);
       await requestReview(nextReading, nextAnalysis);
-    } catch (err) {
-      setError(failure(err, "press Check design to read the sketch again"));
-      setPhase("draw");
+    } catch {
+      if (id === runs.current.check) {
+        setError("The sketch couldn't be read. Press Check design to try again.");
+        setPhase("draw");
+      }
+    } finally {
+      if (id === runs.current.check) checking.current = false;
     }
   }
 
@@ -219,8 +243,11 @@ export default function Studio() {
       kind: "outcome",
       sketch: strokesToPng(drawn),
     };
+    const id = ++runs.current.launch;
     postJson<RenderResponse>("/api/render", body)
-      .then(({ url }) => setFlight((f) => (f ? { ...f, renderUrl: url } : f)))
+      .then(({ url }) => {
+        if (id === runs.current.launch) setFlight((f) => (f ? { ...f, renderUrl: url } : f));
+      })
       .catch(() => {});
   }, []);
 
@@ -255,6 +282,10 @@ export default function Studio() {
 
   function clearAll() {
     replay.current?.abort();
+    // Anything still in flight belongs to the old sketch.
+    for (const key of Object.keys(runs.current) as (keyof typeof runs.current)[]) runs.current[key]++;
+    checking.current = false;
+    rendered.current = null;
     setStrokes([]);
     setReading(null);
     setDesign(null);
@@ -300,7 +331,6 @@ export default function Studio() {
 
   useEffect(() => {
     if (checkRequest === 0) return;
-    // eslint-disable-next-line react-hooks/set-state-in-effect -- running a check that was explicitly requested
     void check().then(() => {
       if (autoLaunch.current) setTimeout(startLaunch, 2500);
     });
