@@ -171,8 +171,8 @@ async function imagine(path: string, body: Record<string, unknown>): Promise<str
 }
 
 /** Generate one image from a prompt. Returns a temporary URL (or a data URL if the API sends base64). */
-export function generateImage(prompt: string): Promise<string | null> {
-  return imagine("/images/generations", { prompt });
+export function generateImage(prompt: string, options?: { aspect_ratio?: string }): Promise<string | null> {
+  return imagine("/images/generations", { prompt, ...options });
 }
 
 /** Re-imagine an existing image (a png/jpg data URL) following `prompt`. */

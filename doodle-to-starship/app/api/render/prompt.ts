@@ -41,6 +41,16 @@ const CONCEPT = "standing on the launch pad at dusk, floodlit, vapor venting, sh
 
 const STYLE = "Photorealistic, cinematic lighting, high detail, wide shot. No text, no logos, no watermarks.";
 
+const PATCH_BACKDROP: Record<DestinationId, string> = {
+  leo: "the curve of Earth seen from orbit",
+  gto: "the curve of Earth seen from orbit",
+  "moon-orbit": "the grey cratered Moon",
+  "moon-surface": "the grey cratered Moon",
+  "mars-transfer": "the red planet Mars",
+  "mars-surface": "the red planet Mars",
+  europa: "icy cracked Europa with banded Jupiter behind it",
+};
+
 /** Text-to-image prompt for /images/generations. */
 export function buildRenderPrompt(
   design: Partial<Design>,
@@ -62,6 +72,27 @@ export function buildSketchEditPrompt(
     "Keep its exact silhouette, proportions, stage count, fins, flaps, legs and engine bells.",
     `It is ${vehicle[0].toLowerCase()}${vehicle.slice(1)}, ${scene(design, analysis, kind)}.`,
     "Cinematic lighting. No text, no logos, no pencil lines, no paper.",
+  ].join(" ");
+}
+
+/** Square embroidered mission patch for /images/generations (never edited from the sketch). */
+export function buildPatchPrompt(design: Partial<Design>): string {
+  const stageCount = Math.min(4, Math.max(1, Array.isArray(design.stages) ? design.stages.length : 1));
+  const name = (typeof design.name === "string" ? design.name : "").replace(/["\n]/g, "").trim().slice(0, 30) || "Napkin Special";
+  const shape = [
+    stageCount > 1 ? `${stageCount}-stage rocket` : "single-stage rocket",
+    ...(Array.isArray(design.features) ? design.features : [])
+      .filter((f) => ["fins", "grid-fins", "flaps", "landing-legs", "heat-shield"].includes(f))
+      .map((f) => String(f).replace(/-/g, " ")),
+  ].join(" with ");
+  const backdrop = (design.destination && PATCH_BACKDROP[design.destination]) || PATCH_BACKDROP.leo;
+  return [
+    "An embroidered circular space mission patch in the classic 1960s–2020s crewed-mission style, photographed flat.",
+    `The mission name "${name.toUpperCase()}" is stitched in bold capital letters around the rim.`,
+    `In the center, a stylized silhouette of a ${shape}, rising in front of ${backdrop}.`,
+    `${stageCount} small embroidered star${stageCount === 1 ? "" : "s"} in the sky.`,
+    "Thick raised embroidered border, visible thread texture, rich colors.",
+    "Centered on a plain light background, square image. No other text, no agency logos.",
   ].join(" ");
 }
 

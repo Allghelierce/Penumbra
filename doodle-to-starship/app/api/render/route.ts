@@ -1,6 +1,6 @@
 import type { RenderRequest, RenderResponse } from "@/lib/design";
 import { editImage, generateImage, hasXai } from "@/lib/xai";
-import { buildRenderPrompt, buildSketchEditPrompt } from "./prompt";
+import { buildPatchPrompt, buildRenderPrompt, buildSketchEditPrompt } from "./prompt";
 
 const NONE: RenderResponse = { url: null, source: "none" };
 /** xAI accepts png/jpg up to 20 MiB; base64 adds a third. */
@@ -11,6 +11,11 @@ export async function POST(request: Request) {
   if (!hasXai() || !body?.design) return Response.json(NONE);
 
   try {
+    if (body.kind === "patch") {
+      const patch = await generateImage(buildPatchPrompt(body.design), { aspect_ratio: "1:1" });
+      return Response.json(patch ? ({ url: patch, source: "grok" } satisfies RenderResponse) : NONE);
+    }
+
     const kind = body.kind === "outcome" ? "outcome" : "concept";
     const sketch = body.sketch;
     // Prefer editing the user's own napkin into a photo; fall back to plain text-to-image.
