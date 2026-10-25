@@ -5,6 +5,7 @@ import AttractMode from "@/components/AttractMode";
 import Link from "next/link";
 import LaunchScene, { unlockLaunchAudio } from "@/components/LaunchScene";
 import NapkinCanvas from "@/components/NapkinCanvas";
+import NapkinRender from "@/components/NapkinRender";
 import MissionClock from "@/components/MissionClock";
 import { PenumbraLockup } from "@/components/PenumbraLogo";
 import PollConsole from "@/components/PollConsole";
@@ -523,23 +524,31 @@ export default function Studio() {
           <SpaceBackdrop />
           <div ref={napkinArea} className="flex min-h-0 w-full flex-1 justify-center">
             <NapkinCanvas strokes={strokes} onChange={changeStrokes} disabled={phase === "reading"}>
-              {patchUrl && (
-                // eslint-disable-next-line @next/next/no-img-element
-                <img
-                  src={patchUrl}
-                  alt="Grok Imagine mission patch"
-                  className="sticker-in absolute right-[5%] top-[3%] aspect-square w-[24%] rounded-full object-cover shadow-[0_6px_14px_-4px_rgba(0,0,0,0.45)]"
-                />
-              )}
-              <div className={`absolute inset-0 transition-opacity duration-300 ${stale ? "opacity-30" : ""}`}>
-                <RedPenOverlay
-                  parts={reviewed ? reading.parts : []}
-                  marks={reviewed ? (review?.marks ?? []) : []}
-                  playKey={String(reviewKey)}
-                  scanning={phase === "reading"}
-                  onFix={handleAction}
-                />
-              </div>
+              <NapkinRender
+                url={concept.url}
+                loading={concept.loading}
+                resetKey={strokes}
+                sticker={
+                  patchUrl && (
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img
+                      src={patchUrl}
+                      alt="Grok Imagine mission patch"
+                      className="sticker-in absolute right-[5%] top-[3%] aspect-square w-[24%] rounded-full object-cover shadow-[0_6px_14px_-4px_rgba(0,0,0,0.45)]"
+                    />
+                  )
+                }
+              >
+                <div className={`absolute inset-0 transition-opacity duration-300 ${stale ? "opacity-30" : ""}`}>
+                  <RedPenOverlay
+                    parts={reviewed ? reading.parts : []}
+                    marks={reviewed ? (review?.marks ?? []) : []}
+                    playKey={String(reviewKey)}
+                    scanning={phase === "reading"}
+                    onFix={handleAction}
+                  />
+                </div>
+              </NapkinRender>
             </NapkinCanvas>
           </div>
 
