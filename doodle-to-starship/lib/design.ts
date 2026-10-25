@@ -210,6 +210,31 @@ export type DesignAction =
 /** Which screen the app is on. */
 export type Phase = "draw" | "reading" | "reviewed" | "launch";
 
+/** One flight in the user's iteration history (attempt 1 is the first launch). */
+export interface Attempt {
+  n: number;
+  design: Design;
+  analysis: Analysis;
+  maxAltitudeKm: number;
+}
+
+export interface Improvement {
+  /** e.g. "Stretch the tanks 12% to make orbit". */
+  text: string;
+  /** The edit that applies it, when there is one. */
+  fix?: DesignAction;
+}
+
+/** What to try next, shown after every flight so the user keeps iterating. */
+export interface Recap {
+  /** e.g. "Attempt 3: orbit, 1.3 km/s better than last time". */
+  headline: string;
+  /** Change since the previous attempt, e.g. "+1.3 km/s since attempt 2 (tanks +12%)"; null on attempt 1. */
+  delta: string | null;
+  /** 1–3 suggestions, most impactful first. After a success these "level up" (more payload, a farther target). */
+  improvements: Improvement[];
+}
+
 // HTTP contracts for the route handlers under app/api/.
 
 /** POST /api/read */
