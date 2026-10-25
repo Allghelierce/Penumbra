@@ -176,12 +176,13 @@ export interface Part {
   stageIndex?: number;
 }
 
+/** `fix`, when present, is the edit the note suggests; tapping the note applies it. */
 export type RedPenMark =
-  | { kind: "arrow"; from: Point; to: Point; note: string }
+  | { kind: "arrow"; from: Point; to: Point; note: string; fix?: DesignAction }
   /** radius is a fraction of the napkin's WIDTH; the pen draws a slightly flattened loop. */
-  | { kind: "circle"; center: Point; radius: number; note: string }
+  | { kind: "circle"; center: Point; radius: number; note: string; fix?: DesignAction }
   /** A dashed outline of suggested geometry, e.g. a new stage under the rocket. */
-  | { kind: "ghost-line"; points: Point[]; note: string };
+  | { kind: "ghost-line"; points: Point[]; note: string; fix?: DesignAction };
 
 /** What Grok vision reads out of a sketch. */
 export interface SketchReading {

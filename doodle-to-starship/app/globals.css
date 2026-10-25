@@ -141,3 +141,12 @@ body {
     background-position: -200% 0;
   }
 }
+
+/* Red-pen notes that carry a fix are tappable. */
+.pen-fix {
+  cursor: pointer;
+  pointer-events: auto;
+}
+.pen-fix:hover {
+  text-decoration: underline;
+}

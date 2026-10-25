@@ -1,7 +1,9 @@
 "use client";
 
-import type { Part, Point, RedPenMark } from "@/lib/design";
+import type { DesignAction, Part, Point, RedPenMark } from "@/lib/design";
 import { penLoop } from "@/lib/napkin";
+
+type OnFix = (fix: DesignAction) => void;
 
 // SVG units for the 3:4 napkin; every mark comes in as normalized 0..1 coordinates.
 const W = 300;
@@ -14,13 +16,19 @@ interface RedPenOverlayProps {
   playKey: string;
   /** Show the scanner sweep while Grok reads the sketch. */
   scanning?: boolean;
+  /** Called when a note that carries a fix is tapped. */
+  onFix?: OnFix;
 }
 
-export default function RedPenOverlay({ parts, marks, playKey, scanning }: RedPenOverlayProps) {
+export default function RedPenOverlay({ parts, marks, playKey, scanning, onFix }: RedPenOverlayProps) {
   const penStart = 0.4 + parts.length * 0.08;
   return (
     <>
-      {scanning && <div className="scanline" />}
+      {scanning && (
+        <div className="absolute inset-0 overflow-hidden">
+          <div className="scanline" />
+        </div>
+      )}
       <svg
         key={playKey}
         viewBox={`0 0 ${W} ${H}`}
@@ -34,7 +42,7 @@ export default function RedPenOverlay({ parts, marks, playKey, scanning }: RedPe
         </g>
         <g>
           {marks.map((mark, i) => (
-            <Mark key={i} mark={mark} seed={i + 1} delay={penStart + i * 0.9} />
+            <Mark key={i} mark={mark} seed={i + 1} delay={penStart + i * 0.9} onFix={onFix} />
           ))}
         </g>
       </svg>
@@ -85,9 +93,10 @@ function PartTag({ part, delay }: { part: Part; delay: number }) {
 
 const scale = ([x, y]: Point): Point => [x * W, y * H];
 
-function Mark({ mark, seed, delay }: { mark: RedPenMark; seed: number; delay: number }) {
+function Mark({ mark, seed, delay, onFix }: { mark: RedPenMark; seed: number; delay: number; onFix?: OnFix }) {
   const draw = { animationDelay: `${delay}s` };
   const write = { animationDelay: `${delay + 0.55}s` };
+  const fix = mark.fix && onFix ? () => onFix(mark.fix!) : undefined;
 
   if (mark.kind === "arrow") {
     const [fx, fy] = scale(mark.from);
@@ -118,6 +127,7 @@ function Mark({ mark, seed, delay }: { mark: RedPenMark; seed: number; delay: nu
           anchor={awayX < -0.25 ? "end" : awayX > 0.25 ? "start" : "middle"}
           text={mark.note}
           style={write}
+          onClick={fix}
         />
       </g>
     );
@@ -145,6 +155,7 @@ function Mark({ mark, seed, delay }: { mark: RedPenMark; seed: number; delay: nu
           anchor="middle"
           text={mark.note}
           style={write}
+          onClick={fix}
         />
       </g>
     );
@@ -183,25 +194,30 @@ function Note({
   anchor,
   text,
   style,
+  onClick,
 }: {
   x: number;
   y: number;
   anchor: "start" | "middle" | "end";
   text: string;
   style: React.CSSProperties;
+  onClick?: () => void;
 }) {
   return (
     <text
       x={x}
       y={y}
       textAnchor={anchor}
-      className="pen-note font-hand"
+      className={`pen-note font-hand ${onClick ? "pen-fix" : ""}`}
       style={style}
       fontSize="15"
       fontWeight="700"
       fill="var(--redpen)"
+      onClick={onClick}
     >
+      {onClick && <title>Tap to apply this fix</title>}
       {text}
+      {onClick && " ↻"}
     </text>
   );
 }

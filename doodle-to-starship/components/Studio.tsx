@@ -1,12 +1,14 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import AttractMode from "@/components/AttractMode";
 import LaunchScene from "@/components/LaunchScene";
 import NapkinCanvas from "@/components/NapkinCanvas";
 import RedPenOverlay from "@/components/RedPenOverlay";
 import VerdictPanel from "@/components/VerdictPanel";
 import VoiceDock from "@/components/VoiceDock";
 import { applyAction } from "@/lib/actions";
+import { replaySketch } from "@/lib/attract";
 import { DEMO_SKETCHES } from "@/lib/demo-sketches";
 import type {
   Analysis,
@@ -216,7 +218,11 @@ export default function Studio() {
     if (reading) setStale(true);
   }
 
+  // Aborts an in-progress demo-sketch replay when something else takes over the napkin.
+  const replay = useRef<AbortController | null>(null);
+
   function clearAll() {
+    replay.current?.abort();
     setStrokes([]);
     setReading(null);
     setDesign(null);
@@ -232,9 +238,42 @@ export default function Studio() {
     const sketch = DEMO_SKETCHES.find((s) => s.id === id);
     if (!sketch) return;
     clearAll();
+    setDestination(sketch.destination);
+    const controller = new AbortController();
+    replay.current = controller;
+    void replaySketch(sketch.strokes, setStrokes, { signal: controller.signal });
+  }
+
+  // A bump of this counter asks for a check of whatever is on the napkin in that render.
+  const [checkRequest, setCheckRequest] = useState(0);
+  const autoLaunch = useRef(false);
+  const [attract, setAttract] = useState(false);
+
+  // URL switches for rehearsals and screenshots: ?demo=<id> loads a demo sketch, &check=1 reads
+  // it, &launch=1 then launches it. ?attract=1 is booth mode: after 45 s idle the napkin draws,
+  // checks and launches itself.
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    /* eslint-disable react-hooks/set-state-in-effect -- one-time sync from the URL after hydration */
+    setAttract(params.get("attract") === "1");
+    const sketch = DEMO_SKETCHES.find((s) => s.id === params.get("demo"));
+    if (!sketch) return;
     setStrokes(sketch.strokes);
     setDestination(sketch.destination);
-  }
+    if (params.get("check") === "1") setCheckRequest((n) => n + 1);
+    /* eslint-enable react-hooks/set-state-in-effect */
+    autoLaunch.current = params.get("launch") === "1";
+  }, []);
+
+  useEffect(() => {
+    if (checkRequest === 0) return;
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- running a check that was explicitly requested
+    void check().then(() => {
+      if (autoLaunch.current) setTimeout(startLaunch, 2500);
+    });
+    // One check per request, using the strokes from the render that carried it.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [checkRequest]);
 
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
@@ -299,6 +338,7 @@ export default function Studio() {
                   marks={reviewed ? (review?.marks ?? []) : []}
                   playKey={String(reviewKey)}
                   scanning={phase === "reading"}
+                  onFix={handleAction}
                 />
               </div>
             </NapkinCanvas>
@@ -338,6 +378,9 @@ export default function Studio() {
             </button>
           </div>
           {error && <p className="font-hand text-xl text-redpen">{error}</p>}
+          {!error && reviewed && review?.marks.some((m) => m.fix) && (
+            <p className="font-hand text-xl text-ink-muted">tip: tap a red note to apply the fix ↻</p>
+          )}
         </section>
 
         <section className="w-[420px] shrink-0 overflow-y-auto pb-6 pr-1">
@@ -352,6 +395,15 @@ export default function Studio() {
           />
         </section>
       </main>
+
+      <AttractMode
+        enabled={attract}
+        phase={phase}
+        onStrokes={(next) => (next.length === 0 ? clearAll() : setStrokes(next))}
+        onDestination={setDestination}
+        onCheck={() => setCheckRequest((n) => n + 1)}
+        onLaunch={startLaunch}
+      />
 
       <VoiceDock
         phase={phase}
