@@ -127,7 +127,12 @@ function LaunchRun(props: LaunchSceneProps & { video: ReplayState; onVideo: () =
   const outcome = input.trace.outcome ?? input.analysis.verdict;
 
   return (
-    <div className="fixed inset-0 z-50 select-none overflow-hidden bg-table" role="dialog" aria-modal="true" aria-label="Launch">
+    <div
+      className={`fixed inset-0 z-50 select-none overflow-hidden ${input.napkinRect ? "" : "bg-table"}`}
+      role="dialog"
+      aria-modal="true"
+      aria-label="Launch"
+    >
       <style>{KEYFRAMES}</style>
       <canvas ref={canvasRef} className="absolute inset-0 h-full w-full" />
 

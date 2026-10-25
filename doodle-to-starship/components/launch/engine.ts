@@ -492,7 +492,8 @@ export function startLaunch(
     const rsy = lerp(ny, H * 0.8 - (Hn / 2) * Zl, e);
     let camX = -(rsx - W / 2) / Z;
     let camY = Hn / 2 - (H / 2 - rsy) / Z;
-    if (plan.liftoffAt !== null) {
+    if (flying) {
+      // Follow only once it flies, so the doodle starts exactly where it was drawn.
       const fw = toWorld(pose, focus);
       camX += fw[0];
       // Keep the rocket just above center; in orbit drop it lower to leave room for the verdict.
@@ -594,7 +595,14 @@ export function startLaunch(
 
     c.globalAlpha = 1;
     c.globalCompositeOperation = "source-over";
-    if (night < 1) {
+    c.clearRect(0, 0, W, H);
+    if (night < 1 && rect) {
+      // Lifting off the real napkin: the studio shows through until night falls, and the
+      // doodle peels off a blank napkin left where it was drawn.
+      c.fillStyle = rgba(pal.napkin, 1);
+      c.fillRect(rect.left, rect.top, rect.width, rect.height);
+    } else if (night < 1) {
+      // No napkin position: the napkin itself rides along from a plain table.
       c.fillStyle = rgba(pal.table, 1);
       c.fillRect(0, 0, W, H);
       const n = doodle.napkin;
