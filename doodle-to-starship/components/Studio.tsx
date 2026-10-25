@@ -469,7 +469,7 @@ export default function Studio() {
 
   return (
     <div className="flex h-dvh flex-col overflow-hidden bg-black text-white">
-      <header className="flex h-14 shrink-0 items-center gap-8 border-b border-rule bg-black px-6">
+      <header className="flex h-14 shrink-0 items-center gap-6 border-b border-rule bg-black px-6 min-[1400px]:gap-8">
         <h1 aria-label="Penumbra">
           <PenumbraLockup />
         </h1>
@@ -498,19 +498,19 @@ export default function Studio() {
           </div>
         </div>
         <div className="ml-auto flex items-center gap-2">
-          <span className="mr-6">
+          <span className="mr-6 hidden min-[1400px]:inline">
             <MissionClock />
           </span>
-          <Link href="/about" className="mr-4 text-[11px] uppercase tracking-[0.2em] text-haze underline-offset-4 transition-colors hover:text-white hover:underline">
+          <Link href="/about" className="mr-4 whitespace-nowrap text-[11px] uppercase tracking-[0.2em] text-haze underline-offset-4 transition-colors hover:text-white hover:underline">
             How it works
           </Link>
-          <span className="mr-1 text-[11px] uppercase tracking-[0.2em] text-haze">Samples</span>
+          <span className="mr-1 hidden text-[11px] uppercase tracking-[0.2em] text-haze min-[1400px]:inline">Samples</span>
           {DEMO_SKETCHES.map((sketch) => (
             <button
               key={sketch.id}
               type="button"
               onClick={() => loadDemo(sketch.id)}
-              className="px-2 py-1 text-[11px] font-semibold uppercase tracking-[0.16em] text-white/80 underline-offset-4 transition-colors hover:text-white hover:underline"
+              className="whitespace-nowrap px-2 py-1 text-[11px] font-semibold uppercase tracking-[0.16em] text-white/80 underline-offset-4 transition-colors hover:text-white hover:underline"
             >
               {sketch.title}
             </button>
