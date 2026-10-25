@@ -357,7 +357,7 @@ export default function Studio() {
   return (
     <div className="flex h-dvh flex-col overflow-hidden bg-umbra text-starlight">
       <header className="flex h-14 shrink-0 items-center gap-8 border-b border-rule px-6">
-        <h1 className="flex items-center gap-2.5 font-display text-[24px] font-semibold tracking-[0.04em]">
+        <h1 className="flex items-center gap-3 font-space text-[17px] uppercase tracking-[0.22em]">
           <EclipseMark />
           Penumbra
         </h1>
@@ -404,7 +404,7 @@ export default function Studio() {
       </header>
 
       <main className="grid min-h-0 flex-1 grid-cols-[minmax(0,1fr)_460px]">
-        <section className="lamp flex min-h-0 min-w-0 flex-col items-center gap-4 px-8 pb-4 pt-6">
+        <section className="aurora flex min-h-0 min-w-0 flex-col items-center gap-4 px-8 pb-4 pt-6">
           <div ref={napkinArea} className="flex min-h-0 w-full flex-1 justify-center">
             <NapkinCanvas strokes={strokes} onChange={changeStrokes} disabled={phase === "reading"}>
               {patchUrl && (
@@ -474,7 +474,7 @@ export default function Studio() {
           </p>
         </section>
 
-        <section className="min-h-0 overflow-y-auto border-l border-rule bg-panel">
+        <section className="min-h-0 overflow-y-auto border-l border-rule bg-[#0b1016]">
           <VerdictPanel
             phase={phase}
             design={design}

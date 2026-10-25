@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState, type FormEvent } from "react";
 import { unlockLaunchAudio } from "@/components/LaunchScene";
+import TypeOut from "@/components/TypeOut";
 import type { Analysis, Design, DesignAction, Phase, Review } from "@/lib/design";
 import { canRecognize, listen, openMicMeter, speak, stopSpeaking, type Listener, type MicMeter } from "@/lib/voice/browser";
 import { parseCommand } from "@/lib/voice/intent";
@@ -391,7 +392,8 @@ export default function VoiceDock({ phase, design, analysis, review, narration, 
             {replyCaption ? (
               <p className="line-clamp-2 text-[15px] leading-snug text-starlight">
                 <span className="text-haze">Engineer: </span>
-                {replyCaption}
+                {/* Grok streams its transcript already; browser replies arrive whole, so type them out. */}
+                {mode === "grok" ? replyCaption : <TypeOut key={replyCaption} text={replyCaption} cps={70} linger={800} />}
               </p>
             ) : null}
           </>

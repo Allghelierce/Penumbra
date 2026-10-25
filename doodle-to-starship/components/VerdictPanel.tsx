@@ -1,6 +1,8 @@
 "use client";
 
+import type { ReactNode } from "react";
 import SpecimenDrawing from "@/components/SpecimenDrawing";
+import TypeOut from "@/components/TypeOut";
 import type { Analysis, Design, DestinationId, Phase, PriorArtResult, Review, Verdict } from "@/lib/design";
 import { DESTINATIONS, ENGINES } from "@/lib/physics";
 import { km, kmShort, kmSpare } from "@/lib/physics/format";
@@ -54,21 +56,24 @@ export default function VerdictPanel(props: VerdictPanelProps) {
   const { phase, design, analysis, review } = props;
 
   if (!design || !analysis) {
+    const heading = phase === "reading" ? "Reading your sketch" : "What Penumbra reads from a sketch";
     return (
-      <aside className="flex h-full flex-col px-6 py-5">
-        <h2 className="font-display text-[26px] font-semibold leading-tight text-starlight">
-          {phase === "reading" ? "Reading your sketch" : "What Penumbra reads from a sketch"}
-        </h2>
-        <p className="mt-1 max-w-[46ch] text-[14px] leading-snug text-haze">
-          {phase === "reading"
-            ? "Grok vision is finding the stages, tanks and engines."
-            : "Draw a spacecraft on the napkin and press Check design. Every number comes from published engine data."}
-        </p>
-        <div className={`mt-4 min-h-0 flex-1 transition-opacity ${phase === "reading" ? "opacity-40" : ""}`}>
-          <div className="mx-auto h-full max-h-full" style={{ aspectRatio: "440 / 640" }}>
-            <SpecimenDrawing />
+      <aside className="flex h-full flex-col p-3">
+        <Module title="Reference drawing" meta={phase === "reading" ? "Grok vision" : "Two-stage launcher"} className="flex min-h-0 flex-1 flex-col">
+          <div className="flex min-h-0 flex-1 flex-col px-5 pb-3 pt-4">
+            <TypeOut key={heading} as="h2" text={heading} className="font-display text-[26px] font-semibold leading-tight text-starlight" />
+            <p className="mt-1 max-w-[46ch] text-[14px] leading-snug text-haze">
+              {phase === "reading"
+                ? "Finding the stages, tanks and engines in your strokes."
+                : "Draw a spacecraft on the napkin and press Check design. Every number comes from published engine data."}
+            </p>
+            <div className={`mt-3 min-h-0 flex-1 transition-opacity ${phase === "reading" ? "opacity-40" : ""}`}>
+              <div className="mx-auto h-full max-h-full" style={{ aspectRatio: "440 / 640" }}>
+                <SpecimenDrawing />
+              </div>
+            </div>
           </div>
-        </div>
+        </Module>
       </aside>
     );
   }
@@ -77,68 +82,70 @@ export default function VerdictPanel(props: VerdictPanelProps) {
   const target = DESTINATIONS[design.destination];
   const ladder = Object.values(DESTINATIONS).sort((a, b) => a.deltaVFromSurfaceMps - b.deltaVFromSurfaceMps);
   const short = analysis.marginMps < 0;
+  const title = capitalize(headline(analysis.verdict, design.destination));
 
   return (
-    <aside className="flex flex-col divide-y divide-rule">
-      {/* Verdict */}
-      <section className="flex gap-4 px-6 pb-4 pt-5">
-        <div className="min-w-0 flex-1">
-          <div className="flex items-center gap-3">
-            <span
-              className={`rounded-sm px-2 py-0.5 font-display text-[15px] font-bold tracking-wide ${
-                go ? "bg-go-signal/15 text-go-signal" : "bg-nogo/15 text-nogo"
-              }`}
-            >
-              {go ? "GO" : "NO GO"}
-            </span>
-            <span className="text-[14px] text-haze">Target: {target.name}</span>
+    <aside className="flex flex-col gap-3 p-3">
+      <Module
+        title="Flight readiness"
+        meta={
+          <span className={`font-space text-[11px] tracking-[0.12em] ${go ? "text-go-signal" : "text-nogo"}`}>
+            <span className={`mr-1.5 inline-block h-1.5 w-1.5 rounded-full align-middle ${go ? "bg-go-signal" : "bg-nogo"}`} />
+            {go ? "GO" : "NO GO"}
+          </span>
+        }
+      >
+        <div className="flex gap-4 px-4 py-3">
+          <div className="min-w-0 flex-1">
+            <p className="text-[13px] text-haze">Target: {target.name}</p>
+            <TypeOut key={title} as="h2" text={title} cps={40} className="mt-1 block font-display text-[30px] font-semibold leading-[1.05] text-starlight" />
+            {review?.summary && (
+              <TypeOut key={review.summary} as="p" text={review.summary} delay={title.length * 25 + 200} cps={90} linger={0} className="mt-2 block text-[14px] leading-snug text-haze" />
+            )}
           </div>
-          <h2 className="mt-2 font-display text-[32px] font-semibold leading-[1.05] text-starlight">
-            {capitalize(headline(analysis.verdict, design.destination))}
-          </h2>
-          {review?.summary && <p className="mt-2 text-[14px] leading-snug text-haze">{review.summary}</p>}
+          {(props.conceptUrl || props.conceptLoading) && (
+            <figure className="w-[112px] shrink-0">
+              <div className="aspect-[4/3] w-full overflow-hidden bg-umbra ring-1 ring-rule">
+                {props.conceptUrl ? (
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img src={props.conceptUrl} alt={`Grok Imagine render of ${design.name}`} className="h-full w-full object-cover" />
+                ) : (
+                  <div className="developing h-full w-full" />
+                )}
+              </div>
+              <figcaption className="mt-1 text-[11px] leading-tight text-haze">Grok Imagine render</figcaption>
+            </figure>
+          )}
         </div>
-        {(props.conceptUrl || props.conceptLoading) && (
-          <figure className="w-[120px] shrink-0">
-            <div className="aspect-[4/3] w-full overflow-hidden rounded-sm bg-panel ring-1 ring-rule">
-              {props.conceptUrl ? (
-                // eslint-disable-next-line @next/next/no-img-element
-                <img src={props.conceptUrl} alt={`Grok Imagine render of ${design.name}`} className="h-full w-full object-cover" />
-              ) : (
-                <div className="developing h-full w-full" />
-              )}
-            </div>
-            <figcaption className="mt-1 text-[11px] leading-tight text-haze">Grok Imagine render</figcaption>
-          </figure>
-        )}
-      </section>
+      </Module>
 
-      {/* Delta-v budget */}
-      <section className="px-6 py-4">
-        <div className="flex items-baseline justify-between">
-          <h3 className="font-display text-[18px] font-semibold text-starlight">Delta-v budget</h3>
-          <p className={`text-[14px] font-medium ${short ? "text-nogo" : "text-go-signal"}`}>
+      <Module
+        title="Delta-v budget"
+        meta={
+          <span className={`text-[13px] font-medium ${short ? "text-nogo" : "text-go-signal"}`}>
             {short
               ? `${kmShort(analysis.totalDeltaVMps, analysis.requiredDeltaVMps)} km/s short`
               : `${kmSpare(analysis.totalDeltaVMps, analysis.requiredDeltaVMps)} km/s to spare`}
-          </p>
+          </span>
+        }
+      >
+        <div className="px-4 pb-3 pt-1">
+          <BudgetBar analysis={analysis} />
         </div>
-        <BudgetBar analysis={analysis} />
-      </section>
+      </Module>
 
-      {/* Key figures */}
-      <section className="grid grid-cols-3 divide-x divide-rule">
-        <Figure label="Liftoff mass" value={tonnes(analysis.liftoffMassKg)} />
-        <Figure label="Thrust-to-weight" value={analysis.liftoffTwr.toFixed(2)} bad={analysis.liftoffTwr < 1} note={analysis.liftoffTwr < 1 ? "needs over 1" : undefined} />
-        <Figure label="Payload" value={tonnes(design.payloadMassKg)} />
-      </section>
+      <Module title="Vehicle">
+        <div className="grid grid-cols-3 divide-x divide-rule">
+          <Figure label="Liftoff mass" value={tonnes(analysis.liftoffMassKg)} />
+          <Figure label="Thrust-to-weight" value={analysis.liftoffTwr.toFixed(2)} bad={analysis.liftoffTwr < 1} note={analysis.liftoffTwr < 1 ? "needs over 1" : undefined} />
+          <Figure label="Payload" value={tonnes(design.payloadMassKg)} />
+        </div>
+      </Module>
 
       <ClosestRocket design={design} analysis={analysis} />
 
-      {/* Reach */}
-      <section className="px-6 py-4">
-        <h3 className="font-display text-[18px] font-semibold text-starlight">Where it can go</h3>
-        <ul className="mt-2 grid grid-cols-2 gap-x-6 gap-y-1">
+      <Module title="Where it can go">
+        <ul className="grid grid-cols-2 gap-x-6 gap-y-1 px-4 py-3">
           {ladder.map((d) => {
             const ok = analysis.liftoffTwr >= 1 && analysis.totalDeltaVMps >= d.deltaVFromSurfaceMps;
             const isTarget = d.id === design.destination;
@@ -154,51 +161,61 @@ export default function VerdictPanel(props: VerdictPanelProps) {
             );
           })}
         </ul>
-      </section>
+      </Module>
 
-      {/* Stages */}
-      <section className="px-6 py-4">
-        <h3 className="font-display text-[18px] font-semibold text-starlight">Stages</h3>
-        <table className="mt-2 w-full text-left text-[13px]">
+      <Module title="Stages" meta={<span className="text-[12px] text-haze">{analysis.stages.length} {analysis.stages.length === 1 ? "stage" : "stages"}</span>}>
+        <table className="w-full text-left text-[13px]">
           <thead className="text-haze">
             <tr>
-              <th className="pb-1 font-normal">Stage</th>
-              <th className="pb-1 font-normal">Engines</th>
-              <th className="pb-1 text-right font-normal">Delta-v</th>
-              <th className="pb-1 text-right font-normal">T/W</th>
+              <th className="px-4 pb-1 pt-2 font-normal">Stage</th>
+              <th className="pb-1 pt-2 font-normal">Engines</th>
+              <th className="pb-1 pt-2 text-right font-normal">Delta-v</th>
+              <th className="px-4 pb-1 pt-2 text-right font-normal">T/W</th>
             </tr>
           </thead>
           <tbody>
             {analysis.stages.map((s, i) => (
               <tr key={`${s.label}-${i}`} className="border-t border-rule">
-                <td className="py-1.5 pr-2 text-starlight">{s.label}</td>
+                <td className="px-4 py-1.5 pr-2 text-starlight">{s.label}</td>
                 <td className="max-w-[150px] truncate py-1.5 pr-2 text-haze">{engineList(design, i)}</td>
                 <td className="py-1.5 text-right text-starlight">{km(s.deltaVMps)} km/s</td>
-                <td className={`py-1.5 text-right ${s.twrAtIgnition < 1 && i === 0 ? "text-nogo" : "text-starlight"}`}>
+                <td className={`px-4 py-1.5 text-right ${s.twrAtIgnition < 1 && i === 0 ? "text-nogo" : "text-starlight"}`}>
                   {s.twrAtIgnition.toFixed(2)}
                 </td>
               </tr>
             ))}
           </tbody>
         </table>
-      </section>
+      </Module>
 
       {props.priorArt.length > 0 && (
-        <section className="px-6 py-4">
-          <h3 className="font-display text-[18px] font-semibold text-starlight">NASA prior art</h3>
-          <ul className="mt-2 space-y-2">
+        <Module title="NASA prior art" meta={<span className="text-[12px] text-haze">Technical Reports Server</span>}>
+          <ul className="space-y-2 px-4 py-3">
             {props.priorArt.slice(0, 3).map((r) => (
               <li key={r.id}>
                 <a href={r.url} target="_blank" rel="noreferrer" className="group block text-[13px] leading-snug">
                   <span className="line-clamp-2 text-starlight group-hover:underline">{r.title}</span>
-                  <span className="text-[12px] text-haze">NASA Technical Reports Server{r.year ? `, ${r.year}` : ""}</span>
+                  {r.year && <span className="text-[12px] text-haze">{r.year}</span>}
                 </a>
               </li>
             ))}
           </ul>
-        </section>
+        </Module>
       )}
     </aside>
+  );
+}
+
+/** A framed instrument: a header strip with its name, and the readout below. */
+function Module({ title, meta, className = "", children }: { title: string; meta?: ReactNode; className?: string; children: ReactNode }) {
+  return (
+    <section className={`module ${className}`}>
+      <header className="module-head">
+        <h3 className="font-space text-[10px] uppercase tracking-[0.16em] text-haze">{title}</h3>
+        {meta}
+      </header>
+      {children}
+    </section>
   );
 }
 
@@ -207,39 +224,37 @@ function ClosestRocket({ design, analysis }: { design: Design; analysis: Analysi
   const [best, ...others] = closestAnalogs(design, analysis, 3);
   if (!best) return null;
   return (
-    <section className="px-6 py-4">
-      <div className="flex items-baseline justify-between gap-3">
-        <h3 className="font-display text-[18px] font-semibold text-starlight">Closest real rocket</h3>
-        <span className="text-[13px] text-haze">{Math.round(best.similarity * 100)}% match</span>
-      </div>
-      <p className="mt-1 flex items-baseline gap-2">
-        <a
-          href={best.vehicle.source}
-          target="_blank"
-          rel="noreferrer"
-          className="font-display text-[22px] font-semibold leading-tight text-starlight hover:underline"
-        >
-          {best.name}
-        </a>
-        <span className="text-[12px] text-haze">first flew {best.vehicle.firstFlight}</span>
-      </p>
-      <p className="mt-0.5 line-clamp-2 text-[13px] leading-snug text-starlight/85">{capitalize(best.why)}.</p>
-      <p className="mt-1 line-clamp-2 text-[13px] leading-snug text-haze">{historyLine(design, analysis)}</p>
-      {others.length > 0 && (
-        <p className="mt-1.5 text-[12px] text-haze">
-          Also close:{" "}
-          {others.map((a, i) => (
-            <span key={a.name}>
-              {i > 0 && ", "}
-              <a href={a.vehicle.source} target="_blank" rel="noreferrer" className="text-starlight/80 hover:underline">
-                {a.name}
-              </a>{" "}
-              {Math.round(a.similarity * 100)}%
-            </span>
-          ))}
+    <Module title="Closest real rocket" meta={<span className="text-[13px] text-haze">{Math.round(best.similarity * 100)}% match</span>}>
+      <div className="px-4 py-3">
+        <p className="flex items-baseline gap-2">
+          <a
+            href={best.vehicle.source}
+            target="_blank"
+            rel="noreferrer"
+            className="font-display text-[22px] font-semibold leading-tight text-starlight hover:underline"
+          >
+            {best.name}
+          </a>
+          <span className="text-[12px] text-haze">first flew {best.vehicle.firstFlight}</span>
         </p>
-      )}
-    </section>
+        <p className="mt-0.5 line-clamp-2 text-[13px] leading-snug text-starlight/85">{capitalize(best.why)}.</p>
+        <p className="mt-1 line-clamp-2 text-[13px] leading-snug text-haze">{historyLine(design, analysis)}</p>
+        {others.length > 0 && (
+          <p className="mt-1.5 text-[12px] text-haze">
+            Also close:{" "}
+            {others.map((a, i) => (
+              <span key={a.name}>
+                {i > 0 && ", "}
+                <a href={a.vehicle.source} target="_blank" rel="noreferrer" className="text-starlight/80 hover:underline">
+                  {a.name}
+                </a>{" "}
+                {Math.round(a.similarity * 100)}%
+              </span>
+            ))}
+          </p>
+        )}
+      </div>
+    </Module>
   );
 }
 
@@ -250,7 +265,7 @@ function BudgetBar({ analysis }: { analysis: Analysis }) {
   const shades = ["bg-starlight/85", "bg-starlight/55", "bg-starlight/35", "bg-starlight/20"];
   const needed = analysis.requiredDeltaVMps / scale;
   return (
-    <div className="mt-3">
+    <div className="mt-2">
       <div className="relative h-10">
         <div className="absolute inset-x-0 top-3 flex h-4 overflow-hidden rounded-[2px] bg-rule/60">
           {analysis.stages.map((s, i) => (
@@ -279,9 +294,9 @@ function BudgetBar({ analysis }: { analysis: Analysis }) {
 
 function Figure({ label, value, bad, note }: { label: string; value: string; bad?: boolean; note?: string }) {
   return (
-    <div className="px-6 py-3">
+    <div className="px-4 py-2.5">
       <p className="text-[12px] text-haze">{label}</p>
-      <p className={`font-display text-[24px] font-semibold leading-tight ${bad ? "text-nogo" : "text-starlight"}`}>{value}</p>
+      <p className={`mt-0.5 font-space text-[17px] leading-tight ${bad ? "text-nogo" : "text-starlight"}`}>{value}</p>
       {note && <p className="text-[11px] text-nogo">{note}</p>}
     </div>
   );

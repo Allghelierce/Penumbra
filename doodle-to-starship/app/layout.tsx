@@ -1,5 +1,5 @@
 import type { Metadata } from "next";
-import { Barlow, Barlow_Condensed, Caveat, Geist, IBM_Plex_Mono } from "next/font/google";
+import { Barlow, Barlow_Condensed, Caveat, Geist, IBM_Plex_Mono, Michroma } from "next/font/google";
 import "./globals.css";
 
 const geistSans = Geist({
@@ -32,6 +32,13 @@ const barlowCondensed = Barlow_Condensed({
   weight: ["500", "600", "700"],
 });
 
+// Michroma follows Microgramma/Eurostile, the face of NASA-era control panels and mission patches.
+const michroma = Michroma({
+  variable: "--font-michroma",
+  subsets: ["latin"],
+  weight: "400",
+});
+
 export const metadata: Metadata = {
   title: "Penumbra",
   description: "Sketch a spacecraft on a napkin. Find out if it flies.",
@@ -41,7 +48,7 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
   return (
     <html
       lang="en"
-      className={`${geistSans.variable} ${plexMono.variable} ${caveat.variable} ${barlow.variable} ${barlowCondensed.variable} h-full antialiased`}
+      className={`${geistSans.variable} ${plexMono.variable} ${caveat.variable} ${barlow.variable} ${barlowCondensed.variable} ${michroma.variable} h-full antialiased`}
     >
       <body className="min-h-full flex flex-col">{children}</body>
     </html>

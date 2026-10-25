@@ -1,6 +1,7 @@
 "use client";
 
 import type { DesignAction, Part, Point, RedPenMark } from "@/lib/design";
+import TypeOut from "@/components/TypeOut";
 import { penLoop } from "@/lib/napkin";
 
 type OnFix = (fix: DesignAction) => void;
@@ -26,7 +27,15 @@ export default function RedPenOverlay({ parts, marks, playKey, scanning, onFix }
     <>
       {scanning && (
         <div className="absolute inset-0 overflow-hidden">
+          <div className="scan-tint" />
           <div className="scanline" />
+          <TypeOut
+            as="p"
+            text="GROK VISION / READING STROKES"
+            cps={32}
+            linger={60_000}
+            className="absolute bottom-[3.5%] left-[6%] font-mono text-[10px] tracking-[0.14em] text-redpen/80"
+          />
         </div>
       )}
       <svg
