@@ -76,7 +76,7 @@ function renderKey(
 ): string {
   if (kind === "patch") return cacheKey({ kind, prompt: buildPatchPrompt(design) });
   const subject = sketch ? { sketch: sha(sketch) } : { prompt: buildRenderPrompt(design, analysis, kind) };
-  // The aspect is in the key so renders made at an older shape are never served.
-  if (kind === "concept") return cacheKey({ kind, aspect: ASPECT.concept, ...subject });
+  // Aspect and style are in the key so renders made at an older shape or look are never served.
+  if (kind === "concept") return cacheKey({ kind, aspect: ASPECT.concept, style: "iso-v2", ...subject });
   return cacheKey({ kind, ...subject, verdict: analysis?.verdict ?? null, destination: design.destination ?? null });
 }
