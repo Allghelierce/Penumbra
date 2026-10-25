@@ -186,6 +186,15 @@ export type RedPenMark =
   /** A dashed outline of suggested geometry, e.g. a new stage under the rocket. */
   | { kind: "ghost-line"; points: Point[]; note: string; fix?: DesignAction };
 
+/** One filled shape of the cleaned-up, colored side profile, in the napkin's SVG units (viewBox 0 0 300 400). */
+export interface CleanShape {
+  part: PartKind | "body" | "interstage";
+  /** SVG path data. */
+  d: string;
+  fill: string;
+  stroke?: string;
+}
+
 /** What Grok vision reads out of a sketch. */
 export interface SketchReading {
   design: Design;
