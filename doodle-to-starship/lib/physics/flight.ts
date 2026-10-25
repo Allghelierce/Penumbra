@@ -2,7 +2,7 @@
 // integrator: speed follows the rocket equation stage by stage, minus gravity and drag
 // losses, and altitude follows a gravity-turn curve that reaches orbit height at orbital speed.
 
-import type { Analysis, Design, FlightEvent, FlightPoint, FlightTrace } from "../design";
+import type { Analysis, Design, DestinationId, FlightEvent, FlightPoint, FlightTrace } from "../design";
 import { DESTINATIONS, G0, ORBITAL_SPEED_MPS } from "./data";
 
 const ORBIT_ALTITUDE_KM = 200;
@@ -14,6 +14,16 @@ const ORBIT_COAST_S = 600;
 const LOSS_MPS = DESTINATIONS.leo.deltaVFromSurfaceMps - ORBITAL_SPEED_MPS;
 /** Share of the losses the bottom stage takes; it fights gravity and air the longest. */
 const BOTTOM_LOSS_SHARE = 0.7;
+/** Speed added in low Earth orbit to leave for the destination (the first leg of the delta-v map). */
+const DEPARTURE_MPS: Record<DestinationId, number> = {
+  leo: 0,
+  gto: 2_440,
+  "moon-orbit": 3_260,
+  "moon-surface": 3_260,
+  "mars-transfer": 3_610,
+  "mars-surface": 3_610,
+  europa: 6_300,
+};
 
 export function simulateFlight(design: Design, analysis: Analysis): FlightTrace {
   if (analysis.verdict === "stuck-on-pad") return padFailure(analysis);
@@ -26,10 +36,16 @@ export function simulateFlight(design: Design, analysis: Analysis): FlightTrace 
   const totalBurnS = burning.reduce((sum, s) => sum + s.burnTimeS, 0);
   const upperBurnS = totalBurnS - (burning[0]?.index === 0 ? burning[0].burnTimeS : 0);
 
+  // Engines cut off once the job is done: orbital speed for LEO (or when the destination is
+  // out of reach), or orbital speed plus the departure burn. Leftover delta-v is margin.
+  const targetSpeed =
+    analysis.verdict === "destination" ? ORBITAL_SPEED_MPS + DEPARTURE_MPS[design.destination] : ORBITAL_SPEED_MPS;
+
   let t = 0;
   let speed = 0;
   let downrangeKm = 0;
   let orbitAt: number | null = null;
+  let cutoff = false;
 
   for (const [n, stage] of burning.entries()) {
     // Mass at ignition: this stage and everything above it.
@@ -43,24 +59,45 @@ export function simulateFlight(design: Design, analysis: Analysis): FlightTrace 
           : (LOSS_MPS * (burning[0].index === 0 ? 1 - BOTTOM_LOSS_SHARE : 1) * stage.burnTimeS) / upperBurnS;
     const startSpeed = speed;
     const steps = Math.max(10, Math.round((BURN_POINTS * stage.burnTimeS) / totalBurnS));
+    const step = stage.burnTimeS / steps;
+    let burned = 0;
+    const speedAt = (dt: number) => {
+      const gained = stage.ispS * G0 * Math.log(m0 / (m0 - massFlow * dt));
+      return Math.max(0, startSpeed + gained - (loss * dt) / stage.burnTimeS);
+    };
 
     for (let k = n === 0 ? 0 : 1; k <= steps; k++) {
-      const dt = (stage.burnTimeS * k) / steps;
-      const gained = stage.ispS * G0 * Math.log(m0 / (m0 - massFlow * dt));
-      const next = Math.max(0, startSpeed + gained - (loss * dt) / stage.burnTimeS);
+      let dt = step * k;
+      let next = speedAt(dt);
+      if (next >= targetSpeed && analysis.verdict !== "suborbital") {
+        // Bisect for the moment the target speed is reached within this step.
+        let lo = Math.max(0, dt - step);
+        let hi = dt;
+        for (let i = 0; i < 30; i++) {
+          const mid = (lo + hi) / 2;
+          if (speedAt(mid) >= targetSpeed) hi = mid;
+          else lo = mid;
+        }
+        dt = hi;
+        next = targetSpeed;
+        cutoff = true;
+      }
       const tNow = t + dt;
-      if (orbitAt === null && speed < ORBITAL_SPEED_MPS && next >= ORBITAL_SPEED_MPS) orbitAt = tNow;
-      downrangeKm += (((speed + next) / 2) * horizontalShare(next) * (stage.burnTimeS / steps)) / 1000;
+      if (orbitAt === null && next >= ORBITAL_SPEED_MPS) orbitAt = tNow;
+      downrangeKm += (((speed + next) / 2) * horizontalShare(next) * (dt - burned)) / 1000;
+      burned = dt;
       speed = next;
       points.push({ tS: tNow, altitudeKm: climbAltitude(speed), downrangeKm, speedMps: speed, stageIndex: stage.index });
+      if (cutoff) break;
     }
 
-    t += stage.burnTimeS;
+    t += burned;
     const nextStage = burning[n + 1];
-    if (nextStage) {
+    if (nextStage && !cutoff) {
       events.push({ tS: t, kind: "stage-sep", label: `${stage.label} separates; ${nextStage.label} ignites` });
     } else {
       events.push({ tS: t, kind: "engine-cutoff", label: `${stage.label} engine cutoff at ${(speed / 1000).toFixed(1)} km/s` });
+      break;
     }
   }
   if (totalBurnS > MAX_Q_S && (burning[0]?.burnTimeS ?? 0) > MAX_Q_S) {
@@ -74,12 +111,14 @@ export function simulateFlight(design: Design, analysis: Analysis): FlightTrace 
   } else {
     const at = orbitAt ?? t;
     events.push({ tS: at, kind: "orbit", label: `Orbit: ${(ORBITAL_SPEED_MPS / 1000).toFixed(1)} km/s at ${ORBIT_ALTITUDE_KM} km` });
+    // In orbit the rocket holds its height; after a departure burn it climbs away from Earth.
+    const climbMps = Math.max(0, speed - ORBITAL_SPEED_MPS);
     for (let k = 1; k <= COAST_POINTS; k++) {
       const dt = (ORBIT_COAST_S * k) / COAST_POINTS;
       points.push({
         tS: t + dt,
-        altitudeKm: ORBIT_ALTITUDE_KM,
-        downrangeKm: downrangeKm + (speed * dt) / 1000,
+        altitudeKm: ORBIT_ALTITUDE_KM + (climbMps * dt) / 1000,
+        downrangeKm: downrangeKm + (Math.min(speed, ORBITAL_SPEED_MPS) * dt) / 1000,
         speedMps: speed,
         stageIndex: lastStage,
       });

@@ -2,6 +2,7 @@
 
 import type { Analysis, Design, DestinationId, Stage, StageAnalysis, Verdict } from "../design";
 import { DESTINATIONS, ENGINES, G0, PROPELLANT_DENSITY_KG_M3, STRUCTURAL_FACTOR, TANK_FILL } from "./data";
+import { km, kmShort, kmSpare } from "./format";
 
 export function analyze(design: Design): Analysis {
   // Stack from the top down: everything above a stage is that stage's payload.
@@ -92,7 +93,6 @@ function furthestReachable(deltaVMps: number): DestinationId | null {
 
 function findings(design: Design, a: Analysis): string[] {
   const out: string[] = [];
-  const km = (mps: number) => (mps / 1000).toFixed(1);
   const tonnes = (kg: number) => Math.round(kg / 1000).toLocaleString("en-US");
   const destination = DESTINATIONS[design.destination].name;
   const bottom = design.stages[0];
@@ -111,12 +111,12 @@ function findings(design: Design, a: Analysis): string[] {
   out.push(`Total delta-v is ${km(a.totalDeltaVMps)} km/s against ${km(a.requiredDeltaVMps)} km/s needed for ${destination}.`);
 
   if (a.verdict === "destination") {
-    out.push(`It reaches ${destination} with ${km(a.marginMps)} km/s to spare.`);
+    out.push(`It reaches ${destination} with ${kmSpare(a.totalDeltaVMps, a.requiredDeltaVMps)} km/s to spare.`);
   } else if (a.verdict === "orbit") {
     const reach = a.furthestReachable ? DESTINATIONS[a.furthestReachable].name : "low Earth orbit";
-    out.push(`It makes orbit but falls ${km(-a.marginMps)} km/s short of ${destination}; the furthest it gets is ${reach}.`);
+    out.push(`It makes orbit but falls ${kmShort(a.totalDeltaVMps, a.requiredDeltaVMps)} km/s short of ${destination}; the furthest it gets is ${reach}.`);
   } else {
-    out.push(`It's ${km(DESTINATIONS.leo.deltaVFromSurfaceMps - a.totalDeltaVMps)} km/s short of orbit, so it's a suborbital hop.`);
+    out.push(`It's ${kmShort(a.totalDeltaVMps, DESTINATIONS.leo.deltaVFromSurfaceMps)} km/s short of orbit, so it's a suborbital hop.`);
   }
 
   if (a.stages.length > 1) {

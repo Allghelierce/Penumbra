@@ -7,6 +7,7 @@ import {
   NAPKIN_ASPECT,
   type Analysis,
   type Design,
+  type DesignAction,
   type DestinationId,
   type Part,
   type PartKind,
@@ -15,7 +16,7 @@ import {
   type Review,
   type SketchReading,
 } from "./design";
-import { analyze } from "./physics";
+import { analyze, km, kmShort, kmSpare } from "./physics";
 
 type Box = [x: number, y: number, w: number, h: number];
 
@@ -34,6 +35,8 @@ const CIRCLE_PAD = 0.03;
 const MIN_RADIUS = 0.04;
 /** Keeps arrow ends and outlines off the very edge of the napkin. */
 const EDGE = 0.02;
+/** About how wide one handwritten note character is, as a fraction of the napkin's width. */
+const NOTE_CHAR_WIDTH = 0.018;
 /** Stand-in for the rocket when the reading found no parts at all. */
 const DEFAULT_ROCKET: Box = [0.38, 0.08, 0.24, 0.84];
 
@@ -65,11 +68,13 @@ export function buildReview(reading: SketchReading, analysis: Analysis): Review 
   const stuck = analysis.liftoffTwr < 1;
   const extraEngines = stuck ? enginesForTwr(design, TARGET_TWR) : null;
   if (stuck) {
-    const note =
-      extraEngines === null
-        ? `TWR ${formatTwr(analysis.liftoffTwr)}: needs more thrust`
-        : `TWR ${formatTwr(analysis.liftoffTwr)}: needs ${extraEngines} more engine${extraEngines === 1 ? "" : "s"}`;
-    marks.push(circleAround(sketch.engines(), note));
+    const twr = formatTwr(analysis.liftoffTwr);
+    if (extraEngines === null) {
+      marks.push(circleAround(sketch.engines(), `TWR ${twr}: needs more thrust`));
+    } else {
+      const note = `TWR ${twr}: needs ${extraEngines} more engine${extraEngines === 1 ? "" : "s"}`;
+      marks.push({ ...circleAround(sketch.engines(), note), fix: engineFix(design, extraEngines) });
+    }
   }
 
   // A stuck rocket's delta-v counts as 0, so judge its fuel as if the engine fix were made.
@@ -86,7 +91,9 @@ export function buildReview(reading: SketchReading, analysis: Analysis): Review 
   const lands = LANDING_DESTINATIONS.has(design.destination);
   const needsLegs = lands && !hasFeature(design, parts, "landing-legs");
   const needsShield = design.destination === "mars-surface" && !hasFeature(design, parts, "heat-shield");
-  if (needsLegs) marks.push(arrowTo(sketch.bottomCenter(), sketch.openSide(), 0.06, "needs legs"));
+  // A new-stage outline already sits under the rocket on the open side, so legs come in from the other.
+  const legsSide = marks.some((m) => m.kind === "ghost-line") ? -sketch.openSide() : sketch.openSide();
+  if (needsLegs) marks.push(arrowTo(sketch.bottomCenter(), legsSide as 1 | -1, 0.06, "needs legs"));
   if (needsShield) marks.push(arrowTo(sketch.capsuleSide(), sketch.openSide(), -0.06, "heat shield!"));
 
   const flies = !stuck && !short && !needsLegs && !needsShield;
@@ -122,6 +129,16 @@ function enginesForTwr(design: Design, target: number): number | null {
 }
 
 /** The design with `extra` more engines in the bottom stage's biggest cluster; other clusters stay as drawn. */
+/**
+ * The tap-to-fix edit for "needs N more engines". set-engines replaces every cluster, so it
+ * only matches the computed count when the bottom stage has a single cluster.
+ */
+function engineFix(design: Design, extra: number): DesignAction | undefined {
+  const engines = design.stages[0].engines;
+  if (engines.length !== 1) return undefined;
+  return { type: "set-engines", stageIndex: 0, engine: engines[0].engine, count: engines[0].count + extra };
+}
+
 function withExtraEngines(design: Design, extra: number): Design {
   const bottom = design.stages[0];
   const main = bottom.engines.reduce((best, c, i, all) => (c.count > all[best].count ? i : best), 0);
@@ -176,14 +193,15 @@ function stageToStretch(design: Design, sketch: Sketch): number {
 
 function shortfallMark(fix: ShortfallFix, sketch: Sketch): RedPenMark {
   if (fix.stretchPercent !== null) {
-    return arrowTo(sketch.tankSide(), sketch.openSide(), -0.08, `stretch +${fix.stretchPercent}%`);
+    return {
+      ...arrowTo(sketch.tankSide(), sketch.openSide(), -0.08, `stretch +${fix.stretchPercent}%`),
+      fix: { type: "scale-tanks", stageIndex: fix.stageIndex, factor: 1 + fix.stretchPercent / 100 },
+    };
   }
   if (fix.withStage) {
-    const note =
-      fix.withStage.marginMps >= 0
-        ? "add a stage"
-        : `add a stage: still ${km(-fix.withStage.marginMps)} km/s short`;
-    return { kind: "ghost-line", points: sketch.newStageOutline(), note };
+    // Kept short so it fits beside the outline; the summary carries the numbers.
+    const note = fix.withStage.marginMps >= 0 ? "add a stage" : "a stage isn't enough";
+    return { kind: "ghost-line", points: sketch.newStageOutline(), note, fix: { type: "add-stage" } };
   }
   return arrowTo(sketch.tankSide(), sketch.openSide(), -0.08, "not enough fuel");
 }
@@ -220,7 +238,7 @@ function summarize(
   if (missing.length > 0) {
     return `${deltaV} gets it to ${destination}, but it needs ${missing.join(" and ")} to land.`;
   }
-  return `${deltaV}: it reaches ${destination} with ${km(analysis.marginMps)} km/s to spare.`;
+  return `${deltaV}: it reaches ${destination} with ${kmSpare(analysis.totalDeltaVMps, analysis.requiredDeltaVMps)} km/s to spare.`;
 }
 
 function shortfallAdvice(fix: ShortfallFix, analysis: Analysis): string {
@@ -230,11 +248,11 @@ function shortfallAdvice(fix: ShortfallFix, analysis: Analysis): string {
   if (options.length > 0) return options.join(" or ");
 
   if (fix.withStage) {
-    return `even a new stage leaves it ${km(-fix.withStage.marginMps)} km/s short`;
+    return `even a new stage leaves it ${kmShort(fix.withStage.totalDeltaVMps, fix.withStage.requiredDeltaVMps)} km/s short`;
   }
   return analysis.furthestReachable
     ? `it can reach ${DESTINATION_NAMES[analysis.furthestReachable]} at most`
-    : `it's ${km(-analysis.marginMps)} km/s short and can't make orbit`;
+    : `it's ${kmShort(analysis.totalDeltaVMps, analysis.requiredDeltaVMps)} km/s short and can't make orbit`;
 }
 
 // ---------------------------------------------------------------------------
@@ -305,10 +323,13 @@ class Sketch {
       : [[right, top], [right, bottom], [left, bottom], [left, top]];
   }
 
-  /** 1 when there's more napkin to the right of the rocket than to the left, else -1. */
+  /**
+   * Which side notes go on: 1 (right) unless the rocket sits well right of center. The overlay
+   * writes ghost-line notes rightward unless they start past 60% of the width, so prefer the right.
+   */
   openSide(): 1 | -1 {
     const [x, , w] = this.whole();
-    return x + w / 2 <= 0.5 ? 1 : -1;
+    return x + w / 2 <= 0.6 ? 1 : -1;
   }
 
   private ofKind(kind: PartKind) {
@@ -330,10 +351,15 @@ function circleAround([x, y, w, h]: Box, note: string): RedPenMark {
   return { kind: "circle", center, radius, note };
 }
 
-/** An arrow coming in from `side` (1 = right, -1 = left), with its note at the tail. */
+/**
+ * An arrow coming in from `side` (1 = right, -1 = left). The note is written outward from the
+ * tail, so the tail keeps enough napkin beyond it for the text.
+ */
 function arrowTo([tx, ty]: Point, side: 1 | -1, rise: number, note: string): RedPenMark {
   const to: Point = [clamp(tx, EDGE, 1 - EDGE), clamp(ty, EDGE, 1 - EDGE)];
-  const from: Point = [clamp(to[0] + side * 0.2, EDGE, 1 - EDGE), clamp(to[1] + rise, EDGE, 1 - EDGE)];
+  const room = EDGE + note.length * NOTE_CHAR_WIDTH;
+  const fromX = side > 0 ? Math.min(to[0] + 0.2, 1 - room) : Math.max(to[0] - 0.2, room);
+  const from: Point = [clamp(fromX, EDGE, 1 - EDGE), clamp(to[1] + rise, EDGE, 1 - EDGE)];
   return { kind: "arrow", from, to, note };
 }
 
@@ -368,9 +394,6 @@ function hasFeature(design: Design, parts: Part[], feature: "fins" | "landing-le
   return listed || parts.some((p) => p.kind === partKind);
 }
 
-function km(mps: number) {
-  return (mps / 1000).toFixed(1);
-}
 
 /** One decimal, but never round a TWR just under 1 up to "1.0". */
 function formatTwr(twr: number) {

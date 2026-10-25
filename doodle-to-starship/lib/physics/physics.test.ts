@@ -146,6 +146,29 @@ describe("simulateFlight", () => {
     expect(trace.maxAltitudeKm).toBeCloseTo(200, 0);
   });
 
+  it("cuts the engines at orbital speed for LEO, leaving the rest as margin", () => {
+    const trace = simulateFlight(falcon9, analyze(falcon9));
+    const maxSpeed = Math.max(...trace.points.map((p) => p.speedMps));
+    expect(maxSpeed).toBeLessThanOrEqual(7_800 + 1);
+    const orbit = trace.events.find((e) => e.kind === "orbit")!;
+    const cutoff = trace.events.find((e) => e.kind === "engine-cutoff")!;
+    expect(cutoff.tS).toBeCloseTo(orbit.tS, 6);
+    expect(trace.points.find((p) => p.tS >= orbit.tS)?.speedMps).toBeCloseTo(7_800, 0);
+
+    // Lots of margin: cutoff comes well before the propellant runs out.
+    const light = { ...falcon9, payloadMassKg: 1_000 };
+    const lightTrace = simulateFlight(light, analyze(light));
+    expect(Math.max(...lightTrace.points.map((p) => p.speedMps))).toBeLessThanOrEqual(7_800 + 1);
+  });
+
+  it("adds only the departure burn on top of orbital speed past LEO", () => {
+    const trace = simulateFlight(saturnV, analyze(saturnV));
+    const maxSpeed = Math.max(...trace.points.map((p) => p.speedMps));
+    expect(maxSpeed).toBeGreaterThan(7_800);
+    expect(maxSpeed).toBeLessThanOrEqual(7_800 + 3_260 + 1);
+    expect(trace.events.map((e) => e.kind)).toEqual(expect.arrayContaining(["orbit", "engine-cutoff", "arrival"]));
+  });
+
   it("sends a suborbital hop up to apogee and back down", () => {
     const trace = simulateFlight(tinyHopper, analyze(tinyHopper));
     const kinds = trace.events.map((e) => e.kind);

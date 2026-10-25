@@ -187,7 +187,7 @@ const DELTA_V_MAP = "https://en.wikipedia.org/wiki/Delta-v_budget";
 export const DESTINATIONS: Record<DestinationId, DestinationSpec> = {
   leo: { id: "leo", name: "Low Earth orbit", deltaVFromSurfaceMps: 9_400, source: DELTA_V_MAP },
   // + LEO to GTO 2.44 km/s
-  gto: { id: "gto", name: "Geostationary transfer orbit", deltaVFromSurfaceMps: 11_840, source: DELTA_V_MAP },
+  gto: { id: "gto", name: "Geo transfer orbit", deltaVFromSurfaceMps: 11_840, source: DELTA_V_MAP },
   // + trans-lunar injection 3.26, + lunar orbit insertion 0.68
   "moon-orbit": { id: "moon-orbit", name: "Lunar orbit", deltaVFromSurfaceMps: 13_340, source: DELTA_V_MAP },
   // + lunar descent 1.73

@@ -76,6 +76,11 @@ function expectOnNapkin(mark: RedPenMark) {
   } else if (mark.kind === "arrow") {
     inside(mark.from);
     inside(mark.to);
+    // The note is written outward from the tail; it needs room on the napkin.
+    const width = mark.note.length * 0.018;
+    const outward = Math.sign(mark.from[0] - mark.to[0]);
+    if (outward > 0) expect(mark.from[0] + width).toBeLessThanOrEqual(1);
+    if (outward < 0) expect(mark.from[0] - width).toBeGreaterThanOrEqual(0);
   } else {
     expect(mark.points.length).toBeGreaterThan(1);
     mark.points.forEach(inside);
@@ -124,6 +129,10 @@ describe("a rocket stuck on the pad", () => {
     }
     expect(r.summary).toContain("never leaves the pad");
     expect(r.summary).toContain(`add ${extra} engine`);
+
+    // Tapping the note applies exactly that edit.
+    expect(mark.fix).toEqual({ type: "set-engines", stageIndex: 0, engine: "merlin-1d", count: 1 + extra });
+    expect(analyze(applyAction(stuck, mark.fix!)).liftoffTwr).toBeGreaterThanOrEqual(1.3);
   });
 });
 
@@ -157,6 +166,9 @@ describe("a rocket short of its destination", () => {
       expect(mark.to[1]).toBeLessThan(0.78);
     }
     expect(r.summary).toMatch(new RegExp(`^\\d+\\.\\d of \\d+\\.\\d km/s: stretch the tanks ${percent}%`));
+
+    expect(mark!.fix).toEqual({ type: "scale-tanks", stageIndex: 0, factor: 1 + percent / 100 });
+    expect(analyze(applyAction(design, mark!.fix!)).marginMps).toBeGreaterThanOrEqual(0);
   });
 
   it("outlines a new stage when +150% tanks still fall short, and only if the stage helps", () => {
@@ -172,7 +184,8 @@ describe("a rocket short of its destination", () => {
     expect(staged.totalDeltaVMps).toBeGreaterThan(analysis.totalDeltaVMps);
 
     const ghost = r.marks.find((m) => m.kind === "ghost-line");
-    expect(ghost?.note).toMatch(/^add a stage/);
+    expect(ghost?.note).toMatch(/^(add a stage|a stage isn't enough)$/);
+    expect(ghost?.fix).toEqual({ type: "add-stage" });
     // Hangs below the rocket's bottom edge.
     if (ghost?.kind === "ghost-line") {
       expect(Math.max(...ghost.points.map((p) => p[1]))).toBeGreaterThan(0.84);
@@ -253,9 +266,38 @@ describe("every review", () => {
   it("brings arrows in from the open side of the napkin, never across the rocket", () => {
     const mars = falconLike({ destination: "mars-surface" });
     for (const [parts, side] of [[partsFor(mars), 1], [shifted(0.3, 0), -1]] as const) {
-      const arrows = review(mars, [...parts]).review.marks.filter((m) => m.kind === "arrow");
+      const { marks } = review(mars, [...parts]).review;
+      // The legs arrow switches sides to stay clear of a new-stage outline (tested below).
+      const hasGhost = marks.some((m) => m.kind === "ghost-line");
+      const arrows = marks.filter((m) => m.kind === "arrow" && !(hasGhost && m.note === "needs legs"));
       expect(arrows.length).toBeGreaterThan(0);
       for (const a of arrows) if (a.kind === "arrow") expect(Math.sign(a.from[0] - a.to[0])).toBe(side);
+    }
+  });
+
+  it("only offers tap-to-fix on marks with a concrete edit", () => {
+    const advisory = ["flies!", "fins do nothing in vacuum", "needs legs", "heat shield!"];
+    for (const d of [falconLike(), everythingWrong, falconLike({ destination: "mars-surface", features: ["fins"] })]) {
+      for (const m of review(d).review.marks) {
+        if (advisory.includes(m.note)) expect(m.fix).toBeUndefined();
+      }
+    }
+  });
+
+  it("brings the legs arrow in from the other side of a new-stage outline", () => {
+    const { review: r } = review(falconLike({ stages: [falconLike().stages[0]], destination: "moon-surface" }));
+    const ghost = r.marks.find((m) => m.kind === "ghost-line");
+    const legs = r.marks.find((m) => m.note === "needs legs");
+    expect(ghost && legs).toBeTruthy();
+    if (ghost?.kind === "ghost-line" && legs?.kind === "arrow") {
+      const ghostSide = Math.sign(ghost.points.at(-1)![0] - ghost.points[0][0]);
+      expect(Math.sign(legs.from[0] - legs.to[0])).toBe(-ghostSide);
+    }
+  });
+
+  it("never reports a shortfall of 0.0 km/s", () => {
+    for (const [, d, parts] of cases) {
+      expect(review(d, parts).review.summary).not.toMatch(/0\.0 km\/s short/);
     }
   });
 
