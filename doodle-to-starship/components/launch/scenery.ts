@@ -1,4 +1,5 @@
 import type { DestinationId } from "@/lib/design";
+import { BOUNDARIES } from "./atmosphere";
 import type { Doodle, Vec } from "./geometry";
 
 export type RGB = [number, number, number];
@@ -82,9 +83,30 @@ export function glowSprite(c: RGB, size = 64): HTMLCanvasElement {
   return canvas;
 }
 
+/** Dusk blue in the troposphere, darkening through the stratosphere, black by the Kármán line. */
+function skyColors(altKm: number, pal: Palette): [RGB, RGB] {
+  const stops: [number, RGB, RGB][] = [
+    [0, [24, 62, 116], [70, 118, 176]],
+    [12, [18, 48, 96], [52, 98, 156]],
+    [30, [12, 30, 64], [32, 66, 116]],
+    [50, [8, 16, 36], [17, 36, 70]],
+    [80, [6, 9, 19], [10, 18, 36]],
+    [100, pal.night, [7, 11, 22]],
+  ];
+  for (let i = 1; i < stops.length; i++) {
+    const [km, top, bottom] = stops[i];
+    if (altKm <= km) {
+      const [km0, top0, bottom0] = stops[i - 1];
+      const k = (altKm - km0) / (km - km0);
+      return [mix(top0, top, k), mix(bottom0, bottom, k)];
+    }
+  }
+  const last = stops[stops.length - 1];
+  return [last[1], last[2]];
+}
+
 export function drawSky(ctx: CanvasRenderingContext2D, W: number, H: number, pal: Palette, altKm: number, alpha: number) {
-  const top = mix(pal.nightHigh, pal.night, clamp01(altKm / 60));
-  const bottom = mix([22, 48, 90], pal.night, clamp01(altKm / 90));
+  const [top, bottom] = skyColors(Math.max(0, altKm), pal);
   const g = ctx.createLinearGradient(0, 0, 0, H);
   g.addColorStop(0, rgba(top, 1));
   g.addColorStop(1, rgba(bottom, 1));
@@ -150,12 +172,13 @@ export function drawStars(
   ctx.globalAlpha = 1;
 }
 
-/** Blue air glow sitting on the horizon (or the bottom of the screen once the ground is gone). */
-export function drawHorizonGlow(ctx: CanvasRenderingContext2D, W: number, H: number, y: number, intensity: number) {
+/** Air glow on the horizon (or the bottom of the screen once the ground is gone); warm at dusk. */
+export function drawHorizonGlow(ctx: CanvasRenderingContext2D, W: number, H: number, y: number, intensity: number, warm = 0) {
   if (intensity <= 0.01) return;
   const top = y - H * 0.45;
+  const near = mix([70, 120, 200], [255, 168, 110], warm);
   const g = ctx.createLinearGradient(0, y, 0, top);
-  g.addColorStop(0, `rgba(70,120,200,${0.32 * intensity})`);
+  g.addColorStop(0, rgba(near, (0.32 + 0.18 * warm) * intensity));
   g.addColorStop(0.4, `rgba(40,80,150,${0.12 * intensity})`);
   g.addColorStop(1, "rgba(20,40,80,0)");
   ctx.fillStyle = g;
@@ -340,4 +363,157 @@ export function drawTargetBody(
   ctx.beginPath();
   ctx.arc(x, y, r, 0, Math.PI * 2.08);
   ctx.stroke();
+}
+
+// --- Layers of the atmosphere ---
+// Boundaries and clouds aren't drawn at true scale (at true scale a layer line would cross
+// the screen in a single frame); each scrolls past at a pace you can read.
+
+/** Screen y of something at `km` while the rocket (at `centerY`) is at `altKm`. */
+const layerY = (altKm: number, km: number, centerY: number, pxPerKm: number) => centerY + (altKm - km) * pxPerKm;
+
+/** A dashed line with its name at each boundary, sweeping down past the rocket as it climbs. */
+export function drawBoundaries(
+  ctx: CanvasRenderingContext2D,
+  W: number,
+  H: number,
+  altKm: number,
+  centerY: number,
+  font: string,
+  chalk: RGB,
+  alpha: number,
+) {
+  if (alpha <= 0.01) return;
+  ctx.save();
+  ctx.font = `600 12px ${font}`;
+  if ("letterSpacing" in ctx) (ctx as CanvasRenderingContext2D & { letterSpacing: string }).letterSpacing = "1.5px";
+  ctx.textBaseline = "bottom";
+  for (const b of BOUNDARIES) {
+    const y = layerY(altKm, b.km, centerY, (H * 2.6) / b.km);
+    if (y < -30 || y > H + 30) continue;
+    const near = 1 - clamp01(Math.abs(altKm - b.km) / Math.max(1, b.km * 0.05));
+    const a = alpha * ((b.hero ? 0.6 : 0.32) + 0.4 * near);
+    if (b.hero) {
+      ctx.setLineDash([]);
+      ctx.globalAlpha = a * 0.25;
+      ctx.strokeStyle = "rgba(140,190,255,1)";
+      ctx.lineWidth = 7;
+      ctx.beginPath();
+      ctx.moveTo(0, y);
+      ctx.lineTo(W, y);
+      ctx.stroke();
+    }
+    ctx.setLineDash(b.hero ? [10, 6] : [5, 7]);
+    ctx.globalAlpha = a;
+    ctx.strokeStyle = rgba(chalk, 1);
+    ctx.lineWidth = b.hero ? 1.5 : 1;
+    ctx.beginPath();
+    ctx.moveTo(0, y);
+    ctx.lineTo(W, y);
+    ctx.stroke();
+    ctx.globalAlpha = Math.min(1, a + 0.25);
+    ctx.fillStyle = rgba(chalk, 1);
+    ctx.fillText(`${b.label.toUpperCase()}  ·  ${b.km.toLocaleString("en-US")} KM`, 24, y - 6);
+  }
+  ctx.restore();
+}
+
+/** Ozone (15–35 km): a faint teal haze while the rocket is inside it. */
+export function drawOzone(ctx: CanvasRenderingContext2D, W: number, H: number, altKm: number, centerY: number) {
+  const s = (H * 2.6) / 25;
+  const yTop = layerY(altKm, 35, centerY, s);
+  const yBot = layerY(altKm, 15, centerY, s);
+  if (yBot < 0 || yTop > H) return;
+  const g = ctx.createLinearGradient(0, yTop, 0, yBot);
+  g.addColorStop(0, "rgba(110,215,225,0)");
+  g.addColorStop(0.5, "rgba(110,215,225,0.09)");
+  g.addColorStop(1, "rgba(110,215,225,0)");
+  ctx.fillStyle = g;
+  ctx.fillRect(0, Math.max(0, yTop), W, Math.min(H, yBot) - Math.max(0, yTop));
+}
+
+export interface Cloud {
+  km: number;
+  x: number;
+  w: number;
+  /** dx, dy, r as fractions of the cloud's width. */
+  puffs: [number, number, number][];
+}
+
+export function makeClouds(rand: () => number): Cloud[] {
+  return Array.from({ length: 18 }, () => {
+    const n = 4 + Math.floor(rand() * 4);
+    const puffs: [number, number, number][] = [];
+    for (let k = 0; k < n; k++) {
+      const f = k / (n - 1);
+      puffs.push([(f - 0.5) * 0.85 + (rand() - 0.5) * 0.08, -0.1 * Math.sin(Math.PI * f) + (rand() - 0.5) * 0.06, 0.13 + rand() * 0.11]);
+    }
+    return { km: 1.2 + rand() * 9.6, x: rand(), w: 0.16 + rand() * 0.3, puffs };
+  });
+}
+
+/** Chalk-outlined clouds in the troposphere, falling past as the rocket climbs through them. */
+export function drawClouds(
+  ctx: CanvasRenderingContext2D,
+  W: number,
+  H: number,
+  clouds: Cloud[],
+  altKm: number,
+  downKm: number,
+  centerY: number,
+  sprite: HTMLCanvasElement,
+  chalk: RGB,
+  alpha: number,
+) {
+  if (alpha <= 0.01 || altKm > 16) return;
+  ctx.save();
+  ctx.lineWidth = 1.5;
+  ctx.lineCap = "round";
+  ctx.strokeStyle = rgba(chalk, 1);
+  for (const c of clouds) {
+    const w = c.w * W;
+    const y = layerY(altKm, c.km, centerY, H * 0.32);
+    if (y < -w * 0.4 || y > H + w * 0.4) continue;
+    const x = wrap(c.x * W * 1.4 - downKm * 30, W * 1.4) - W * 0.2;
+    ctx.globalAlpha = alpha * 0.3;
+    for (const [dx, dy, r] of c.puffs) {
+      const R = r * w * 1.3;
+      ctx.drawImage(sprite, x + dx * w - R, y + dy * w - R, R * 2, R * 2);
+    }
+    ctx.globalAlpha = alpha * 0.5;
+    ctx.beginPath();
+    for (const [dx, dy, r] of c.puffs) {
+      const R = r * w * 0.62;
+      const cx = x + dx * w;
+      const cy = y + dy * w;
+      ctx.moveTo(cx + Math.cos(Math.PI * 1.08) * R, cy + Math.sin(Math.PI * 1.08) * R);
+      ctx.arc(cx, cy, R, Math.PI * 1.08, Math.PI * 1.92);
+    }
+    ctx.stroke();
+  }
+  ctx.restore();
+}
+
+/** Thermosphere aurora: green-to-violet curtains shimmering low on the screen, k 0..1. */
+export function drawAurora(ctx: CanvasRenderingContext2D, W: number, H: number, k: number, t: number) {
+  if (k <= 0.01) return;
+  const base = H * 0.92;
+  const g = ctx.createLinearGradient(0, base - H * 0.5, 0, base);
+  g.addColorStop(0, "rgba(150,90,220,0)");
+  g.addColorStop(0.35, "rgba(150,90,220,0.55)");
+  g.addColorStop(0.75, "rgba(76,195,138,0.9)");
+  g.addColorStop(1, "rgba(76,195,138,0)");
+  ctx.save();
+  ctx.globalCompositeOperation = "lighter";
+  ctx.fillStyle = g;
+  for (let band = 0; band < 2; band++) {
+    for (let x = -8; x < W + 8; x += 4) {
+      const ph = x * 0.005 + t * (0.3 + band * 0.18) + band * 2.1;
+      const y = base - H * (0.06 + band * 0.08) + Math.sin(ph) * H * 0.035 + Math.sin(ph * 2.3 + 1) * H * 0.015;
+      const h = H * (0.1 + 0.12 * (0.5 + 0.5 * Math.sin(ph * 1.7 + t * 0.8)));
+      ctx.globalAlpha = Math.max(0, k * (0.09 + 0.07 * Math.sin(x * 0.04 + t * 2.6 + band)));
+      ctx.fillRect(x, y - h, 4, h);
+    }
+  }
+  ctx.restore();
 }

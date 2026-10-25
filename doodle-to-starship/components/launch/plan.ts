@@ -8,6 +8,7 @@ import type {
   FlightTrace,
   Verdict,
 } from "@/lib/design";
+import { BOUNDARIES } from "./atmosphere";
 
 // Playback timeline, in seconds of animation. The napkin fades to night, the camera
 // settles on the pad, the engines light, and then the trace plays compressed.
@@ -43,6 +44,16 @@ export interface Burn {
   piece: number;
 }
 
+/** The rocket passing a layer boundary, for the ladder and the mission log. */
+export interface Crossing {
+  at: number;
+  /** Sim seconds after liftoff, for the log's T+ stamp. */
+  simT: number;
+  km: number;
+  text: string;
+  hero: boolean;
+}
+
 export interface Finale {
   at: number;
   text: string;
@@ -59,6 +70,7 @@ export interface Plan {
   liftoffAt: number | null;
   cues: Cue[];
   captions: CaptionCue[];
+  crossings: Crossing[];
   burns: Burn[];
   /** seps[i] is when pieces[i] lets go. */
   seps: number[];
@@ -155,6 +167,7 @@ function padPlan(points: FlightPoint[], events: FlightEvent[], analysis: Analysi
     liftoffAt: null,
     cues,
     captions: captionsFor(cues, 0, true),
+    crossings: [],
     burns: [{ from: T_IGNITE, to: explodeAt, piece: 0 }],
     seps: [],
     finaleAt: explodeAt,
@@ -254,6 +267,7 @@ function flightPlan(
   }
   if (on !== null) burns.push({ from: on, to: finaleAt + 0.7, piece });
 
+  const crossings = crossingsFor(points, T, playOf);
   const sepsSeen = { n: 0 };
   const failed = outcome === "suborbital";
   const finale = finaleFor(outcome, design, failed ? finaleAt + 0.15 : finaleAt + 1.1);
@@ -267,7 +281,11 @@ function flightPlan(
     liftoffAt,
     cues,
     // In orbit the finale has the stage; later events still reach onEvent but get no caption.
-    captions: captionsFor(cues, maxAltKm, false, sepsSeen, outcome === "suborbital" ? Infinity : finaleAt - 0.2),
+    captions: withKarman(
+      captionsFor(cues, maxAltKm, false, sepsSeen, outcome === "suborbital" ? Infinity : finaleAt - 0.2),
+      crossings,
+    ),
+    crossings,
     burns,
     seps,
     finaleAt,
@@ -280,6 +298,38 @@ function flightPlan(
     hasDownrange: maxDown > Math.max(0.5, maxAltKm * 0.02),
     simAt,
   };
+}
+
+/** Every time the trace passes a layer boundary, either way, within the played part. */
+function crossingsFor(points: FlightPoint[], T: number, playOf: (sim: number) => number): Crossing[] {
+  const out: Crossing[] = [];
+  for (let i = 1; i < points.length && points[i - 1].tS < T; i++) {
+    const a = points[i - 1];
+    const b = points[i];
+    for (const bd of BOUNDARIES) {
+      const up = a.altitudeKm < bd.km && b.altitudeKm >= bd.km;
+      const down = a.altitudeKm >= bd.km && b.altitudeKm < bd.km;
+      if (!up && !down) continue;
+      const k = (bd.km - a.altitudeKm) / (b.altitudeKm - a.altitudeKm || 1);
+      const simT = Math.min(T, a.tS + (b.tS - a.tS) * k);
+      out.push({ at: playOf(simT), simT, km: bd.km, text: up ? bd.up : bd.down, hero: !!bd.hero });
+    }
+  }
+  return out.sort((x, y) => x.at - y.at);
+}
+
+/** "Space begins" gets its own callout on the way up, slotted between the others. */
+function withKarman(captions: CaptionCue[], crossings: Crossing[]): CaptionCue[] {
+  const karman = crossings.find((c) => c.hero && c.text.startsWith("Crossed"));
+  if (!karman) return captions;
+  const all = [...captions, { at: karman.at, text: "Kármán line", sub: "Space begins · 100 km", tone: "chalk" as Tone }];
+  all.sort((a, b) => a.at - b.at);
+  let lastAt = -Infinity;
+  for (const c of all) {
+    c.at = Math.max(c.at, lastAt + 1.6);
+    lastAt = c.at;
+  }
+  return all;
 }
 
 /** If a suborbital trace stops in mid-air, finish the fall ballistically so it can hit the ground. */

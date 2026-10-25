@@ -2,10 +2,11 @@
 
 import { useEffect, useMemo, useRef, useState, type Ref } from "react";
 import type { Analysis, FlightEvent, FlightEventKind, FlightTrace, SketchReading, Stroke } from "@/lib/design";
+import { BOUNDARIES, FAR_MARKS, LAYERS, ladderPos, ladderTop } from "./launch/atmosphere";
 import { createLaunchAudio, isLaunchAudioMuted, setLaunchAudioMuted, unlockLaunchAudio } from "./launch/audio";
 import EndCard from "./launch/EndCard";
 import { flightStats, planFor, startLaunch, type LaunchHandle, type NapkinRect } from "./launch/engine";
-import type { CaptionCue, Finale, Plan, Tone } from "./launch/plan";
+import type { CaptionCue, Crossing, Finale, Plan, Tone } from "./launch/plan";
 import { useReplay, type ReplayState } from "./launch/useReplay";
 
 // The narrator can share the launch's mission-control tones, and the LAUNCH button
@@ -158,6 +159,10 @@ function LaunchRun(props: RunProps) {
   const stageRef = useRef<HTMLDivElement>(null);
   const fillRef = useRef<HTMLDivElement>(null);
   const timelineRef = useRef<HTMLDivElement>(null);
+  const ladderRef = useRef<HTMLDivElement>(null);
+  const markerRef = useRef<HTMLDivElement>(null);
+  const readoutRef = useRef<HTMLSpanElement>(null);
+  const [log, setLog] = useState<Crossing[]>([]);
   const handle = useRef<LaunchHandle | null>(null);
   const [caption, setCaption] = useState<(CaptionCue & { id: number }) | null>(null);
   const [finale, setFinale] = useState<Finale | null>(null);
@@ -177,9 +182,16 @@ function LaunchRun(props: RunProps) {
       stage: stageRef.current,
       fill: fillRef.current,
       marks: [...(timelineRef.current?.querySelectorAll<HTMLElement>("[data-at]") ?? [])],
+      ladder: {
+        box: ladderRef.current,
+        marker: markerRef.current,
+        readout: readoutRef.current,
+        marks: [...(ladderRef.current?.querySelectorAll<HTMLElement>("[data-km]") ?? [])],
+      },
     };
     const h = startLaunch(canvas, hud, input, {
       onCaption: setCaption,
+      onCrossing: (c) => setLog((l) => [...l.slice(-3), c]),
       onFinale: setFinale,
       onEnd: () => setEnded(true),
       onEvent: (e) => latest.current.onEvent?.(e),
@@ -222,6 +234,27 @@ function LaunchRun(props: RunProps) {
           {input.reading.design.name}
         </span>
       </div>
+
+      {!ended && log.length > 0 && (
+        <ol className="pointer-events-none absolute left-4 top-12 space-y-1 sm:left-6 sm:top-14" aria-label="Mission log">
+          {log.map((c, i) => (
+            <li
+              key={`${c.km}-${c.at}`}
+              className={`ls-fade flex gap-3 text-xs ${LIFT} ${i === log.length - 1 ? "text-starlight" : "text-haze/70"}`}
+            >
+              <span className="font-display font-semibold tracking-wide">{clockText(c.simT)}</span>
+              <span>{c.text}</span>
+            </li>
+          ))}
+        </ol>
+      )}
+
+      <AltitudeLadder
+        top={ladderTop(input.reading.design.destination)}
+        boxRef={ladderRef}
+        markerRef={markerRef}
+        readoutRef={readoutRef}
+      />
 
       {!ended && (
         <div className="absolute right-4 top-4 flex items-center gap-5 text-[11px] font-semibold uppercase tracking-[0.18em] text-haze sm:right-6 sm:top-5">
@@ -311,6 +344,79 @@ function LaunchRun(props: RunProps) {
           onReplay={props.onReplay}
         />
       )}
+    </div>
+  );
+}
+
+function clockText(sim: number): string {
+  const secs = Math.max(0, Math.floor(sim));
+  const two = (n: number) => String(n).padStart(2, "0");
+  return `T+ ${two(Math.floor(secs / 3600))}:${two(Math.floor(secs / 60) % 60)}:${two(secs % 60)}`;
+}
+
+const kmLabel = (km: number) => km.toLocaleString("en-US");
+
+/**
+ * The layers of the atmosphere as a vertical scale on the right: linear to 120 km, then
+ * log-compressed so orbit (and the Moon, if that's the target) fit. The engine moves the
+ * marker and lights each boundary as the rocket passes it.
+ */
+function AltitudeLadder({
+  top,
+  boxRef,
+  markerRef,
+  readoutRef,
+}: {
+  top: number;
+  boxRef: Ref<HTMLDivElement>;
+  markerRef: Ref<HTMLDivElement>;
+  readoutRef: Ref<HTMLSpanElement>;
+}) {
+  const marks = [
+    ...BOUNDARIES.filter((b) => b.km <= top).map((b) => ({ km: b.km, label: b.label, hero: !!b.hero })),
+    ...FAR_MARKS.filter((m) => m.km <= top).map((m) => ({ ...m, hero: false })),
+  ];
+  return (
+    <div className="ls-fade pointer-events-none absolute bottom-32 right-8 top-20 hidden w-44 [animation-delay:1.4s] lg:block">
+      <div ref={boxRef} className="relative h-full">
+        <div className="absolute inset-y-0 left-0 w-px bg-white/15" />
+        {LAYERS.map((l) => {
+          const a = ladderPos(l.from, top);
+          const b = ladderPos(Math.min(l.to, top), top);
+          return (
+            <div key={l.name} className="absolute -left-px w-[3px]" style={{ bottom: `${a * 100}%`, height: `${(b - a) * 100}%` }}>
+              <div className="h-full w-full opacity-60" style={{ background: l.color }} />
+              <div
+                className="absolute left-3 top-1/2 -translate-y-1/2 whitespace-nowrap text-[10px] font-semibold uppercase tracking-[0.2em] text-white/25"
+                style={{ display: b - a > 0.07 ? undefined : "none" }}
+              >
+                {l.name}
+              </div>
+            </div>
+          );
+        })}
+        {marks.map((m) => (
+          <div
+            key={m.label}
+            data-km={m.km}
+            className="group absolute left-0 flex translate-y-1/2 items-center gap-2"
+            style={{ bottom: `${ladderPos(m.km, top) * 100}%` }}
+          >
+            <span className={`h-px transition-colors ${m.hero ? "w-5 bg-white/60" : "w-2.5 bg-white/35"} group-data-[lit=1]:bg-starlight`} />
+            <span
+              className={`whitespace-nowrap text-[11px] transition-colors group-data-[lit=1]:text-starlight ${m.hero ? "text-starlight/80" : "text-haze"} ${LIFT}`}
+            >
+              <span className="font-display font-semibold">{kmLabel(m.km)} km</span> {m.label}
+            </span>
+          </div>
+        ))}
+        <div ref={markerRef} className="absolute bottom-0 left-0 will-change-transform">
+          <div className="absolute right-1.5 top-0 flex -translate-y-1/2 items-center gap-1.5 whitespace-nowrap">
+            <span ref={readoutRef} className={`font-display text-sm font-semibold text-starlight ${LIFT}`} />
+            <span className="h-0 w-0 border-y-[5px] border-l-[7px] border-y-transparent border-l-starlight" />
+          </div>
+        </div>
+      </div>
     </div>
   );
 }

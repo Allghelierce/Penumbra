@@ -1,4 +1,5 @@
 import { NAPKIN_ASPECT, type Analysis, type FlightEvent, type FlightTrace, type SketchReading, type Stroke } from "@/lib/design";
+import { ladderPos, ladderTop, layerAt } from "./atmosphere";
 import type { LaunchAudio } from "./audio";
 import { buildDoodle, unionBox, type Nozzle, type Vec } from "./geometry";
 import {
@@ -11,18 +12,24 @@ import {
   T_LIFTOFF,
   T_NIGHT,
   type CaptionCue,
+  type Crossing,
   type Finale,
   type Plan,
 } from "./plan";
 import {
   clamp01,
+  drawAurora,
+  drawBoundaries,
+  drawClouds,
   drawGround,
   drawHorizonGlow,
   drawLimb,
+  drawOzone,
   drawSky,
   drawStars,
   drawTargetBody,
   glowSprite,
+  makeClouds,
   makePad,
   makeStars,
   mix,
@@ -51,6 +58,8 @@ export interface LaunchInput {
 
 export interface LaunchHooks {
   onCaption: (c: CaptionCue & { id: number }) => void;
+  /** The rocket passed a layer boundary (for the mission log). */
+  onCrossing?: (c: Crossing) => void;
   onFinale: (f: Finale) => void;
   onEnd: () => void;
   onEvent: (e: FlightEvent) => void;
@@ -69,6 +78,13 @@ export interface HudRefs {
   fill: HTMLElement | null;
   /** Timeline milestones with data-at (0..1); the engine sets data-passed as they go by. */
   marks: HTMLElement[];
+  /** The altitude ladder: a marker that rides up the scale and boundaries that light as they pass. */
+  ladder?: {
+    box: HTMLElement | null;
+    marker: HTMLElement | null;
+    readout: HTMLElement | null;
+    marks: HTMLElement[];
+  } | null;
 }
 
 /** Doodle and plan for a launch, shared by the engine and the overlay's timeline. */
@@ -201,6 +217,13 @@ export function startLaunch(
   const piecePaths = pieces.map((p) => pencilPath(p.lines));
   const padPath = polyPath(makePad(doodle, GROUND * Hn, seeded(11)));
   const stars = makeStars(seeded(5));
+  const clouds = makeClouds(seeded(41));
+  const topKm = ladderTop(design.destination);
+  const displayFont =
+    getComputedStyle(document.documentElement).getPropertyValue("--font-barlow-condensed").trim() || "sans-serif";
+  /** Mesosphere meteors, in screen px. */
+  const meteors: { x: number; y: number; vx: number; vy: number; age: number; life: number; len: number }[] = [];
+  let crossIdx = 0;
   const wobbleRand = seeded(23);
   const horizon = Array.from({ length: 48 }, () => (wobbleRand() - 0.5) * 3);
   const sprites: Record<SpriteId, HTMLCanvasElement> = {
@@ -675,12 +698,57 @@ export function startLaunch(
       H,
       -(flying ? s.down : 0) * 5 - finaleK * 70,
       altKm * 26,
-      night * (0.35 + 0.65 * clamp01(altKm / 40)),
+      night * (0.08 + 0.92 * clamp01((altKm - 8) / 45)),
       t,
     );
+
+    // The layers of the atmosphere, passing by at a readable pace.
+    const layerCenter = H * 0.47;
+    const limbRise = orbitish ? easeOut((t - plan.finaleAt + 0.3) / 2.6) : 0;
+    drawOzone(c, W, H, altKm, layerCenter);
+    drawAurora(c, W, H, clamp01((altKm - 85) / 25) * (1 - limbRise) * night, t);
+    const meteorK = flying ? clamp01((altKm - 45) / 8) * clamp01((88 - altKm) / 8) : 0;
+    if (meteorK > 0 && Math.random() < 7 * meteorK * dt) {
+      const ang = rnd(0.55, 0.95) * Math.PI;
+      const sp = rnd(900, 1600);
+      meteors.push({ x: rnd(0.1, 1.1) * W, y: rnd(-0.1, 0.55) * H, vx: Math.cos(ang) * sp, vy: Math.sin(ang) * sp, age: 0, life: rnd(0.35, 0.7), len: rnd(60, 150) });
+    }
+    if (meteors.length) {
+      c.save();
+      c.globalCompositeOperation = "lighter";
+      c.lineCap = "round";
+      for (let i = meteors.length - 1; i >= 0; i--) {
+        const m = meteors[i];
+        m.age += dt;
+        if (m.age >= m.life) {
+          meteors.splice(i, 1);
+          continue;
+        }
+        m.x += m.vx * dt;
+        m.y += m.vy * dt;
+        const sp = Math.hypot(m.vx, m.vy);
+        const tx = m.x - (m.vx / sp) * m.len;
+        const ty = m.y - (m.vy / sp) * m.len;
+        const g = c.createLinearGradient(m.x, m.y, tx, ty);
+        g.addColorStop(0, "rgba(255,244,220,0.95)");
+        g.addColorStop(0.25, rgba(pal.flameHot, 0.5));
+        g.addColorStop(1, rgba(pal.flameHot, 0));
+        c.globalAlpha = 1 - m.age / m.life;
+        c.strokeStyle = g;
+        c.lineWidth = 1.6;
+        c.beginPath();
+        c.moveTo(m.x, m.y);
+        c.lineTo(tx, ty);
+        c.stroke();
+      }
+      c.restore();
+    }
+    if (flying || plan.liftoffAt === null) drawBoundaries(c, W, H, altKm, layerCenter, displayFont, pal.chalk, night);
+    drawClouds(c, W, H, clouds, altKm, flying ? s.down : 0, layerCenter, sprites.puff, pal.chalk, night * (flying ? 1 : 0));
+
     const groundY = SY(groundLevel);
-    drawHorizonGlow(c, W, H, Math.min(groundY, H * 1.02), padK * (1 - clamp01(altKm / 150)));
-    if (orbitish) drawLimb(c, W, H, easeOut((t - plan.finaleAt + 0.3) / 2.6), pal.chalk);
+    drawHorizonGlow(c, W, H, Math.min(groundY, H * 1.02), padK * (1 - clamp01(altKm / 150)), 1 - clamp01(altKm / 15));
+    if (orbitish) drawLimb(c, W, H, limbRise, pal.chalk);
     if (body) drawTargetBody(c, W, H, body, easeOutBack((t - plan.finaleAt - 1.3) / 1.2), pal);
     drawGround(c, W, H, groundY, padK, horizon, pal.chalk);
     if (padK > 0.01 && groundY > -H && groundY < H * 3) {
@@ -781,7 +849,16 @@ export function startLaunch(
       hudSet(hud.clock, "clock", `T${neg ? "−" : "+"} ${two(Math.floor(secs / 3600))}:${two(Math.floor(secs / 60) % 60)}:${two(secs % 60)}`);
       hudSet(hud.speed, "speed", Math.round(flying ? s.speed : 0).toLocaleString("en-US"));
       hudSet(hud.alt, "alt", altKm < 100 ? altKm.toFixed(1) : Math.round(altKm).toLocaleString("en-US"));
-      hudSet(hud.stage, "stage", `Stage ${(flying ? s.stage : 0) + 1}`);
+      hudSet(hud.stage, "stage", `Stage ${(flying ? s.stage : 0) + 1} · ${layerAt(altKm).name}`);
+      const lad = hud.ladder;
+      if (lad?.box && lad.marker) {
+        lad.marker.style.transform = `translateY(${-ladderPos(altKm, topKm) * lad.box.clientHeight}px)`;
+        hudSet(lad.readout, "ladder", `${altKm < 100 ? altKm.toFixed(1) : Math.round(altKm).toLocaleString("en-US")} km`);
+        for (const m of lad.marks) {
+          const lit = altKm >= Number(m.dataset.km) ? "1" : "0";
+          if (m.dataset.lit !== lit) m.dataset.lit = lit;
+        }
+      }
       if (hud.root && hudShown.root !== "1") {
         hudShown.root = "1";
         hud.root.style.opacity = "1";
@@ -811,6 +888,9 @@ export function startLaunch(
         console.error(err);
       }
     }
+    while (crossIdx < plan.crossings.length && plan.crossings[crossIdx].at <= t) {
+      hooks.onCrossing?.(plan.crossings[crossIdx++]);
+    }
     while (capIdx < plan.captions.length && plan.captions[capIdx].at <= t) {
       hooks.onCaption({ ...plan.captions[capIdx++], id: ++capId });
     }
@@ -833,6 +913,7 @@ export function startLaunch(
       if (ended) return;
       cueIdx = plan.cues.length;
       capIdx = plan.captions.length;
+      crossIdx = plan.crossings.length;
       finaleShown = true;
       t = Math.max(t, plan.endAt);
     },
