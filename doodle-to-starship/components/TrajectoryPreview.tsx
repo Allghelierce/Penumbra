@@ -8,7 +8,9 @@ import type { FlightEventKind, FlightTrace } from "@/lib/design";
 
 const W = 420;
 const H = 170;
-const PAD = { left: 8, right: 8, top: 10, bottom: 18 };
+/** The left gutter holds the layer names, so the flight path never crosses them. */
+const GUTTER = 78;
+const PAD = { left: GUTTER, right: 10, top: 12, bottom: 18 };
 
 /** Linear up to 120 km, where the layers are; compressed above, so orbit still fits. */
 function scaleAltitude(km: number, top: number): number {
@@ -58,7 +60,7 @@ export default function TrajectoryPreview({ trace }: { trace: FlightTrace }) {
       const prev = events[events.length - 1];
       if (prev && Math.hypot(ex - prev.x, ey - prev.y) < 26) continue;
       const nearRight = ex > W - 70;
-      events.push({ label, x: ex, y: ey, anchor: nearRight ? "end" : "start", dy: events.length % 2 ? 12 : -5 });
+      events.push({ label, x: ex, y: ey, anchor: nearRight ? "end" : "start", dy: 3 });
     }
     return { path, events, x, y, top, maxAlt };
   }, [trace]);
@@ -76,9 +78,9 @@ export default function TrajectoryPreview({ trace }: { trace: FlightTrace }) {
         return (
           <g key={layer.name}>
             <rect x={PAD.left} y={y1} width={W - PAD.left - PAD.right} height={Math.max(0, y0 - y1)} fill="#fff" opacity={0.015 + (i % 2) * 0.02} />
-            {/* Name each band inside it, at its middle; bands too thin to hold a label stay unnamed. */}
-            {tall && layer.name !== "Thermosphere" && (
-              <text x={W - PAD.right - 4} y={(y0 + y1) / 2 + 3} textAnchor="end" fontSize="8" letterSpacing="1.2" fill="var(--haze)" fontFamily="var(--font-barlow)">
+            {/* Name each band in the gutter beside it; bands too thin to hold a label stay unnamed. */}
+            {tall && (
+              <text x={4} y={(y0 + Math.max(y1, karman + 4)) / 2 + 3} fontSize="8" letterSpacing="1" fill="var(--haze)" fontFamily="var(--font-barlow)">
                 {layer.name.toUpperCase()}
               </text>
             )}
@@ -87,8 +89,11 @@ export default function TrajectoryPreview({ trace }: { trace: FlightTrace }) {
       })}
       {/* the Kármán line: where space begins */}
       <line x1={PAD.left} x2={W - PAD.right} y1={karman} y2={karman} stroke="#fff" strokeOpacity="0.55" strokeDasharray="4 3" />
-      <text x={W - PAD.right - 4} y={karman - 4} textAnchor="end" fontSize="8" letterSpacing="1.2" fill="#fff" fontFamily="var(--font-barlow)">
-        KÁRMÁN LINE · 100 KM · SPACE
+      <text x={4} y={karman + 3} fontSize="8" letterSpacing="1" fill="#fff" fontFamily="var(--font-barlow)">
+        KÁRMÁN 100 KM
+      </text>
+      <text x={4} y={PAD.top + 6} fontSize="8" letterSpacing="1" fill="var(--haze)" fontFamily="var(--font-barlow)">
+        SPACE
       </text>
       {/* ground */}
       <line x1={PAD.left} x2={W - PAD.right} y1={H - PAD.bottom} y2={H - PAD.bottom} stroke="#fff" strokeOpacity="0.35" />
@@ -100,7 +105,7 @@ export default function TrajectoryPreview({ trace }: { trace: FlightTrace }) {
             <g key={i}>
               <circle cx={e.x} cy={e.y} r="2.4" fill="#000" stroke="#fff" strokeWidth="1.2" />
               <text
-                x={e.anchor === "end" ? e.x - 5 : e.x + 5}
+                x={e.anchor === "end" ? e.x - 7 : e.x + 7}
                 y={e.y + e.dy}
                 textAnchor={e.anchor}
                 fontSize="8"

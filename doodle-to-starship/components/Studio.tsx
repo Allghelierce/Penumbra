@@ -209,7 +209,7 @@ export default function Studio() {
 
   async function check() {
     // A ref, not `phase`: a click, ?check=1 and attract mode can all ask within one render.
-    if (strokes.length === 0 || checking.current) return;
+    if (strokes.length === 0 || checking.current || replaying) return;
     checking.current = true;
     const id = ++runs.current.check;
     setPhase("reading");
@@ -262,6 +262,7 @@ export default function Studio() {
   }
 
   const startLaunch = useCallback(() => {
+    if (checking.current) return;
     // Inside the click or key press that launched, so Safari lets the launch audio play.
     unlockLaunchAudio();
     const { design: current, reading: read, strokes: drawn } = latest.current;
@@ -291,6 +292,8 @@ export default function Studio() {
 
   // handleAction is memoized; it reaches the latest openPoll (defined below) through this ref.
   const openPollRef = useRef<() => void>(() => {});
+  // The Cmd+Z listener is registered once; it reaches the latest undo (defined below) through this ref.
+  const undoRef = useRef<() => void>(() => {});
 
   /** Voice commands and destination chips both edit the design, then the red pen re-checks it. */
   const handleAction = useCallback(
@@ -316,6 +319,7 @@ export default function Studio() {
 
   /** Launch goes through mission control: every controller reports GO or NO-GO first. */
   function openPoll() {
+    if (checking.current) return; // the read in flight would replace the design under the poll
     const { design: current, reading: read, review: latestReview } = latest.current;
     const currentAnalysis = safeAnalyze(current);
     if (!current || !read || !currentAnalysis) return;
@@ -366,11 +370,13 @@ export default function Studio() {
   function changeStrokes(next: Stroke[]) {
     sampleTitle.current = null;
     setStrokes(next);
-    if (reading) setStale(true);
+    if (latest.current.reading) setStale(true);
   }
 
   // Aborts an in-progress demo-sketch replay when something else takes over the napkin.
   const replay = useRef<AbortController | null>(null);
+  // True while a sample is still drawing itself; checking then would read half a sketch.
+  const [replaying, setReplaying] = useState(false);
 
   function clearAll() {
     replay.current?.abort();
@@ -394,6 +400,15 @@ export default function Studio() {
     setPhase("draw");
   }
 
+  /** Undo the last stroke; like any edit, it marks an existing review as out of date. */
+  function undo() {
+    const drawn = latest.current.strokes;
+    if (drawn.length > 0) changeStrokes(drawn.slice(0, -1));
+  }
+  useEffect(() => {
+    undoRef.current = undo;
+  });
+
   function loadDemo(id: string) {
     const sketch = DEMO_SKETCHES.find((s) => s.id === id);
     if (!sketch) return;
@@ -402,7 +417,10 @@ export default function Studio() {
     setDestination(sketch.destination);
     const controller = new AbortController();
     replay.current = controller;
-    void replaySketch(sketch.strokes, setStrokes, { signal: controller.signal });
+    setReplaying(true);
+    void replaySketch(sketch.strokes, setStrokes, { signal: controller.signal }).finally(() => {
+      if (replay.current === controller) setReplaying(false);
+    });
   }
 
   // A bump of this counter asks for a check of whatever is on the napkin in that render.
@@ -440,7 +458,7 @@ export default function Studio() {
     function onKey(e: KeyboardEvent) {
       if ((e.metaKey || e.ctrlKey) && e.key === "z") {
         e.preventDefault();
-        setStrokes((s) => s.slice(0, -1));
+        undoRef.current();
       }
     }
     window.addEventListener("keydown", onKey);
@@ -532,7 +550,7 @@ export default function Studio() {
             <div className="flex shrink-0 items-center gap-2">
               <button
                 type="button"
-                onClick={() => setStrokes((s) => s.slice(0, -1))}
+                onClick={undo}
                 disabled={strokes.length === 0}
                 className="h-11 px-2 text-[11px] uppercase tracking-[0.18em] text-haze transition-colors hover:text-white disabled:opacity-40"
               >
@@ -549,7 +567,7 @@ export default function Studio() {
               <button
                 type="button"
                 onClick={check}
-                disabled={strokes.length === 0 || phase === "reading"}
+                disabled={strokes.length === 0 || phase === "reading" || replaying}
                 className="btn-outline h-11 px-6 text-[12px]"
               >
                 {phase === "reading" ? "Reading…" : reading && !stale ? "Check again" : "Check design"}
