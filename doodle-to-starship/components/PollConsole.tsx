@@ -45,12 +45,14 @@ export default function PollConsole({ poll, revealed, onGo, onScrub, onFix }: Po
             Apply fix
           </button>
         )}
+        {/* Disabled until every controller has reported, so a NO-GO can't fly before it's heard (Esc skips). */}
         <button
           type="button"
           onClick={onGo}
+          disabled={!done}
           className={`h-11 px-8 text-[12px] ${poll.go || !done ? "btn-solid" : "btn-outline border-nogo text-nogo"}`}
         >
-          {poll.go || !done ? "GO for launch" : "GO anyway"}
+          {!done ? "Polling…" : poll.go ? "GO for launch" : "GO anyway"}
         </button>
       </div>
     </section>

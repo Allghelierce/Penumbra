@@ -233,8 +233,10 @@ export default function VoiceDock({
       closeSession();
       if (err instanceof Error && err.message === "closed") return;
       console.warn("[voice] Grok Voice failed, using browser voice:", err);
-      setError("Grok Voice didn't connect, so this is browser voice. Hold to talk again.");
       setMode("browser");
+      // A denied mic is the user's choice, not a failure: fall back quietly (typing and buttons still work).
+      const denied = err instanceof Error && (err.name === "NotAllowedError" || /permission/i.test(err.message));
+      if (!denied) setError("Grok Voice didn't connect, so this is browser voice. Hold to talk again.");
     });
     touch();
     return session;
@@ -313,17 +315,22 @@ export default function VoiceDock({
   // ---- The GO/NO-GO poll: read each controller's line, lighting its tile as it starts.
   const pollRun = useRef(0);
   const pollAnswered = useRef(false);
+  /** True once every call has been read out (or skipped); a spoken GO before that only finishes the readout. */
+  const pollDone = useRef(false);
   useEffect(() => {
     if (phase !== "poll" || !poll || mode === "checking") return;
     const run = ++pollRun.current;
     pollAnswered.current = false;
+    pollDone.current = false;
     void (async () => {
       for (let i = 0; i < poll.calls.length; i++) {
         if (run !== pollRun.current) return;
         onPollRevealRef.current?.(i + 1);
         await speakLine(poll.calls[i].line, ROLE_VOICE[poll.calls[i].role]);
       }
-      if (run === pollRun.current) setReplyCaption(pollPrompt(poll));
+      if (run !== pollRun.current) return;
+      pollDone.current = true;
+      setReplyCaption(pollPrompt(poll));
     })();
     return () => {
       pollRun.current++;
@@ -341,6 +348,7 @@ export default function VoiceDock({
       stopSpeaking();
       sessionRef.current?.interrupt();
       onPollRevealRef.current?.(poll.calls.length);
+      pollDone.current = true;
       setReplyCaption(pollPrompt(poll));
     };
     window.addEventListener("keydown", onKey);
@@ -365,6 +373,15 @@ export default function VoiceDock({
       const answer = reply === "yes" ? "go" : reply === "no" ? "scrub" : reply;
       if (!answer) {
         sayReply.current("Say go, fix it, or scrub.");
+        return true;
+      }
+      if (answer === "go" && !pollDone.current) {
+        // Don't fly past controllers that haven't reported: finish the board, then ask again.
+        pollRun.current++;
+        stopSpeaking();
+        onPollRevealRef.current?.(currentPoll.calls.length);
+        pollDone.current = true;
+        sayReply.current(pollPrompt(currentPoll));
         return true;
       }
       if (answer === "fix" && !currentPoll.calls.some((c) => !c.go && c.fix)) {
