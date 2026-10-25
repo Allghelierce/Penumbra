@@ -5,6 +5,7 @@ import type { Analysis, FlightEvent, FlightTrace, SketchReading, Stroke } from "
 import EndCard from "./launch/EndCard";
 import { flightStats, startLaunch, type LaunchHandle } from "./launch/engine";
 import type { CaptionCue, Finale, Tone } from "./launch/plan";
+import { useReplay, type ReplayState } from "./launch/useReplay";
 
 export interface LaunchSceneProps {
   /** The user's drawing, normalized 0..1, aspect NAPKIN_ASPECT (3:4). */
@@ -60,10 +61,20 @@ const KEYFRAMES = `
  */
 export default function LaunchScene(props: LaunchSceneProps) {
   const [run, setRun] = useState(0);
-  return <LaunchRun key={run} {...props} onReplay={() => setRun((r) => r + 1)} />;
+  // Lives out here so a paid video job survives "fly again".
+  const replay = useReplay(props.renderUrl, props.trace.outcome ?? props.analysis.verdict);
+  return (
+    <LaunchRun
+      key={run}
+      {...props}
+      video={replay.state}
+      onVideo={replay.start}
+      onReplay={() => setRun((r) => r + 1)}
+    />
+  );
 }
 
-function LaunchRun(props: LaunchSceneProps & { onReplay: () => void }) {
+function LaunchRun(props: LaunchSceneProps & { video: ReplayState; onVideo: () => void; onReplay: () => void }) {
   const [input] = useState(() => ({
     strokes: props.strokes,
     reading: props.reading,
@@ -163,6 +174,8 @@ function LaunchRun(props: LaunchSceneProps & { onReplay: () => void }) {
           maxAltKm={stats.maxAltKm}
           maxSpeedMps={stats.maxSpeedMps}
           renderUrl={props.renderUrl}
+          video={props.video}
+          onVideo={props.onVideo}
           onDone={props.onDone}
           onReplay={props.onReplay}
         />

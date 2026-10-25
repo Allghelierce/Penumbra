@@ -3,6 +3,7 @@
 import { useState } from "react";
 import type { Analysis, Design, Verdict } from "@/lib/design";
 import { DEST_NAME, DEST_SHORT, fmtKm } from "./plan";
+import type { ReplayState } from "./useReplay";
 
 interface EndCardProps {
   outcome: Verdict;
@@ -11,6 +12,8 @@ interface EndCardProps {
   maxAltKm: number;
   maxSpeedMps: number;
   renderUrl: string | null;
+  video: ReplayState;
+  onVideo: () => void;
   onDone: () => void;
   onReplay: () => void;
 }
@@ -49,7 +52,7 @@ function verdictCopy({ outcome, design, analysis, maxAltKm }: EndCardProps): { h
 }
 
 export default function EndCard(props: EndCardProps) {
-  const { design, analysis, maxAltKm, maxSpeedMps, renderUrl, onDone, onReplay } = props;
+  const { design, analysis, maxAltKm, maxSpeedMps, renderUrl, video, onVideo, onDone, onReplay } = props;
   const { headline, ok, line } = verdictCopy(props);
   const findings = (analysis.findings ?? []).slice(0, 2);
 
@@ -57,7 +60,7 @@ export default function EndCard(props: EndCardProps) {
     <div className="ls-fade absolute inset-0 flex items-start justify-center overflow-y-auto bg-night/60 px-4 py-8 sm:items-center">
       <div className="ls-rise relative w-full max-w-3xl rounded-[3px] border border-napkin-edge bg-napkin p-5 text-graphite shadow-[0_30px_80px_rgba(0,0,0,0.6)] sm:p-8">
         <div className="grid gap-6 sm:grid-cols-[minmax(0,15rem)_1fr] sm:gap-8">
-          <Polaroid url={renderUrl} name={design.name} />
+          <Polaroid url={renderUrl} name={design.name} video={video} />
           <div className="flex min-w-0 flex-col">
             <h2 className={`font-hand text-6xl leading-[0.9] sm:text-7xl ${ok ? "text-graphite" : "text-redpen"}`}>
               {headline}
@@ -86,6 +89,7 @@ export default function EndCard(props: EndCardProps) {
               >
                 Back to the napkin
               </button>
+              {renderUrl && <VideoButton video={video} onVideo={onVideo} />}
               <button
                 type="button"
                 onClick={onReplay}
@@ -110,13 +114,53 @@ function Stat({ label, value }: { label: string; value: string }) {
   );
 }
 
-function Polaroid({ url, name }: { url: string | null; name: string }) {
+/** Starts the Grok Imagine mission replay (a paid job, so only on click) and shows its progress. */
+function VideoButton({ video, onVideo }: { video: ReplayState; onVideo: () => void }) {
+  const label = "font-mono text-xs uppercase tracking-widest";
+  switch (video.phase) {
+    case "idle":
+      return (
+        <button type="button" onClick={onVideo} className={`${label} text-graphite underline-offset-4 hover:underline`}>
+          ▶ mission replay
+        </button>
+      );
+    case "pending":
+      return (
+        <span className={`${label} ls-pending text-ink-muted`} aria-live="polite">
+          developing{video.progress !== null ? ` ${Math.round(video.progress)}%` : "…"}
+        </span>
+      );
+    case "failed":
+      return (
+        <button type="button" onClick={onVideo} className={`${label} text-redpen underline-offset-4 hover:underline`}>
+          replay failed · try again
+        </button>
+      );
+    case "unavailable":
+      return <span className={`${label} text-ink-muted`}>replay unavailable</span>;
+    default:
+      return null;
+  }
+}
+
+function Polaroid({ url, name, video }: { url: string | null; name: string; video: ReplayState }) {
   const [failed, setFailed] = useState<string | null>(null);
   const show = url !== null && failed !== url;
   return (
     <figure className="mx-auto w-full max-w-[15rem] -rotate-3 self-start bg-white p-3 pb-2 shadow-[0_10px_30px_rgba(0,0,0,0.25)]">
       <div className="relative aspect-square w-full overflow-hidden bg-night">
-        {show ? (
+        {video.phase === "done" ? (
+          <video
+            key={video.url}
+            src={video.url}
+            autoPlay
+            muted
+            loop
+            playsInline
+            aria-label={`Grok Imagine mission replay of ${name}`}
+            className="ls-fade h-full w-full object-cover"
+          />
+        ) : show ? (
           // Grok Imagine URLs are remote and short-lived; next/image would need them allow-listed.
           // eslint-disable-next-line @next/next/no-img-element
           <img
