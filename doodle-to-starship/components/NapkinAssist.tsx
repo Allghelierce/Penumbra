@@ -155,7 +155,7 @@ export default function NapkinAssist({ strokes, destination, onKeep, active = tr
         tagsFor(reading).map((tag) => (
           <div
             key={`${tag.key}:${tag.text}`}
-            className={`absolute flex -translate-y-1/2 items-center gap-1 transition-[left,top] duration-300 ${tag.left ? "-translate-x-full flex-row-reverse" : ""}`}
+            className={`napkin-overlay absolute flex -translate-y-1/2 items-center gap-1 transition-[left,top] duration-300 ${tag.left ? "-translate-x-full flex-row-reverse" : ""}`}
             style={{ left: `${tag.x * 100}%`, top: `${tag.y * 100}%`, opacity: 0, animation: "fade-in 0.45s ease-out forwards" }}
           >
             <span className="h-px w-3 bg-redpen" />
@@ -163,7 +163,7 @@ export default function NapkinAssist({ strokes, destination, onKeep, active = tr
           </div>
         ))}
       {seen && (
-        <p className="absolute inset-x-[6%] bottom-[2.5%] truncate text-center font-mono text-[11px] text-white/80">
+        <p className="napkin-overlay absolute inset-x-[6%] bottom-[2.5%] truncate text-center font-mono text-[11px] text-white/80">
           {confident ? (
             <>
               <span className="text-redpen">I see:</span> {caption(reading)}
@@ -173,7 +173,7 @@ export default function NapkinAssist({ strokes, destination, onKeep, active = tr
           )}
         </p>
       )}
-      <div className="pointer-events-auto absolute left-[4%] top-[3%] flex bg-black font-ui">
+      <div className="napkin-overlay pointer-events-auto absolute left-[4%] top-[3%] flex bg-black font-ui">
         {pending?.done ? (
           <>
             <button type="button" onClick={() => onKeep([...strokes, ...pending.all])} className={`${button} text-white hover:text-white/70`}>

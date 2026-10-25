@@ -71,7 +71,7 @@ export default function NapkinRender({ url, loading, resetKey, sticker, children
       {present && (
         <div
           key={url}
-          className={`absolute inset-0 select-none overflow-hidden rounded-[2px] transition-opacity ${peek ? "duration-150" : "duration-300"} ${
+          className={`napkin-overlay absolute inset-0 select-none overflow-hidden rounded-[2px] transition-opacity ${peek ? "duration-150" : "duration-300"} ${
             onRender ? "pointer-events-auto cursor-zoom-out" : ""
           } ${showing ? "opacity-100" : "opacity-0"}`}
           title={onRender ? "Hold to see the sketch" : undefined}
@@ -104,7 +104,7 @@ export default function NapkinRender({ url, loading, resetKey, sticker, children
       {/* The red pen stays at full strength over the render: the review is the point of the napkin. */}
       <div className="absolute inset-0">{children}</div>
       {ready && (
-        <div role="group" aria-label="Napkin view" className="pointer-events-auto absolute left-[4%] top-[3%] flex bg-black px-1 font-ui shadow-[0_2px_10px_rgba(0,0,0,0.35)]">
+        <div role="group" aria-label="Napkin view" className="napkin-overlay pointer-events-auto absolute left-[4%] top-[3%] flex bg-black px-1 font-ui shadow-[0_2px_10px_rgba(0,0,0,0.35)]">
           {(["sketch", "render"] as const).map((v) => (
             <button
               key={v}
@@ -122,8 +122,8 @@ export default function NapkinRender({ url, loading, resetKey, sticker, children
       )}
       {loading && (
         <>
-          <div className="render-pending" />
-          <p className="absolute inset-x-0 bottom-[3.5%] text-center font-mono text-[9px] uppercase tracking-[0.22em] text-graphite/60">
+          <div className="napkin-overlay render-pending" />
+          <p className="napkin-overlay absolute inset-x-0 bottom-[3.5%] text-center font-mono text-[9px] uppercase tracking-[0.22em] text-graphite/60">
             Rendering with Grok Imagine…
           </p>
         </>
