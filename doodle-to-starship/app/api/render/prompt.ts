@@ -79,12 +79,12 @@ export function buildSketchEditPrompt(
 export function buildPatchPrompt(design: Partial<Design>): string {
   const stageCount = Math.min(4, Math.max(1, Array.isArray(design.stages) ? design.stages.length : 1));
   const name = (typeof design.name === "string" ? design.name : "").replace(/["\n]/g, "").trim().slice(0, 30) || "Napkin Special";
-  const shape = [
-    stageCount > 1 ? `${stageCount}-stage rocket` : "single-stage rocket",
-    ...(Array.isArray(design.features) ? design.features : [])
-      .filter((f) => ["fins", "grid-fins", "flaps", "landing-legs", "heat-shield"].includes(f))
-      .map((f) => String(f).replace(/-/g, " ")),
-  ].join(" with ");
+  const parts = (Array.isArray(design.features) ? design.features : [])
+    .filter((f) => ["fins", "grid-fins", "flaps", "landing-legs", "heat-shield"].includes(f))
+    .map((f) => (f === "heat-shield" ? "a heat shield" : String(f).replace(/-/g, " ")));
+  const shape =
+    (stageCount > 1 ? `${stageCount}-stage rocket` : "single-stage rocket") +
+    (parts.length > 0 ? ` with ${parts.join(" and ")}` : "");
   const backdrop = (design.destination && PATCH_BACKDROP[design.destination]) || PATCH_BACKDROP.leo;
   return [
     "An embroidered circular space mission patch in the classic 1960s–2020s crewed-mission style, photographed flat.",
