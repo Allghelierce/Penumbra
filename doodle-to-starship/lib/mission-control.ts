@@ -44,7 +44,9 @@ export function pollRoom(design: Design, analysis: Analysis, review: Review | nu
   // Propulsion: can it leave the pad?
   const twr = analysis.liftoffTwr.toFixed(2);
   const booster = design.stages[0]?.engines[0];
-  const engines = booster ? `${booster.count} ${ENGINES[booster.engine]?.name ?? "engines"}` : "no engines";
+  const engines = booster
+    ? `${booster.count} ${ENGINES[booster.engine]?.name ?? "rocket"} engine${booster.count === 1 ? "" : "s"}`
+    : "no engines";
   calls.push(
     analysis.liftoffTwr >= 1
       ? { role: "Propulsion", go: true, line: `Propulsion, GO. Thrust to weight ${twr} on ${engines}.` }
@@ -103,10 +105,20 @@ export function pollRoom(design: Design, analysis: Analysis, review: Review | nu
       !has("landing-legs", "landing-legs") && "landing legs",
       design.destination === "mars-surface" && !has("heat-shield", "heat-shield") && "a heat shield",
     ].filter(Boolean);
-    const reserve = `${kmSpare(analysis.totalDeltaVMps, analysis.requiredDeltaVMps)} kilometers per second in reserve`;
+    const legs = parts.filter((p) => p.kind === "landing-legs").length;
+    const gear = [
+      legs > 0 ? `${legs} landing leg${legs === 1 ? "" : "s"}` : "Landing legs",
+      design.destination === "mars-surface" && "a heat shield",
+    ]
+      .filter(Boolean)
+      .join(" and ");
+    const reserve =
+      analysis.marginMps > 0
+        ? `, ${kmSpare(analysis.totalDeltaVMps, analysis.requiredDeltaVMps)} kilometers per second in reserve`
+        : "";
     calls.push(
       missing.length === 0
-        ? { role: "Landing", go: true, line: `Landing, GO. Gear is on the drawing, ${reserve}.` }
+        ? { role: "Landing", go: true, line: `Landing, GO. ${gear} on the drawing${reserve}.` }
         : { role: "Landing", go: false, line: `Landing, NO-GO. No ${missing.join(" and no ")} on the drawing.` },
     );
   }
