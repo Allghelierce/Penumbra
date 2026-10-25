@@ -186,9 +186,9 @@ export default function VerdictPanel(props: VerdictPanelProps) {
           <ul className="mt-2 space-y-2">
             {props.priorArt.slice(0, 3).map((r) => (
               <li key={r.id}>
-                <a href={r.url} target="_blank" rel="noreferrer" className="block text-[13px] leading-snug text-starlight hover:underline">
-                  {r.title}
-                  {r.year && <span className="ml-1.5 text-haze">{r.year}</span>}
+                <a href={r.url} target="_blank" rel="noreferrer" className="group block text-[13px] leading-snug">
+                  <span className="line-clamp-2 text-starlight group-hover:underline">{r.title}</span>
+                  <span className="text-[12px] text-haze">NASA Technical Reports Server{r.year ? `, ${r.year}` : ""}</span>
                 </a>
               </li>
             ))}

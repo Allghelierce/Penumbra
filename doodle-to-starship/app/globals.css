@@ -211,6 +211,23 @@ body {
   }
 }
 
+/* Part tags step back once the red pen starts writing; hovering the napkin brings them back. */
+.part-tags {
+  transition: opacity 0.2s ease-out;
+}
+.part-tags.retire {
+  animation: tags-retire 0.5s var(--retire-delay, 1s) ease-out forwards;
+}
+.napkin:hover .part-tags.retire {
+  animation: none;
+  opacity: 0.9;
+}
+@keyframes tags-retire {
+  to {
+    opacity: 0;
+  }
+}
+
 /* Red-pen notes that carry a fix are tappable. */
 .pen-fix {
   cursor: pointer;

@@ -35,9 +35,13 @@ export default function RedPenOverlay({ parts, marks, playKey, scanning, onFix }
         className="absolute inset-0 h-full w-full overflow-visible"
         aria-hidden
       >
-        <g>
-          {parts.map((part, i) => (
-            <PartTag key={i} part={part} delay={i * 0.08} />
+        {/* Part tags explain the read; once the red pen starts they step back (hover the napkin to see them). */}
+        <g
+          className={marks.length > 0 && !scanning ? "part-tags retire" : "part-tags"}
+          style={{ "--retire-delay": `${penStart}s` } as React.CSSProperties}
+        >
+          {layoutTags(parts).map((tag, i) => (
+            <PartTag key={i} tag={tag} delay={i * 0.08} />
           ))}
         </g>
         <g>
@@ -50,43 +54,94 @@ export default function RedPenOverlay({ parts, marks, playKey, scanning, onFix }
   );
 }
 
-function PartTag({ part, delay }: { part: Part; delay: number }) {
-  const [bx, by, bw, bh] = part.box;
-  const x = bx * W;
-  const y = by * H;
-  const w = bw * W;
-  const h = bh * H;
-  const c = Math.min(6, w / 4, h / 4);
-  const corners =
-    `M${x} ${y + c} L${x} ${y} L${x + c} ${y}` +
-    ` M${x + w - c} ${y} L${x + w} ${y} L${x + w} ${y + c}` +
-    ` M${x + w} ${y + h - c} L${x + w} ${y + h} L${x + w - c} ${y + h}` +
-    ` M${x + c} ${y + h} L${x} ${y + h} L${x} ${y + h - c}`;
-  const onLeft = x + w > W * 0.74;
-  const labelX = onLeft ? x - 7 : x + w + 7;
-  const labelY = y + h / 2;
+interface Tag {
+  /** Every box of this kind gets corner brackets. */
+  boxes: [number, number, number, number][];
+  /** Where the label goes, or null when it would collide with another label. */
+  label: { text: string; x: number; y: number; anchor: "start" | "end"; fromX: number } | null;
+}
+
+const TAG_FONT = 6.2;
+/** Rough width of uppercase Barlow at TAG_FONT with the tag's letter spacing. */
+const tagWidth = (text: string) => text.length * 4.3 + 2;
+
+/**
+ * One label per kind of part ("Landing leg ×2"), put on the outside of the drawing
+ * (left of centre goes left), and dropped if its text would overlap a label already placed.
+ */
+function layoutTags(parts: Part[]): Tag[] {
+  const groups = new Map<string, Part[]>();
+  for (const part of parts) {
+    const key = part.label.trim().toLowerCase();
+    groups.set(key, [...(groups.get(key) ?? []), part]);
+  }
+  const placed: [number, number, number, number][] = [];
+  const overlaps = (b: [number, number, number, number]) =>
+    b[0] < 2 || b[0] + b[2] > W - 2 || placed.some((p) => b[0] < p[0] + p[2] && p[0] < b[0] + b[2] && b[1] < p[1] + p[3] && p[1] < b[1] + b[3]);
+
+  const tags = [...groups.values()].map((group) => {
+    const boxes = group.map((p) => [p.box[0] * W, p.box[1] * H, p.box[2] * W, p.box[3] * H] as [number, number, number, number]);
+    // Label the box furthest out on its side, so the leader doesn't cross the drawing.
+    const centre = (b: [number, number, number, number]) => b[0] + b[2] / 2;
+    const left = boxes.reduce((n, b) => n + (centre(b) < W / 2 ? 1 : 0), 0) > boxes.length / 2;
+    const anchorBox = boxes.reduce((best, b) => (left ? (b[0] < best[0] ? b : best) : b[0] + b[2] > best[0] + best[2] ? b : best));
+    const text = group.length > 1 ? `${group[0].label} ×${group.length}` : group[0].label;
+    return { boxes, left, anchorBox, text: text.toUpperCase() };
+  });
+
+  // Place labels top to bottom so the upper ones win ties.
+  return tags
+    .sort((a, b) => a.anchorBox[1] - b.anchorBox[1])
+    .map(({ boxes, left, anchorBox: [x, y, w, h], text }) => {
+      const width = tagWidth(text);
+      const labelY = y + h / 2;
+      for (const side of left ? (["left", "right"] as const) : (["right", "left"] as const)) {
+        const lx = side === "left" ? x - 7 : x + w + 7;
+        const box: [number, number, number, number] = [side === "left" ? lx - width : lx, labelY - 5, width, 8];
+        if (overlaps(box)) continue;
+        placed.push(box);
+        return { boxes, label: { text, x: lx, y: labelY, anchor: side === "left" ? "end" : "start", fromX: side === "left" ? x - 1 : x + w + 1 } };
+      }
+      return { boxes, label: null };
+    }) as Tag[];
+}
+
+function PartTag({ tag, delay }: { tag: Tag; delay: number }) {
   return (
     <g className="part-tag" style={{ animationDelay: `${delay}s` }}>
-      <path d={corners} fill="none" stroke="var(--ink-muted)" strokeWidth="0.9" opacity="0.7" />
-      <line
-        x1={onLeft ? x - 1 : x + w + 1}
-        y1={labelY}
-        x2={onLeft ? labelX + 2 : labelX - 2}
-        y2={labelY}
-        stroke="var(--ink-muted)"
-        strokeWidth="0.6"
-      />
-      <text
-        x={labelX}
-        y={labelY + 2.2}
-        textAnchor={onLeft ? "end" : "start"}
-        className="font-mono"
-        fontSize="6.2"
-        letterSpacing="0.4"
-        fill="var(--ink-muted)"
-      >
-        {part.label.toUpperCase()}
-      </text>
+      {tag.boxes.map(([x, y, w, h], i) => {
+        const c = Math.min(6, w / 4, h / 4);
+        const corners =
+          `M${x} ${y + c} L${x} ${y} L${x + c} ${y}` +
+          ` M${x + w - c} ${y} L${x + w} ${y} L${x + w} ${y + c}` +
+          ` M${x + w} ${y + h - c} L${x + w} ${y + h} L${x + w - c} ${y + h}` +
+          ` M${x + c} ${y + h} L${x} ${y + h} L${x} ${y + h - c}`;
+        return <path key={i} d={corners} fill="none" stroke="var(--ink-muted)" strokeWidth="0.9" opacity="0.7" />;
+      })}
+      {tag.label && (
+        <>
+          <line
+            x1={tag.label.fromX}
+            y1={tag.label.y}
+            x2={tag.label.anchor === "end" ? tag.label.x + 2 : tag.label.x - 2}
+            y2={tag.label.y}
+            stroke="var(--ink-muted)"
+            strokeWidth="0.6"
+          />
+          <text
+            x={tag.label.x}
+            y={tag.label.y + 2.2}
+            textAnchor={tag.label.anchor}
+            fontFamily="var(--font-barlow)"
+            fontWeight="500"
+            fontSize={TAG_FONT}
+            letterSpacing="0.5"
+            fill="var(--ink-muted)"
+          >
+            {tag.label.text}
+          </text>
+        </>
+      )}
     </g>
   );
 }
