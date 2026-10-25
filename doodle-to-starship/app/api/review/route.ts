@@ -1,9 +1,13 @@
 import type { Review, ReviewRequest, ReviewResponse } from "@/lib/design";
 import { buildReview } from "@/lib/redpen";
-import { chatJson, hasXai } from "@/lib/xai";
+import { chatJson, hasXai, metered } from "@/lib/xai";
 import { applyRewrite, buildCopyPrompt, COPY_SCHEMA, COPY_SYSTEM, type CopyRewrite } from "./copy";
 
-export async function POST(request: Request) {
+export function POST(request: Request) {
+  return metered(() => handle(request));
+}
+
+async function handle(request: Request) {
   const body = (await request.json().catch(() => null)) as Partial<ReviewRequest> | null;
 
   let review: Review;

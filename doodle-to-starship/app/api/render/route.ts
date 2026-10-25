@@ -1,12 +1,16 @@
 import type { RenderRequest, RenderResponse } from "@/lib/design";
-import { editImage, generateImage, hasXai } from "@/lib/xai";
+import { editImage, generateImage, hasXai, metered } from "@/lib/xai";
 import { buildPatchPrompt, buildRenderPrompt, buildSketchEditPrompt } from "./prompt";
 
 const NONE: RenderResponse = { url: null, source: "none" };
 /** xAI accepts png/jpg up to 20 MiB; base64 adds a third. */
 const MAX_SKETCH_CHARS = 27_000_000;
 
-export async function POST(request: Request) {
+export function POST(request: Request) {
+  return metered(() => handle(request));
+}
+
+async function handle(request: Request) {
   const body = (await request.json().catch(() => null)) as Partial<RenderRequest> | null;
   if (!hasXai() || !body?.design) return Response.json(NONE);
 

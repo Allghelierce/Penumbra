@@ -1,5 +1,7 @@
 import "server-only";
 
+import { AsyncLocalStorage } from "node:async_hooks";
+
 // Thin fetch wrappers around the xAI REST API. Every helper resolves to null on
 // any failure (no key, timeout, HTTP error, bad JSON) so routes can fall back.
 
@@ -19,6 +21,18 @@ const VISION_TIMEOUT_MS = 30_000;
 const TEXT_TIMEOUT_MS = 20_000;
 const IMAGE_TIMEOUT_MS = 60_000;
 const VIDEO_TIMEOUT_MS = 20_000;
+
+/** Adds up usage.cost_in_usd_ticks for every xAI call made inside metered(). 1 USD = 1e10 ticks. */
+const costMeter = new AsyncLocalStorage<{ ticks: number; seen: boolean }>();
+const TICKS_PER_USD = 1e10;
+
+/** Runs a route handler and stamps what its xAI calls cost onto the response as x-xai-cost-usd. */
+export async function metered(handle: () => Promise<Response>): Promise<Response> {
+  const meter = { ticks: 0, seen: false };
+  const res = await costMeter.run(meter, handle);
+  if (meter.seen) res.headers.set("x-xai-cost-usd", String(meter.ticks / TICKS_PER_USD));
+  return res;
+}
 
 export function hasXai(): boolean {
   return Boolean(process.env.XAI_API_KEY);
@@ -70,7 +84,14 @@ async function request<T>(method: "GET" | "POST", path: string, body: unknown, t
       console.warn(`[xai] ${method} ${path} -> ${res.status}: ${detail.slice(0, 300)}`);
       return null;
     }
-    return (await res.json()) as T;
+    const json = (await res.json()) as T & { usage?: { cost_in_usd_ticks?: number } };
+    const ticks = json?.usage?.cost_in_usd_ticks;
+    const meter = costMeter.getStore();
+    if (meter && typeof ticks === "number") {
+      meter.ticks += ticks;
+      meter.seen = true;
+    }
+    return json;
   } catch (err) {
     console.warn(`[xai] ${method} ${path} failed:`, err instanceof Error ? err.message : err);
     return null;

@@ -2,9 +2,13 @@ import type { ReadRequest, ReadResponse } from "@/lib/design";
 import { readFromGeometry } from "@/lib/sketch/geometry";
 import { isDestinationId } from "@/lib/sketch/ids";
 import { buildReadPrompt, READ_SYSTEM, READING_SCHEMA, sanitizeReading, type GrokReading } from "@/lib/sketch/vision";
-import { hasXai, visionJson } from "@/lib/xai";
+import { hasXai, metered, visionJson } from "@/lib/xai";
 
-export async function POST(request: Request) {
+export function POST(request: Request) {
+  return metered(() => handle(request));
+}
+
+async function handle(request: Request) {
   const body = (await request.json().catch(() => null)) as Partial<ReadRequest> | null;
   const destination = isDestinationId(body?.destination) ? body.destination : "leo";
 
