@@ -29,8 +29,8 @@ import type {
   SketchReading,
   Stroke,
 } from "@/lib/design";
-import { penLoop, strokesToPng } from "@/lib/napkin";
-import { analyze, simulateFlight } from "@/lib/physics";
+import { strokesToPng } from "@/lib/napkin";
+import { analyze, DESTINATIONS, simulateFlight } from "@/lib/physics";
 
 const DESTINATION_CHIPS: { id: DestinationId; label: string }[] = [
   { id: "leo", label: "Orbit" },
@@ -307,38 +307,44 @@ export default function Studio() {
   const reviewed = phase === "reviewed" && reading && design;
 
   return (
-    <div className="flex h-dvh flex-col overflow-hidden">
-      <header className="flex flex-wrap items-center gap-x-8 gap-y-2 px-8 pt-5">
-        <h1 className="font-hand text-[36px] font-bold leading-none">
-          <span className="text-redpen">Pen</span>umbra
+    <div className="flex h-dvh flex-col overflow-hidden bg-umbra text-starlight">
+      <header className="flex h-14 shrink-0 items-center gap-8 border-b border-rule px-6">
+        <h1 className="flex items-center gap-2.5 font-display text-[24px] font-semibold tracking-[0.04em]">
+          <EclipseMark />
+          Penumbra
         </h1>
-        <nav className="flex items-center gap-1" aria-label="Destination">
-          <span className="mr-2 font-hand text-xl text-ink-muted">headed to</span>
-          {DESTINATION_CHIPS.map((chip) => (
-            <button
-              key={chip.id}
-              type="button"
-              onClick={() => (design ? handleAction({ type: "set-destination", destination: chip.id }) : setDestination(chip.id))}
-              className="relative px-3 py-1 font-hand text-[26px] leading-none"
-              aria-pressed={destination === chip.id}
-            >
-              {chip.label}
-              {destination === chip.id && (
-                <svg viewBox="0 0 100 50" className="pointer-events-none absolute -inset-x-1 -inset-y-1 h-[calc(100%+8px)] w-[calc(100%+8px)] overflow-visible" aria-hidden>
-                  <path d={penLoop(50, 25, 46, 21, chip.id.length)} fill="none" stroke="var(--redpen)" strokeWidth="2.5" vectorEffect="non-scaling-stroke" className="pen-draw" pathLength={1} />
-                </svg>
-              )}
-            </button>
-          ))}
-        </nav>
-        <div className="ml-auto flex items-center gap-1">
-          <span className="mr-1 font-hand text-xl text-ink-muted">or try</span>
+        <div className="flex items-center gap-3">
+          <span id="target-label" className="text-[13px] text-haze">
+            Target
+          </span>
+          <div role="radiogroup" aria-labelledby="target-label" className="flex rounded-[3px] border border-rule p-0.5">
+            {DESTINATION_CHIPS.map((chip) => {
+              const selected = destination === chip.id;
+              return (
+                <button
+                  key={chip.id}
+                  type="button"
+                  role="radio"
+                  aria-checked={selected}
+                  onClick={() => (design ? handleAction({ type: "set-destination", destination: chip.id }) : setDestination(chip.id))}
+                  className={`rounded-[2px] px-3 py-1 text-[13px] font-medium transition-colors ${
+                    selected ? "bg-starlight text-umbra" : "text-haze hover:text-starlight"
+                  }`}
+                >
+                  {chip.label}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+        <div className="ml-auto flex items-center gap-2">
+          <span className="mr-1 text-[13px] text-haze">Sample sketches</span>
           {DEMO_SKETCHES.map((sketch) => (
             <button
               key={sketch.id}
               type="button"
               onClick={() => loadDemo(sketch.id)}
-              className="rounded-full border border-napkin-edge px-3 py-1 font-mono text-[11px] tracking-wider text-ink-muted transition hover:border-graphite hover:text-graphite"
+              className="rounded-[3px] border border-rule px-3 py-1 text-[13px] text-starlight/85 transition-colors hover:border-haze hover:text-starlight"
             >
               {sketch.title}
             </button>
@@ -346,8 +352,8 @@ export default function Studio() {
         </div>
       </header>
 
-      <main className="flex min-h-0 flex-1 gap-10 px-8 py-5">
-        <section className="flex min-h-0 min-w-0 flex-1 flex-col items-center gap-4">
+      <main className="grid min-h-0 flex-1 grid-cols-[minmax(0,1fr)_460px]">
+        <section className="lamp flex min-h-0 min-w-0 flex-col items-center gap-4 px-8 pb-4 pt-6">
           <div ref={napkinArea} className="flex min-h-0 w-full flex-1 justify-center">
             <NapkinCanvas strokes={strokes} onChange={changeStrokes} disabled={phase === "reading"}>
               {patchUrl && (
@@ -369,47 +375,55 @@ export default function Studio() {
               </div>
             </NapkinCanvas>
           </div>
-          <div className="flex items-center gap-4">
-            <button
-              type="button"
-              onClick={() => setStrokes((s) => s.slice(0, -1))}
-              disabled={strokes.length === 0}
-              className="font-mono text-[11px] tracking-[0.2em] text-ink-muted hover:text-graphite disabled:opacity-40"
-            >
-              UNDO
-            </button>
-            <button
-              type="button"
-              onClick={clearAll}
-              disabled={strokes.length === 0}
-              className="font-mono text-[11px] tracking-[0.2em] text-ink-muted hover:text-graphite disabled:opacity-40"
-            >
-              CLEAR
-            </button>
-            <button
-              type="button"
-              onClick={check}
-              disabled={strokes.length === 0 || phase === "reading"}
-              className="rounded-full bg-graphite px-6 py-2 font-hand text-[26px] leading-none text-napkin shadow-[0_8px_18px_-10px_rgba(0,0,0,0.6)] transition hover:-translate-y-0.5 disabled:opacity-40"
-            >
-              {phase === "reading" ? "reading…" : reading && !stale ? "re-check ✎" : "check my napkin ✎"}
-            </button>
-            <button
-              type="button"
-              onClick={startLaunch}
-              disabled={!reviewed || !analysis}
-              className="rounded-full bg-gradient-to-b from-flame-hot to-flame px-8 py-3 font-mono text-[13px] font-semibold tracking-[0.3em] text-white shadow-[0_10px_24px_-10px_rgba(255,90,31,0.9)] transition hover:-translate-y-0.5 disabled:opacity-30 disabled:shadow-none"
-            >
-              LAUNCH
-            </button>
+
+          <div className="flex w-full max-w-[760px] items-stretch gap-4">
+            <dl className="grid min-w-0 flex-1 grid-cols-[1.25fr_1.35fr_0.95fr_0.45fr] divide-x divide-rule rounded-[3px] border border-rule bg-umbra/70 text-[13px]">
+              <TitleCell label="Drawing" value={design?.name ?? (strokes.length ? "Untitled sketch" : "Blank napkin")} />
+              <TitleCell label="Target" value={DESTINATIONS[destination].name} />
+              <TitleCell label="Status" value={STATUS[phase === "reviewed" && stale ? "changed" : phase]} />
+              <TitleCell label="Rev" value={String(reviewKey)} />
+            </dl>
+            <div className="flex shrink-0 items-center gap-2">
+              <button
+                type="button"
+                onClick={() => setStrokes((s) => s.slice(0, -1))}
+                disabled={strokes.length === 0}
+                className="h-10 px-2 text-[13px] text-haze transition-colors hover:text-starlight disabled:opacity-40"
+              >
+                Undo
+              </button>
+              <button
+                type="button"
+                onClick={clearAll}
+                disabled={strokes.length === 0}
+                className="h-10 px-2 text-[13px] text-haze transition-colors hover:text-starlight disabled:opacity-40"
+              >
+                Clear
+              </button>
+              <button
+                type="button"
+                onClick={check}
+                disabled={strokes.length === 0 || phase === "reading"}
+                className="h-10 rounded-[3px] bg-starlight px-5 text-[14px] font-semibold text-umbra transition-opacity hover:opacity-90 disabled:opacity-35"
+              >
+                {phase === "reading" ? "Reading…" : reading && !stale ? "Check again" : "Check design"}
+              </button>
+              <button
+                type="button"
+                onClick={startLaunch}
+                disabled={!reviewed || !analysis}
+                className="h-10 rounded-[3px] bg-flame px-6 font-display text-[16px] font-semibold tracking-[0.06em] text-white transition-opacity hover:opacity-90 disabled:opacity-30"
+              >
+                Launch
+              </button>
+            </div>
           </div>
-          {error && <p className="font-hand text-xl text-redpen">{error}</p>}
-          {!error && reviewed && review?.marks.some((m) => m.fix) && (
-            <p className="font-hand text-xl text-ink-muted">tip: tap a red note to apply the fix ↻</p>
-          )}
+          <p className={`h-5 text-[13px] ${error ? "text-nogo" : "text-haze"}`} aria-live="polite">
+            {error ?? (reviewed && review?.marks.some((m) => m.fix) ? "Tap a red note on the sketch to apply its fix." : "")}
+          </p>
         </section>
 
-        <section className="w-[420px] shrink-0 overflow-y-auto pb-6 pr-1">
+        <section className="min-h-0 overflow-y-auto border-l border-rule bg-panel">
           <VerdictPanel
             phase={phase}
             design={design}
@@ -456,5 +470,33 @@ export default function Studio() {
         />
       )}
     </div>
+  );
+}
+
+const STATUS: Record<Phase | "changed", string> = {
+  draw: "Sketching",
+  reading: "Reading",
+  reviewed: "Reviewed",
+  changed: "Changed",
+  launch: "In flight",
+};
+
+function TitleCell({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="min-w-0 px-3 py-1.5">
+      <dt className="text-[11px] text-haze">{label}</dt>
+      <dd className="truncate text-starlight">{value}</dd>
+    </div>
+  );
+}
+
+/** A disc partly in shadow: the umbra and the penumbra around it. */
+function EclipseMark() {
+  return (
+    <svg viewBox="0 0 24 24" className="h-5 w-5" aria-hidden>
+      <circle cx="12" cy="12" r="9" fill="var(--starlight)" opacity="0.9" />
+      <circle cx="16" cy="9.5" r="8" fill="var(--umbra)" opacity="0.55" />
+      <circle cx="17.5" cy="8.5" r="6.5" fill="var(--umbra)" />
+    </svg>
   );
 }

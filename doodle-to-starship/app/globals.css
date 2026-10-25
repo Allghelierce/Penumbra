@@ -1,6 +1,6 @@
 @import "tailwindcss";
 
-/* Napkin & red pen. The studio is always light (it's paper); the launch scene is always night. */
+/* Napkin & red pen live on the paper; the studio around it is a dark console; the launch scene is night. */
 :root {
   --table: #f4efe4;
   --napkin: #fbf8f1;
@@ -13,6 +13,15 @@
   --night-high: #0b1a33;
   --flame: #ff5a1f;
   --flame-hot: #ffb347;
+
+  /* The studio console: a dark room with one lit napkin in it. */
+  --umbra: #0f141b;
+  --panel: #151c25;
+  --rule: #263040;
+  --starlight: #e8edf3;
+  --haze: #8a97a8;
+  --go-signal: #4cc38a;
+  --nogo: #f0614d;
 }
 
 @theme inline {
@@ -27,15 +36,75 @@
   --color-night-high: var(--night-high);
   --color-flame: var(--flame);
   --color-flame-hot: var(--flame-hot);
+  --color-umbra: var(--umbra);
+  --color-panel: var(--panel);
+  --color-rule: var(--rule);
+  --color-starlight: var(--starlight);
+  --color-haze: var(--haze);
+  --color-go-signal: var(--go-signal);
+  --color-nogo: var(--nogo);
+  --font-ui: var(--font-barlow);
+  --font-display: var(--font-barlow-condensed);
   --font-sans: var(--font-geist-sans);
   --font-mono: var(--font-plex-mono);
   --font-hand: var(--font-caveat);
 }
 
 body {
-  background: var(--table);
-  color: var(--graphite);
-  font-family: var(--font-geist-sans), system-ui, sans-serif;
+  background: var(--umbra);
+  color: var(--starlight);
+  font-family: var(--font-barlow), system-ui, sans-serif;
+  font-variant-numeric: tabular-nums;
+}
+
+:focus-visible {
+  outline: 2px solid var(--starlight);
+  outline-offset: 2px;
+}
+
+/* The work lamp over the napkin: a warm pool of light that falls off into the room. */
+.lamp {
+  background:
+    radial-gradient(ellipse 46% 58% at 50% 46%, rgba(255, 236, 200, 0.16), rgba(255, 236, 200, 0.05) 55%, transparent 78%),
+    radial-gradient(ellipse 80% 90% at 50% 50%, rgba(21, 28, 37, 0.0), rgba(8, 11, 15, 0.55));
+}
+
+/* Technical drawing: lines draw on once when the page opens. */
+.draft-in path,
+.draft-in line,
+.draft-in circle,
+.draft-in rect,
+.draft-in polyline {
+  stroke-dasharray: 1;
+  stroke-dashoffset: 1;
+  animation: pen-draw 1.6s cubic-bezier(0.3, 0.1, 0.2, 1) forwards;
+}
+/* Hidden lines keep their own dash pattern and fade in after the outline is drawn. */
+.draft-in .dashed {
+  opacity: 0;
+  animation: fade-in 0.6s 1.2s ease-out forwards;
+}
+.draft-in .dashed * {
+  stroke-dasharray: inherit;
+  stroke-dashoffset: 0;
+  animation: none;
+}
+.draft-in text,
+.draft-in .callout {
+  opacity: 0;
+  animation: fade-in 0.5s 1.3s ease-out forwards;
+}
+@media (prefers-reduced-motion: reduce) {
+  .draft-in *,
+  .pen-draw,
+  .pen-note,
+  .part-tag,
+  .sticker-in,
+  .scanline {
+    animation: none !important;
+    stroke-dashoffset: 0 !important;
+    opacity: 1 !important;
+  }
 }
 
 /* The napkin: soft fold creases, an embossed dotted border and a paper shadow. */
@@ -47,9 +116,9 @@ body {
     radial-gradient(ellipse at 30% 20%, rgba(255, 255, 255, 0.85), transparent 60%),
     radial-gradient(ellipse at 80% 90%, rgba(120, 100, 60, 0.06), transparent 55%);
   box-shadow:
-    0 0 0 1px var(--napkin-edge),
-    0 2px 4px rgba(70, 50, 20, 0.08),
-    0 28px 50px -30px rgba(70, 50, 20, 0.5);
+    0 0 0 1px rgba(227, 220, 203, 0.6),
+    0 2px 6px rgba(0, 0, 0, 0.35),
+    0 40px 80px -30px rgba(0, 0, 0, 0.85);
   border-radius: 3px;
 }
 .napkin::before {

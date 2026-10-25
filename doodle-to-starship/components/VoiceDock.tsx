@@ -22,10 +22,10 @@ type Mode = "checking" | "grok" | "browser";
 type Talker = "user" | "reviewer" | null;
 
 const HINTS: Record<Phase, string> = {
-  draw: "Draw a rocket, then hold to talk to the engineer.",
-  reading: "Reading your napkin…",
-  reviewed: "Try “send it to Mars” or “stretch the tanks 30 percent”.",
-  launch: "Hold to talk. “Launch it again” works.",
+  draw: "Sketch something, check it, then ask the engineer to change it.",
+  reading: "Reading your sketch…",
+  reviewed: "Try “send it to Mars”, “stretch the tanks 30 percent” or “add a booster”.",
+  launch: "Say “launch it again” to fly once more.",
 };
 
 /** How long to wait for the parent to re-analyze after an edit before replying anyway. */
@@ -327,12 +327,12 @@ export default function VoiceDock({ phase, design, analysis, review, narration, 
       e.preventDefault();
       endTalk();
     };
-    window.addEventListener("keydown", down);
-    window.addEventListener("keyup", up);
+    window.addEventListener("keydown", down, true);
+    window.addEventListener("keyup", up, true);
     window.addEventListener("blur", endTalk);
     return () => {
-      window.removeEventListener("keydown", down);
-      window.removeEventListener("keyup", up);
+      window.removeEventListener("keydown", down, true);
+      window.removeEventListener("keyup", up, true);
       window.removeEventListener("blur", endTalk);
     };
   }, [startTalk, endTalk]);
@@ -348,77 +348,78 @@ export default function VoiceDock({ phase, design, analysis, review, narration, 
   const analyser = talker === "user" ? micAnalyser : talker === "reviewer" ? outputAnalyser : null;
 
   return (
-    <div className="w-full rounded-t-2xl border border-b-0 border-napkin-edge bg-napkin/95 px-4 pt-3 pb-4 shadow-[0_-6px_24px_rgba(45,45,45,0.08)] backdrop-blur-sm">
-      <div className="flex items-center gap-4">
-        <div className="min-w-0 flex-1">
-          <div className="mb-1 flex items-center gap-2">
-            <ModeBadge mode={mode} />
-            <span className="truncate font-sans text-xs text-ink-muted">{error ?? HINTS[phase]}</span>
-          </div>
-          <div className="min-h-[3.5rem] font-hand leading-tight" aria-live="polite">
+    <div className="flex h-[76px] w-full shrink-0 items-center gap-5 border-t border-rule bg-panel px-6">
+      <button
+        type="button"
+        aria-label="Hold to talk to the engineer"
+        aria-pressed={holding}
+        disabled={mode === "checking"}
+        onPointerDown={(e) => {
+          e.currentTarget.setPointerCapture(e.pointerId);
+          startTalk();
+        }}
+        onPointerUp={endTalk}
+        onPointerCancel={endTalk}
+        onContextMenu={(e) => e.preventDefault()}
+        className={`relative flex h-12 w-12 shrink-0 touch-none select-none items-center justify-center rounded-full transition-colors disabled:opacity-40 ${
+          holding ? "bg-nogo text-white" : "bg-starlight text-umbra hover:bg-white"
+        }`}
+      >
+        {holding ? <span className="absolute inset-0 animate-ping rounded-full bg-nogo/40 motion-reduce:hidden" /> : null}
+        <MicIcon />
+      </button>
+
+      <div className="w-[150px] shrink-0">
+        <p className="font-display text-[16px] font-semibold leading-tight text-starlight">{holding ? "Listening…" : "Talk to the engineer"}</p>
+        <p className="text-[12px] text-haze">Hold the button or Space</p>
+      </div>
+
+      <div className="min-w-0 flex-1 border-l border-rule pl-5" aria-live="polite">
+        {error ? (
+          <p className="truncate text-[14px] text-nogo">{error}</p>
+        ) : userCaption || replyCaption ? (
+          <>
             {userCaption ? (
-              <p className="truncate text-xl text-graphite">
-                <span className="text-ink-muted">you: </span>
+              <p className="truncate text-[13px] text-haze">
+                <span className="text-haze/70">You: </span>
                 {userCaption}
               </p>
             ) : null}
             {replyCaption ? (
-              <p className="line-clamp-2 text-2xl text-redpen">
-                <span className="text-ink-muted text-xl">engineer: </span>
+              <p className="line-clamp-2 text-[15px] leading-snug text-starlight">
+                <span className="text-haze">Engineer: </span>
                 {replyCaption}
               </p>
             ) : null}
-            {!userCaption && !replyCaption ? (
-              <p className="text-xl text-ink-muted">Hold the red button (or Space) and talk.</p>
-            ) : null}
-          </div>
-          <form onSubmit={submitTyped} className="mt-1">
-            <input
-              value={typed}
-              onChange={(e) => setTyped(e.target.value)}
-              placeholder="or type: add a booster and send it to Mars"
-              aria-label="Type a command for the engineer"
-              className="w-full max-w-md border-b border-dashed border-napkin-edge bg-transparent font-mono text-xs text-graphite placeholder:text-ink-muted/70 focus:border-redpen focus:outline-none"
-            />
-          </form>
-        </div>
+          </>
+        ) : (
+          <p className="truncate text-[14px] text-haze">{HINTS[phase]}</p>
+        )}
+      </div>
 
-        <Waveform talker={talker} analyser={analyser} />
+      <Waveform talker={talker} analyser={analyser} />
 
-        <button
-          type="button"
-          aria-label="Hold to talk"
-          aria-pressed={holding}
-          disabled={mode === "checking"}
-          onPointerDown={(e) => {
-            e.currentTarget.setPointerCapture(e.pointerId);
-            startTalk();
-          }}
-          onPointerUp={endTalk}
-          onPointerCancel={endTalk}
-          onContextMenu={(e) => e.preventDefault()}
-          className={`relative flex h-20 w-20 shrink-0 touch-none select-none flex-col items-center justify-center rounded-full bg-redpen text-napkin shadow-[0_4px_0_#8f1d15] transition-transform disabled:opacity-50 ${
-            holding ? "translate-y-1 scale-95 shadow-[0_1px_0_#8f1d15]" : "hover:scale-[1.03]"
-          }`}
-        >
-          {holding ? <span className="absolute inset-0 animate-ping rounded-full bg-redpen/40" /> : null}
-          <MicIcon />
-          <span className="mt-0.5 font-mono text-[9px] font-semibold tracking-wider uppercase">{holding ? "listening" : "hold"}</span>
-        </button>
+      <div className="flex w-[230px] shrink-0 flex-col items-end gap-1.5">
+        <ModeBadge mode={mode} />
+        <form onSubmit={submitTyped} className="w-full">
+          <input
+            value={typed}
+            onChange={(e) => setTyped(e.target.value)}
+            placeholder="Or type a command"
+            aria-label="Type a command for the engineer"
+            className="h-7 w-full rounded-[3px] border border-rule bg-umbra px-2 text-[13px] text-starlight placeholder:text-haze/70 focus:border-haze focus:outline-none"
+          />
+        </form>
       </div>
     </div>
   );
 }
 
 function ModeBadge({ mode }: { mode: Mode }) {
-  const label = mode === "grok" ? "Grok Voice" : mode === "browser" ? "browser voice" : "connecting…";
+  const label = mode === "grok" ? "Grok Voice" : mode === "browser" ? "Browser voice" : "Connecting…";
   return (
-    <span
-      className={`inline-flex shrink-0 items-center gap-1 rounded-full border px-2 py-0.5 font-mono text-[10px] tracking-wide uppercase ${
-        mode === "grok" ? "border-go/40 text-go" : "border-napkin-edge text-ink-muted"
-      }`}
-    >
-      <span className={`h-1.5 w-1.5 rounded-full ${mode === "grok" ? "bg-go" : "bg-ink-muted"}`} />
+    <span className={`inline-flex items-center gap-1.5 text-[12px] ${mode === "grok" ? "text-go-signal" : "text-haze"}`}>
+      <span className={`h-1.5 w-1.5 rounded-full ${mode === "grok" ? "bg-go-signal" : "bg-haze"}`} />
       {label}
     </span>
   );
@@ -442,8 +443,8 @@ function Waveform({ talker, analyser }: { talker: Talker; analyser: AnalyserNode
     const ctx = canvas?.getContext("2d");
     if (!canvas || !ctx) return;
     const styles = getComputedStyle(document.documentElement);
-    const color = talker === "user" ? styles.getPropertyValue("--redpen") : styles.getPropertyValue("--graphite");
-    const idle = styles.getPropertyValue("--napkin-edge");
+    const color = talker === "user" ? styles.getPropertyValue("--nogo") : styles.getPropertyValue("--starlight");
+    const idle = styles.getPropertyValue("--rule");
     const samples = analyser ? new Uint8Array(analyser.fftSize) : null;
     let frame = 0;
     let raf = 0;
@@ -489,5 +490,5 @@ function Waveform({ talker, analyser }: { talker: Talker; analyser: AnalyserNode
     return () => cancelAnimationFrame(raf);
   }, [talker, analyser]);
 
-  return <canvas ref={canvasRef} className="hidden h-14 w-40 shrink-0 sm:block" aria-hidden />;
+  return <canvas ref={canvasRef} className="hidden h-10 w-36 shrink-0 md:block" aria-hidden />;
 }

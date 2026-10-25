@@ -164,6 +164,8 @@ function Mark({ mark, seed, delay, onFix }: { mark: RedPenMark; seed: number; de
   const points = mark.points.map(scale);
   if (points.length === 0) return null;
   const [lx, ly] = points[points.length - 1];
+  // Write the note away from the outline: past its last point, on the side it ended on.
+  const endsLeft = lx < points[0][0];
   return (
     <g>
       <polyline
@@ -178,11 +180,12 @@ function Mark({ mark, seed, delay, onFix }: { mark: RedPenMark; seed: number; de
         opacity="0.85"
       />
       <Note
-        x={lx > W * 0.6 ? lx - 4 : lx + 4}
+        x={endsLeft ? lx - 4 : lx + 4}
         y={Math.min(H - 4, ly + 14)}
-        anchor={lx > W * 0.6 ? "end" : "start"}
+        anchor={endsLeft ? "end" : "start"}
         text={mark.note}
         style={write}
+        onClick={fix}
       />
     </g>
   );

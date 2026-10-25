@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useRef, type PointerEvent, type ReactNode } from "react";
 import { NAPKIN_ASPECT, type Point, type Stroke } from "@/lib/design";
-import { drawStrokes, penLoop } from "@/lib/napkin";
+import { drawStrokes } from "@/lib/napkin";
 
 interface NapkinCanvasProps {
   strokes: Stroke[];
@@ -86,7 +86,6 @@ export default function NapkinCanvas({ strokes, onChange, disabled, children }: 
       className="napkin relative h-full max-w-full touch-none select-none"
       style={{ aspectRatio: NAPKIN_ASPECT }}
     >
-      <CoffeeRing />
       <canvas
         ref={canvasRef}
         className={`absolute inset-0 h-full w-full ${disabled ? "cursor-default" : "cursor-crosshair"}`}
@@ -101,24 +100,11 @@ export default function NapkinCanvas({ strokes, onChange, disabled, children }: 
   );
 }
 
-function CoffeeRing() {
-  return (
-    <svg
-      viewBox="0 0 100 100"
-      className="pointer-events-none absolute bottom-[3%] right-[3%] w-[30%] opacity-60"
-      aria-hidden
-    >
-      <path d={penLoop(50, 50, 40, 39, 7)} fill="none" stroke="rgba(150,100,45,0.18)" strokeWidth="3.5" />
-      <path d={penLoop(51, 50, 36, 36, 11)} fill="none" stroke="rgba(150,100,45,0.10)" strokeWidth="1.5" />
-    </svg>
-  );
-}
-
 function EmptyHint() {
   return (
     <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center gap-1 text-ink-muted">
-      <p className="font-hand text-4xl">sketch a spacecraft</p>
-      <p className="font-hand text-xl opacity-80">a rocket, a lander, a Mars ship… anything</p>
+      <p className="font-display text-[26px] font-semibold text-graphite/70">Draw your spacecraft here</p>
+      <p className="text-[14px]">A rocket, a lander, a Mars ship. Rough is fine.</p>
     </div>
   );
 }
