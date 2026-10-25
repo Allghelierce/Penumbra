@@ -5,6 +5,7 @@ import AttractMode from "@/components/AttractMode";
 import Link from "next/link";
 import LaunchScene, { unlockLaunchAudio } from "@/components/LaunchScene";
 import NapkinCanvas from "@/components/NapkinCanvas";
+import NapkinAssist from "@/components/NapkinAssist";
 import NapkinRender from "@/components/NapkinRender";
 import { PenumbraLockup } from "@/components/PenumbraLogo";
 import PollConsole from "@/components/PollConsole";
@@ -609,6 +610,7 @@ export default function Studio() {
                   />
                 </div>
               </NapkinRender>
+              <NapkinAssist strokes={strokes} destination={destination} onKeep={changeStrokes} active={phase === "draw"} />
             </NapkinCanvas>
           </div>
 

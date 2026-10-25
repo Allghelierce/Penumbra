@@ -88,7 +88,7 @@ export default function VerdictPanel(props: VerdictPanelProps) {
             <p className="mt-1 max-w-[46ch] text-[14px] leading-snug text-haze">
               {phase === "reading"
                 ? "Finding the stages, tanks and engines in your strokes."
-                : "Draw a spacecraft on the napkin and press Check design. Every number comes from published engine data."}
+                : "Draw a spacecraft and press Check design. Every number comes from published engine data."}
             </p>
             <div className={`mt-3 min-h-0 flex-1 transition-opacity ${phase === "reading" ? "opacity-40" : ""}`}>
               <div className="mx-auto h-full max-h-full" style={{ aspectRatio: "440 / 640" }}>
