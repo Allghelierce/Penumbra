@@ -7,6 +7,7 @@ import NapkinCanvas from "@/components/NapkinCanvas";
 import RedPenOverlay from "@/components/RedPenOverlay";
 import VerdictPanel from "@/components/VerdictPanel";
 import VoiceDock from "@/components/VoiceDock";
+import type { NapkinRect } from "@/components/launch/engine";
 import { applyAction } from "@/lib/actions";
 import { replaySketch } from "@/lib/attract";
 import { DEMO_SKETCHES } from "@/lib/demo-sketches";
@@ -97,7 +98,7 @@ export default function Studio() {
   const [concept, setConcept] = useState<{ url: string | null; loading: boolean }>({ url: null, loading: false });
   const [priorArt, setPriorArt] = useState<PriorArtResult[]>([]);
   const [patchUrl, setPatchUrl] = useState<string | null>(null);
-  const [flight, setFlight] = useState<{ trace: FlightTrace; renderUrl: string | null } | null>(null);
+  const [flight, setFlight] = useState<{ trace: FlightTrace; renderUrl: string | null; napkinRect: NapkinRect | null } | null>(null);
   const [narration, setNarration] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -109,6 +110,8 @@ export default function Studio() {
     latest.current = { reading, design, strokes };
   }, [reading, design, strokes]);
   const conceptRequest = useRef(0);
+  // Wraps the napkin so the launch can lift off from exactly where the doodle sits on screen.
+  const napkinArea = useRef<HTMLDivElement>(null);
 
   const requestReview = useCallback(async (nextReading: SketchReading, nextAnalysis: Analysis) => {
     try {
@@ -191,7 +194,9 @@ export default function Studio() {
     const { design: current, reading: read, strokes: drawn } = latest.current;
     const currentAnalysis = safeAnalyze(current);
     if (!current || !read || !currentAnalysis) return;
-    setFlight({ trace: simulateFlight(current, currentAnalysis), renderUrl: null });
+    const box = napkinArea.current?.querySelector(".napkin")?.getBoundingClientRect();
+    const napkinRect = box ? { left: box.left, top: box.top, width: box.width, height: box.height } : null;
+    setFlight({ trace: simulateFlight(current, currentAnalysis), renderUrl: null, napkinRect });
     setPhase("launch");
     const body: RenderRequest = {
       design: current,
@@ -343,7 +348,7 @@ export default function Studio() {
 
       <main className="flex min-h-0 flex-1 gap-10 px-8 py-5">
         <section className="flex min-h-0 min-w-0 flex-1 flex-col items-center gap-4">
-          <div className="flex min-h-0 w-full flex-1 justify-center">
+          <div ref={napkinArea} className="flex min-h-0 w-full flex-1 justify-center">
             <NapkinCanvas strokes={strokes} onChange={changeStrokes} disabled={phase === "reading"}>
               {patchUrl && (
                 // eslint-disable-next-line @next/next/no-img-element
@@ -438,10 +443,11 @@ export default function Studio() {
       {phase === "launch" && flight && reading && design && analysis && (
         <LaunchScene
           strokes={strokes}
-          reading={reading}
+          reading={{ ...reading, design }}
           analysis={analysis}
           trace={flight.trace}
           renderUrl={flight.renderUrl}
+          napkinRect={flight.napkinRect}
           onEvent={(event) => setNarration(event.label)}
           onDone={() => {
             setFlight(null);
