@@ -184,7 +184,13 @@ export type RedPenMark =
   /** radius is a fraction of the napkin's WIDTH; the pen draws a slightly flattened loop. */
   | { kind: "circle"; center: Point; radius: number; note: string; fix?: DesignAction }
   /** A dashed outline of suggested geometry, e.g. a new stage under the rocket. */
-  | { kind: "ghost-line"; points: Point[]; note: string; fix?: DesignAction };
+  | { kind: "ghost-line"; points: Point[]; note: string; fix?: DesignAction }
+  /** Engineer's markup: a hand-drawn outline traced around a part's box (x, y, w, h), identifying it. */
+  | { kind: "outline"; box: [number, number, number, number]; note: string; fix?: DesignAction }
+  /** A measured dimension line with end ticks, e.g. the vehicle's height "96 m". */
+  | { kind: "dimension"; from: Point; to: Point; note: string; fix?: DesignAction }
+  /** A leader line from a point on a part out to a spec label, e.g. "33× Raptor 3 · 7,590 tf". */
+  | { kind: "callout"; anchor: Point; label: Point; note: string; fix?: DesignAction };
 
 /** One filled shape of the cleaned-up, colored side profile, in the napkin's SVG units (viewBox 0 0 300 400). */
 export interface CleanShape {
