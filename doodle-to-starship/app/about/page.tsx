@@ -45,8 +45,7 @@ export default function About() {
 
   return (
     <div className="min-h-dvh bg-umbra text-starlight">
-      {/* [position:sticky], not `sticky`: globals.css styles a .sticky note for the studio. */}
-      <header className="top-0 z-10 border-b border-rule bg-umbra/95 backdrop-blur [position:sticky]">
+      <header className="sticky top-0 z-10 border-b border-rule bg-umbra/95 backdrop-blur">
         <div className="mx-auto flex max-w-[1180px] items-center justify-between px-8 py-3">
           <Link href="/" className="font-display text-[20px] font-semibold tracking-[0.04em]">
             Penumbra
