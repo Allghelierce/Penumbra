@@ -24,6 +24,8 @@ export interface Piece {
   lines: Vec[][];
   box: Box;
   nozzle: Nozzle;
+  /** The stage's slice of the frame in local y (top < bottom; ±Infinity at the ends). */
+  band: { top: number; bottom: number };
 }
 
 export interface Doodle {
@@ -93,7 +95,7 @@ export function buildDoodle(strokes: Stroke[], parts: Part[], stageCount: number
     const band = local.flatMap((l, li) => (along[li] < 0 ? clipToBand(l, top, bottom) : along[li] === i ? [l] : []));
     const pb = boxOf(band);
     if (!pb) continue;
-    pieces.push({ lines: band, box: pb, nozzle: nozzleFor(band, pb, localParts, pieces.length, top, bottom) });
+    pieces.push({ lines: band, box: pb, nozzle: nozzleFor(band, pb, localParts, pieces.length, top, bottom), band: { top, bottom } });
   }
 
   return {

@@ -105,6 +105,8 @@ export function planFor(input: LaunchInput): Plan {
 
 export interface LaunchHandle {
   stop: () => void;
+  /** Fly a picture of the vehicle (same 3:4 frame as the strokes) instead of the chalk strokes. */
+  setVehicle: (img: HTMLImageElement | null) => void;
   /** Jump straight to the end card. */
   skip: () => void;
 }
@@ -212,7 +214,7 @@ export function startLaunch(
   const ctx = canvas.getContext("2d");
   if (!ctx) {
     hooks.onEnd();
-    return { stop: () => {}, skip: () => {} };
+    return { stop: () => {}, skip: () => {}, setVehicle: () => {} };
   }
 
   const design = input.reading.design;
@@ -285,6 +287,7 @@ export function startLaunch(
     el.textContent = text;
   };
   let ignited = false;
+  let vehicle: HTMLImageElement | null = null;
   let cutArmed = false;
   const sound = hooks.sound;
 
@@ -496,6 +499,26 @@ export function startLaunch(
       c.lineTo(x + (x - nose[0]) * 0.4, nose[1] + Hn * (0.4 + rand() * 0.6));
       c.stroke();
     }
+    c.restore();
+  }
+
+  /** One stage's slice of the vehicle picture, clipped to its band so stages split cleanly. */
+  function drawVehiclePiece(i: number, alpha: number) {
+    const c = ctx!;
+    const n = doodle.napkin;
+    const p = pieces[i];
+    if (!vehicle || !p) return;
+    const top = Math.max(p.band.top, n.minY);
+    const bottom = Math.min(p.band.bottom, n.maxY);
+    if (bottom <= top) return;
+    c.save();
+    c.beginPath();
+    c.rect(n.minX, top, n.maxX - n.minX, bottom - top);
+    c.clip();
+    c.globalAlpha = alpha;
+    c.imageSmoothingEnabled = true;
+    c.imageSmoothingQuality = "high";
+    c.drawImage(vehicle, n.minX, n.minY, n.maxX - n.minX, n.maxY - n.minY);
     c.restore();
   }
 
@@ -877,7 +900,9 @@ export function startLaunch(
         if (thr > 0.01) withPiece(i, (a) => drawFlame(p.nozzle, thr, plume, a, Z, i + 1));
       });
       drawParticles(local, (p) => [p.x, p.y, 1]);
-      pieces.forEach((_, i) => withPiece(i, (a) => strokeDoodle(piecePaths[i], a, chalk, Z)));
+      pieces.forEach((_, i) =>
+        withPiece(i, (a) => (vehicle ? drawVehiclePiece(i, a) : strokeDoodle(piecePaths[i], a, chalk, Z))),
+      );
       if (reentry > 0.02) drawReentry(reentry, [focus[0], top], Z);
       // Vapor cone around Max-Q: a crisp condensation collar as it goes transonic.
       const vapor = maxQAt !== null && flying ? 1 - clamp01(Math.abs(t - maxQAt) / 1.1) : 0;
@@ -1031,6 +1056,9 @@ export function startLaunch(
 
   return {
     stop: () => cancelAnimationFrame(raf),
+    setVehicle: (img) => {
+      vehicle = img;
+    },
     skip: () => {
       if (ended) return;
       cueIdx = plan.cues.length;

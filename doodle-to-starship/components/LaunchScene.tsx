@@ -13,6 +13,7 @@ import type {
 } from "@/lib/design";
 import { BOUNDARIES, FAR_MARKS, LAYERS, ladderPos, ladderTop } from "./launch/atmosphere";
 import { PenumbraLockup } from "@/components/PenumbraLogo";
+import { cutoutBlack } from "@/lib/cutout";
 import { createLaunchAudio, isLaunchAudioMuted, setLaunchAudioMuted, unlockLaunchAudio } from "./launch/audio";
 import EndCard from "./launch/EndCard";
 import { flightStats, planFor, startLaunch, type LaunchHandle, type NapkinRect } from "./launch/engine";
@@ -48,6 +49,12 @@ export interface LaunchSceneProps {
    * starts exactly where it was drawn. Without it the scene starts from a centered 3:4 box.
    */
   napkinRect?: NapkinRect | null;
+  /**
+   * Optional: a picture of the vehicle "isolated on pure black", in the same 3:4 frame as the
+   * strokes. When it loads, the launch flies it (black cut out) instead of the chalk strokes,
+   * split at the same stage line. Read live; if it fails, the strokes fly.
+   */
+  vehicleImageUrl?: string | null;
   /** Optional: what to try next, shown on the end card. Read live, so it can arrive late. */
   recap?: Recap | null;
   /** Optional: apply an improvement's fix, re-check and relaunch (the studio remounts the scene). */
@@ -255,6 +262,32 @@ function LaunchRun(props: RunProps) {
       handle.current = null;
     };
   }, [input]);
+
+  // The vehicle picture, black cut out, swapped in for the strokes as soon as it's ready.
+  useEffect(() => {
+    const url = props.vehicleImageUrl;
+    if (!url) return;
+    let live = true;
+    cutoutBlack(url)
+      .then(
+        (src) =>
+          new Promise<HTMLImageElement>((resolve, reject) => {
+            const img = new Image();
+            img.onload = () => resolve(img);
+            img.onerror = () => reject(new Error("cutout failed to decode"));
+            img.src = src;
+          }),
+      )
+      .then((img) => {
+        if (live) handle.current?.setVehicle(img);
+      })
+      .catch(() => {
+        // Keep flying the chalk strokes.
+      });
+    return () => {
+      live = false;
+    };
+  }, [props.vehicleImageUrl]);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
