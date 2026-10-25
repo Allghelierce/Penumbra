@@ -39,7 +39,9 @@ export type XaiErrorKind = "auth" | "rate-limit" | "server" | "bad-request" | "t
 
 /** Paid calls stop for the rest of the UTC day once metered spend reaches this (XAI_DAILY_BUDGET_USD). */
 export function dailyBudgetUsd(): number {
-  return envNumber("XAI_DAILY_BUDGET_USD", 15);
+  // 0 is allowed and means "no paid calls at all".
+  const value = Number(process.env.XAI_DAILY_BUDGET_USD);
+  return process.env.XAI_DAILY_BUDGET_USD && Number.isFinite(value) && value >= 0 ? value : 15;
 }
 
 export interface XaiError {
