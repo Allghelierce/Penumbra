@@ -1,4 +1,5 @@
 import { NAPKIN_ASPECT } from "../design";
+import { scoreSketch } from "./confidence";
 import { enginesForBase, enginesForBells, upperStageEngines } from "./engines";
 import { tuneEngines } from "./tune";
 import type {
@@ -235,7 +236,8 @@ export function readFromGeometry(strokes: Stroke[], destination: DestinationId):
     parts.push({ kind: "landing-legs", label: "Landing leg", box: boxOf(b), stageIndex: stageAt(b.minY) });
   }
 
-  return { design, parts };
+  // Scored on what was actually drawn (not the stand-in outline for a blank napkin).
+  return { design, parts, ...scoreSketch(strokes) };
 }
 
 /** Which wall a stroke leaves when it runs from that wall down and outward past it, like a leg. */

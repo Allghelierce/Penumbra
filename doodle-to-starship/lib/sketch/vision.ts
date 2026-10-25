@@ -13,6 +13,9 @@ const MAX_FEATURES = 12;
 
 /** What the model returns. Boxes are flattened to x/y/width/height so the schema stays simple. */
 export interface GrokReading {
+  isLaunchVehicle: boolean;
+  confidence: number;
+  problem: string | null;
   name: string;
   stages: Array<{
     label: string;
@@ -46,6 +49,15 @@ const object = (properties: Record<string, unknown>) => ({
 });
 
 export const READING_SCHEMA = object({
+  isLaunchVehicle: {
+    type: "boolean",
+    description: "False if this is a scribble, a doodle of something else, or too vague to read as a rocket or spacecraft.",
+  },
+  confidence: { type: "number", description: "0..1: how clearly this reads as a launch vehicle." },
+  problem: {
+    type: ["string", "null"],
+    description: "If it isn't clearly a vehicle: one short, friendly sentence saying what to draw instead. Otherwise null.",
+  },
   name: { type: "string", description: "A short, fun name for the vehicle, or the name written on the sketch." },
   stages: {
     type: "array",
@@ -94,7 +106,8 @@ export function buildReadPrompt(hint: SketchReading): string {
   const d = hint.design;
   const hintStages = d.stages.map((s, i) => `stage ${i} "${s.label}" ~${s.tankVolumeM3} m³`).join("; ");
   return [
-    "This is a pencil sketch of a rocket on a napkin. Read it into the JSON schema.",
+    "This is a pencil sketch on a napkin, meant to be a rocket. Read it into the JSON schema.",
+    "First judge honestly whether it actually depicts a launch vehicle. A scribble, a random shape or something else is not one: say so with isLaunchVehicle false, a low confidence and a one-sentence problem.",
     `Scale: the napkin is ${NAPKIN_WIDTH_M} m wide and ${NAPKIN_HEIGHT_M} m tall. Coordinates are normalized 0..1 with x to the right and y down.`,
     "Stages: list them bottom first. A horizontal line across the body or a change in width marks a stage boundary.",
     "Engines: for each stage, count the bells drawn under it and measure a typical bell's width in metres at the scale above. Do not convert bells into engine counts yourself; only fill writtenEngineCount when a number is written. Use the engine named on the sketch if any; otherwise raptor-3 for the first stage and raptor-vacuum for upper stages, with methalox.",
@@ -156,6 +169,8 @@ export function sanitizeReading(raw: unknown, destination: DestinationId): Sketc
     ),
   ].slice(0, MAX_FEATURES);
 
+  const vehicle = raw.isLaunchVehicle !== false;
+  const confidence = clamp(num(raw.confidence, vehicle ? 0.8 : 0.2), 0, 1);
   const design = tuneEngines(
     {
       name: str(raw.name, 40) || "Napkin Special",
@@ -168,7 +183,12 @@ export function sanitizeReading(raw: unknown, destination: DestinationId): Sketc
     },
     { minEngines, locked },
   );
-  return { design, parts };
+  return {
+    design,
+    parts,
+    confidence: Math.round((vehicle ? confidence : Math.min(confidence, 0.3)) * 100) / 100,
+    problem: str(raw.problem, 160) || null,
+  };
 }
 
 /** A written count wins; otherwise drawn bells are read at scale (see ./engines). */

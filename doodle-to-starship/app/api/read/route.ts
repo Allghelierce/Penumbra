@@ -26,7 +26,14 @@ async function handle(request: Request) {
         schemaName: "sketch_reading",
       });
       const reading = sanitizeReading(raw, destination);
-      if (reading) return Response.json({ reading, source: "grok" } satisfies ReadResponse);
+      if (reading) {
+        // Trust the more doubtful of the two judges, and explain with whichever one doubted.
+        const grok = reading.confidence ?? 1;
+        const geo = geometry.confidence ?? 1;
+        const confidence = Math.min(grok, geo);
+        const problem = confidence >= 0.5 ? null : grok <= geo ? (reading.problem ?? geometry.problem) : geometry.problem;
+        return Response.json({ reading: { ...reading, confidence, problem: problem ?? null }, source: "grok" } satisfies ReadResponse);
+      }
     }
 
     return Response.json({ reading: geometry, source: "geometry" } satisfies ReadResponse);
