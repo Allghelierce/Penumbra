@@ -83,55 +83,36 @@ export function glowSprite(c: RGB, size = 64): HTMLCanvasElement {
   return canvas;
 }
 
-/**
- * A dawn launch: deep blue overhead, a warm haze on the horizon. Climbing, the zenith goes black first
- * (most of the air is below 12 km), and the warm band thins until it's only the limb's glow.
- * Each stop is [km, zenith, upper sky, horizon, horizon glow].
- */
-const SKY: [number, RGB, RGB, RGB, RGB][] = [
-  [0, [18, 46, 96], [46, 92, 152], [146, 174, 208], [242, 190, 146]],
-  [6, [14, 36, 80], [36, 76, 134], [118, 150, 192], [226, 166, 128]],
-  [15, [8, 22, 54], [22, 50, 98], [74, 108, 156], [190, 128, 102]],
-  [30, [3, 10, 26], [10, 26, 56], [36, 64, 108], [128, 86, 80]],
-  [55, [1, 3, 9], [3, 9, 22], [14, 30, 58], [62, 46, 50]],
-  [85, [0, 0, 2], [1, 2, 6], [6, 12, 26], [22, 18, 24]],
-  [110, [0, 0, 0], [0, 0, 1], [2, 4, 9], [6, 6, 9]],
-];
-
-function skyAt(altKm: number): [RGB, RGB, RGB, RGB] {
-  for (let i = 1; i < SKY.length; i++) {
-    const hi = SKY[i];
-    if (altKm <= hi[0]) {
-      const lo = SKY[i - 1];
-      const k = (altKm - lo[0]) / (hi[0] - lo[0]);
-      return [mix(lo[1], hi[1], k), mix(lo[2], hi[2], k), mix(lo[3], hi[3], k), mix(lo[4], hi[4], k)];
+/** Dusk blue in the troposphere, darkening through the stratosphere, black by the Kármán line. */
+function skyColors(altKm: number): [RGB, RGB] {
+  const stops: [number, RGB, RGB][] = [
+    [0, [24, 62, 116], [70, 118, 176]],
+    [12, [18, 48, 96], [52, 98, 156]],
+    [30, [12, 30, 64], [32, 66, 116]],
+    [50, [8, 16, 36], [17, 36, 70]],
+    [80, [6, 9, 19], [10, 18, 36]],
+    [100, [0, 0, 0], [2, 3, 5]],
+  ];
+  for (let i = 1; i < stops.length; i++) {
+    const [km, top, bottom] = stops[i];
+    if (altKm <= km) {
+      const [km0, top0, bottom0] = stops[i - 1];
+      const k = (altKm - km0) / (km - km0);
+      return [mix(top0, top, k), mix(bottom0, bottom, k)];
     }
   }
-  const last = SKY[SKY.length - 1];
-  return [last[1], last[2], last[3], last[4]];
+  const last = stops[stops.length - 1];
+  return [last[1], last[2]];
 }
 
-export function drawSky(ctx: CanvasRenderingContext2D, W: number, H: number, _pal: Palette, altKm: number, alpha: number) {
-  const [zenith, upper, horizon, glow] = skyAt(Math.max(0, altKm));
+export function drawSky(ctx: CanvasRenderingContext2D, W: number, H: number, pal: Palette, altKm: number, alpha: number) {
+  const [top, bottom] = skyColors(Math.max(0, altKm));
   const g = ctx.createLinearGradient(0, 0, 0, H);
-  g.addColorStop(0, rgba(zenith, 1));
-  g.addColorStop(0.48, rgba(upper, 1));
-  g.addColorStop(0.86, rgba(horizon, 1));
-  g.addColorStop(1, rgba(glow, 1));
+  g.addColorStop(0, rgba(top, 1));
+  g.addColorStop(1, rgba(bottom, 1));
   ctx.globalAlpha = alpha;
   ctx.fillStyle = g;
   ctx.fillRect(0, 0, W, H);
-  // Low sun off to the right: a broad warm bloom that fades as the air thins.
-  const sun = clamp01(1 - altKm / 40);
-  if (sun > 0.01) {
-    const r = Math.max(W, H) * 0.9;
-    const bloom = ctx.createRadialGradient(W * 0.86, H * 1.02, 0, W * 0.86, H * 1.02, r);
-    bloom.addColorStop(0, `rgba(255,200,150,${0.28 * sun})`);
-    bloom.addColorStop(0.35, `rgba(255,170,130,${0.1 * sun})`);
-    bloom.addColorStop(1, "rgba(255,170,130,0)");
-    ctx.fillStyle = bloom;
-    ctx.fillRect(0, 0, W, H);
-  }
   ctx.globalAlpha = 1;
 }
 
@@ -414,255 +395,110 @@ export function drawOzone(ctx: CanvasRenderingContext2D, W: number, H: number, a
   ctx.fillRect(0, Math.max(0, yTop), W, Math.min(H, yBot) - Math.max(0, yTop));
 }
 
-/** One vertical slice of aurora light: violet fringe on top, green glow below, sharp lower edge. */
-let auroraStrip: HTMLCanvasElement | null = null;
-function auroraSlice(): HTMLCanvasElement | null {
-  if (auroraStrip || typeof document === "undefined") return auroraStrip;
-  const canvas = document.createElement("canvas");
-  canvas.width = 1;
-  canvas.height = 256;
-  const g = canvas.getContext("2d");
-  if (!g) return null;
-  const grd = g.createLinearGradient(0, 0, 0, 256);
-  grd.addColorStop(0, "rgba(170,90,230,0)");
-  grd.addColorStop(0.35, "rgba(170,90,230,0.35)");
-  grd.addColorStop(0.7, "rgba(90,235,160,0.8)");
-  grd.addColorStop(0.93, "rgba(150,255,200,1)");
-  grd.addColorStop(1, "rgba(150,255,200,0)");
-  g.fillStyle = grd;
-  g.fillRect(0, 0, 1, 256);
-  auroraStrip = canvas;
-  return canvas;
-}
-
-/** Thermosphere aurora: curtains of fine rays rippling along the limb, k 0..1. */
+/** Thermosphere aurora: green-to-violet curtains shimmering low on the screen, k 0..1. */
 export function drawAurora(ctx: CanvasRenderingContext2D, W: number, H: number, k: number, t: number, base: number) {
-  const slice = auroraSlice();
-  if (k <= 0.01 || !slice) return;
+  if (k <= 0.01) return;
+  const g = ctx.createLinearGradient(0, base - H * 0.3, 0, base);
+  g.addColorStop(0, "rgba(150,90,220,0)");
+  g.addColorStop(0.35, "rgba(150,90,220,0.55)");
+  g.addColorStop(0.75, "rgba(76,195,138,0.9)");
+  g.addColorStop(1, "rgba(76,195,138,0)");
   ctx.save();
   ctx.globalCompositeOperation = "lighter";
+  ctx.fillStyle = g;
   for (let band = 0; band < 2; band++) {
-    for (let x = -2; x < W + 2; x += 2) {
-      const ph = x * 0.0042 + t * (0.22 + band * 0.12) + band * 2.1;
-      // The curtain's fold: its lower edge ripples, and its brightness gathers into rays.
-      const edge = base - H * (0.012 + band * 0.035) + Math.sin(ph) * H * 0.014 + Math.sin(ph * 2.7 + 1) * H * 0.006;
-      const h = H * (0.08 + 0.12 * (0.5 + 0.5 * Math.sin(ph * 1.3 + t * 0.5)));
-      const rays = 0.55 + 0.45 * Math.sin(x * 0.11 + t * 1.7 + band * 3) * Math.sin(x * 0.037 - t * 0.9);
-      ctx.globalAlpha = Math.max(0, k * (band ? 0.16 : 0.22) * rays);
-      ctx.drawImage(slice, x, edge - h, 2, h);
+    for (let x = -8; x < W + 8; x += 4) {
+      const ph = x * 0.005 + t * (0.3 + band * 0.18) + band * 2.1;
+      const y = base - H * (0.01 + band * 0.03) + Math.sin(ph) * H * 0.012 + Math.sin(ph * 2.3 + 1) * H * 0.006;
+      const h = H * (0.06 + 0.1 * (0.5 + 0.5 * Math.sin(ph * 1.7 + t * 0.8)));
+      ctx.globalAlpha = Math.max(0, k * (0.09 + 0.07 * Math.sin(x * 0.04 + t * 2.6 + band)));
+      ctx.fillRect(x, y - h, 4, h);
     }
   }
   ctx.restore();
 }
 
-// --- Cloud layers: soft, lit banks rendered once into textures and slid past with parallax ---
+// --- Detailed layer art: crisp shapes, no blur ---
 
 export interface Deck {
   km: number;
   kind: "cumulus" | "alto" | "cirrus";
   /** Parallax: how fast the deck slides sideways. */
   depth: number;
-  /** Vertical size of the bank in px; the engine uses it to tell when the rocket is inside. */
-  thick: number;
-  /** One tile of the deck, `tile` px wide, drawn repeatedly across the screen. */
-  texture: HTMLCanvasElement | null;
+  /** One tile of the deck's shape, `tile` px wide, drawn repeatedly across the screen. */
+  shape: Path2D;
+  rim: Path2D;
   tile: number;
-  /** Where the deck's base sits inside the texture (px from its top). */
-  base: number;
+  thick: number;
 }
 
-const LIT: RGB = [255, 244, 232];
-const MID: RGB = [222, 226, 236];
-const SHADE: RGB = [112, 128, 160];
-
-/** One cloud puff: lit from the upper right (the low sun), shading to blue-grey underneath. */
-function puff(g: CanvasRenderingContext2D, cx: number, cy: number, r: number, shade: number, alpha: number) {
-  const lit = mix(LIT, MID, shade);
-  const dark = mix(MID, SHADE, 0.35 + shade * 0.65);
-  const grd = g.createRadialGradient(cx + r * 0.28, cy - r * 0.38, r * 0.06, cx, cy, r);
-  grd.addColorStop(0, rgba(lit, alpha));
-  grd.addColorStop(0.45, rgba(mix(lit, dark, 0.45), alpha * 0.85));
-  grd.addColorStop(0.78, rgba(dark, alpha * 0.28));
-  grd.addColorStop(1, rgba(dark, 0));
-  g.fillStyle = grd;
-  g.beginPath();
-  g.arc(cx, cy, r, 0, Math.PI * 2);
-  g.fill();
-}
-
-/** A copy of `src` with a light blur, so overlapping puffs melt into one body (browsers without canvas filters get it sharp). */
-function softened(src: HTMLCanvasElement | null, px: number): HTMLCanvasElement | null {
-  if (!src) return src;
-  const made = canvasOf(src.width, src.height);
-  if (!made) return src;
-  const [canvas, g] = made;
-  g.filter = `blur(${px}px)`;
-  g.drawImage(src, 0, 0);
-  g.filter = "none";
-  // Feather both ends so neighbouring tiles meet without a hard vertical seam.
-  const feather = 70;
-  g.globalCompositeOperation = "destination-out";
-  for (const [x0, x1] of [[0, feather], [src.width, src.width - feather]]) {
-    const fade = g.createLinearGradient(x0, 0, x1, 0);
-    fade.addColorStop(0, "rgba(0,0,0,1)");
-    fade.addColorStop(1, "rgba(0,0,0,0)");
-    g.fillStyle = fade;
-    g.fillRect(Math.min(x0, x1), 0, feather, src.height);
-  }
-  g.globalCompositeOperation = "source-over";
-  return canvas;
-}
-
-function canvasOf(w: number, h: number): [HTMLCanvasElement, CanvasRenderingContext2D] | null {
-  if (typeof document === "undefined") return null;
-  const canvas = document.createElement("canvas");
-  canvas.width = w;
-  canvas.height = h;
-  const g = canvas.getContext("2d");
-  return g ? [canvas, g] : null;
-}
-
-/** Cumulus: billowing heaps with flat, shaded bases, the tallest tops in each heap's middle. */
-function cumulusTexture(rand: () => number, tile: number, thick: number): [HTMLCanvasElement | null, number] {
-  const h = Math.round(thick * 1.9);
-  const base = Math.round(h * 0.78);
-  const made = canvasOf(tile, h);
-  if (!made) return [null, base];
-  const [canvas, g] = made;
-  let x = 40 + rand() * 120;
-  while (x < tile - 60) {
-    const w = 160 + rand() * 300;
-    const tall = thick * (0.45 + rand() * 0.6);
-    const n = Math.round(26 + w / 9);
-    // Back to front, bottom rows first, so lit tops sit over shaded bellies.
-    const puffs: [number, number, number, number][] = [];
-    for (let i = 0; i < n; i++) {
-      const f = rand();
-      const dome = Math.sin(Math.PI * f) ** 0.8;
-      const px = x + w * f;
-      const up = rand() * dome;
-      const py = base - tall * up * 0.9 - 6;
-      const r = (14 + rand() * 26) * (0.65 + 0.7 * dome) * (thick / 200);
-      puffs.push([px, py, r, up]);
-    }
-    puffs.sort((p, q) => q[1] - p[1]);
-    for (const [px, py, r, up] of puffs) puff(g, px, py, r, 1 - up, 0.95);
-    x += w * (0.75 + rand() * 0.6) + rand() * 220;
-  }
-  // Flatten and shade the bases: fade out anything that sags below the condensation level.
-  g.globalCompositeOperation = "destination-out";
-  const cut = g.createLinearGradient(0, base - 4, 0, base + 18);
-  cut.addColorStop(0, "rgba(0,0,0,0)");
-  cut.addColorStop(1, "rgba(0,0,0,1)");
-  g.fillStyle = cut;
-  g.fillRect(0, base - 4, tile, h - base + 4);
-  g.globalCompositeOperation = "source-atop";
-  const belly = g.createLinearGradient(0, base - thick * 0.45, 0, base);
-  belly.addColorStop(0, "rgba(70,86,120,0)");
-  belly.addColorStop(1, "rgba(70,86,120,0.5)");
-  g.fillStyle = belly;
-  g.fillRect(0, 0, tile, h);
-  g.globalCompositeOperation = "source-over";
-  return [canvas, base];
-}
-
-/** Altocumulus: a thin, dappled sheet, with patches of densely packed cloudlets and gaps between. */
-function altoTexture(rand: () => number, tile: number, thick: number): [HTMLCanvasElement | null, number] {
-  const h = Math.round(thick * 2.2);
-  const base = Math.round(h * 0.62);
-  const made = canvasOf(tile, h);
-  if (!made) return [null, base];
-  const [canvas, g] = made;
-  let x = rand() * 60;
-  while (x < tile) {
-    const w = 120 + rand() * 260;
-    const n = Math.round(w * 0.9);
-    for (let i = 0; i < n; i++) {
-      const f = rand();
-      const px = x + f * w;
-      // Patches are lens-shaped: thickest in the middle, feathered at the ends.
-      const lens = Math.sin(Math.PI * f);
-      const py = base - rand() * thick * 0.5 * lens - (rand() - 0.5) * 4;
-      puff(g, px, py, (3 + rand() * 7) * (0.6 + 0.6 * lens), 0.3 + rand() * 0.35, 0.32);
-    }
-    x += w + 40 + rand() * 200;
-  }
-  return [canvas, base];
-}
-
-/** Cirrus: long, wind-combed streaks of ice near the tropopause. */
-function cirrusTexture(rand: () => number, tile: number, thick: number): [HTMLCanvasElement | null, number] {
-  const h = Math.round(thick * 2.4);
-  const base = Math.round(h * 0.55);
-  const made = canvasOf(tile, h);
-  if (!made) return [null, base];
-  const [canvas, g] = made;
-  g.lineCap = "round";
-  for (let i = 0; i < 34; i++) {
-    const x0 = rand() * tile;
-    const y0 = base + (rand() - 0.5) * thick;
-    const len = 160 + rand() * 420;
-    const bend = (rand() - 0.5) * 30;
-    const hooks = 6 + Math.floor(rand() * 10);
-    for (let k = 0; k < hooks; k++) {
-      const off = (k - hooks / 2) * (1.6 + rand());
-      g.strokeStyle = `rgba(255,246,236,${0.05 + rand() * 0.09})`;
-      g.lineWidth = 1 + rand() * 2.4;
-      g.beginPath();
-      g.moveTo(x0, y0 + off);
-      g.quadraticCurveTo(x0 + len * 0.5, y0 + off + bend, x0 + len, y0 + off - bend * 0.4 + (rand() - 0.5) * 8);
-      g.stroke();
-    }
-  }
-  return [canvas, base];
-}
-
-/** Four decks: cumulus at 1.6 and 3.2 km, altocumulus at 6 km, cirrus at 10.5 km. */
+/** Three cloud decks: puffy cumulus low, patchy altocumulus mid, cirrus streaks near the tropopause. */
 export function makeDecks(rand: () => number): Deck[] {
-  const deck = (km: number, kind: Deck["kind"], depth: number, thick: number, tile: number): Deck => {
-    const [texture, base] =
-      kind === "cumulus" ? cumulusTexture(rand, tile, thick) : kind === "alto" ? altoTexture(rand, tile, thick) : cirrusTexture(rand, tile, thick);
-    return { km, kind, depth, thick, texture: softened(texture, kind === "cirrus" ? 1.5 : 1.1), tile, base };
+  const decks: Deck[] = [];
+  const cumulus = (km: number, depth: number, thick: number) => {
+    const tile = 1800;
+    const shape = new Path2D();
+    const rim = new Path2D();
+    let x = 0;
+    while (x < tile) {
+      const w = 140 + rand() * 260;
+      const bodyH = thick * (0.35 + rand() * 0.4);
+      shape.rect(x, -bodyH * 0.25, w, bodyH * 0.6);
+      // Billowing tops: many overlapping domes, tallest in the middle.
+      const domes = 6 + Math.floor(rand() * 4);
+      for (let k = 0; k < domes; k++) {
+        const f = k / (domes - 1);
+        const r = w * (0.07 + rand() * 0.07) * (0.7 + 0.6 * Math.sin(Math.PI * f));
+        const cx = x + w * (0.06 + 0.88 * f) + (rand() - 0.5) * 12;
+        const cy = -bodyH * (0.1 + 0.35 * Math.sin(Math.PI * f) * (0.6 + rand() * 0.4));
+        shape.moveTo(cx + r, cy);
+        shape.arc(cx, cy, r, 0, Math.PI * 2);
+        rim.moveTo(cx + r * Math.cos(Math.PI * 1.15), cy + r * Math.sin(Math.PI * 1.15));
+        rim.arc(cx, cy, r, Math.PI * 1.15, Math.PI * 1.85);
+      }
+      x += w + 60 + rand() * 260;
+    }
+    decks.push({ km, kind: "cumulus", depth, shape, rim, tile, thick });
   };
-  return [deck(1.6, "cumulus", 1, 220, 2000), deck(3.2, "cumulus", 0.8, 150, 1800), deck(6, "alto", 0.6, 70, 1600), deck(10.5, "cirrus", 0.4, 50, 2200)];
-}
-
-/**
- * Above the weather: the cloud tops far below, foreshortened into a band just over the horizon.
- * It fades in once the rocket clears the decks and thins out as the view widens toward space.
- */
-export function drawCloudSea(ctx: CanvasRenderingContext2D, W: number, H: number, decks: Deck[], altKm: number, downKm: number, horizonY: number, alpha: number) {
-  const k = alpha * clamp01((altKm - 5) / 6) * clamp01((60 - altKm) / 30);
-  const tex = decks[0]?.texture;
-  if (!tex || k <= 0.01) return;
-  const bandH = H * (0.13 - 0.06 * clamp01((altKm - 10) / 40));
-  const top = horizonY - bandH;
-  ctx.save();
-  // Five overlapping rows, foreshortened: far rows thin and pale at the horizon, near rows larger.
-  for (let row = 0; row < 5; row++) {
-    const near = row / 4;
-    const rh = bandH * (0.22 + near * 0.3);
-    const y = top + bandH * (0.02 + near * 0.62) - rh * 0.25;
-    const rw = tex.width * (0.28 + near * 0.35);
-    const rs = -((downKm * (8 + near * 22)) % rw) - row * 271;
-    ctx.globalAlpha = k * (0.55 + near * 0.35);
-    for (let x = (rs % rw) - rw; x < W + rw; x += rw) ctx.drawImage(tex, Math.round(x), Math.round(y), Math.round(rw), Math.round(rh));
-  }
-  // Haze over the distant clouds, thickest at the horizon.
-  const haze = ctx.createLinearGradient(0, top, 0, horizonY);
-  haze.addColorStop(0, "rgba(150,175,210,0)");
-  haze.addColorStop(0.6, `rgba(160,182,214,${0.18 * k})`);
-  haze.addColorStop(1, `rgba(180,198,224,${0.5 * k})`);
-  ctx.globalAlpha = 1;
-  ctx.fillStyle = haze;
-  ctx.fillRect(0, top, W, horizonY - top);
-  ctx.restore();
+  const alto = (km: number, depth: number) => {
+    const tile = 1500;
+    const shape = new Path2D();
+    const rim = new Path2D();
+    for (let i = 0; i < 70; i++) {
+      const cx = rand() * tile;
+      const cy = (rand() - 0.5) * 50;
+      const r = 8 + rand() * 18;
+      shape.moveTo(cx + r * 1.6, cy);
+      shape.ellipse(cx, cy, r * 1.6, r * 0.8, 0, 0, Math.PI * 2);
+      rim.moveTo(cx - r * 1.4, cy - r * 0.3);
+      rim.ellipse(cx, cy, r * 1.6, r * 0.8, 0, Math.PI * 1.1, Math.PI * 1.9);
+    }
+    decks.push({ km, kind: "alto", depth, shape, rim, tile, thick: 60 });
+  };
+  const cirrus = (km: number, depth: number) => {
+    const tile = 2000;
+    const shape = new Path2D();
+    for (let i = 0; i < 26; i++) {
+      const cx = rand() * tile;
+      const cy = (rand() - 0.5) * 70;
+      const rx = 90 + rand() * 260;
+      const ry = 1.5 + rand() * 3.5;
+      shape.moveTo(cx + rx, cy);
+      shape.ellipse(cx, cy, rx, ry, (rand() - 0.5) * 0.08, 0, Math.PI * 2);
+    }
+    decks.push({ km, kind: "cirrus", depth, shape, rim: new Path2D(), tile, thick: 40 });
+  };
+  cumulus(1.6, 1, 220);
+  cumulus(3.2, 0.8, 160);
+  alto(6, 0.6);
+  cirrus(10.5, 0.4);
+  return decks;
 }
 
 /** Screen y of a cloud deck at `km` while the rocket (at `centerY`) is at `altKm`. */
 export const deckY = (d: Deck, altKm: number, centerY: number, H: number) => centerY + (altKm - d.km) * H * 0.32;
 
-/** Draws one deck: its texture tiled across the screen, sliding with parallax as the rocket goes downrange. */
+/** Draws one deck: lit tops, slate undersides, crisp edges. */
 export function drawDeck(
   ctx: CanvasRenderingContext2D,
   W: number,
@@ -675,12 +511,28 @@ export function drawDeck(
   alpha: number,
 ) {
   const y = deckY(d, altKm, centerY, H);
-  if (!d.texture || alpha <= 0.01 || y < -d.thick * 2 || y > H + d.thick * 2) return;
+  if (alpha <= 0.01 || y < -d.thick * 2 || y > H + d.thick * 2) return;
   const shift = -(((downKm * 60 + t * 12) * d.depth) % d.tile);
+  const top = d.kind === "cirrus" ? "rgba(255,236,222,0.55)" : "rgba(255,236,220,0.97)";
+  const under = d.kind === "cirrus" ? "rgba(200,210,230,0.35)" : "rgba(104,120,148,0.97)";
+  const g = ctx.createLinearGradient(0, y - d.thick * 0.6, 0, y + d.thick * 0.35);
+  g.addColorStop(0, top);
+  g.addColorStop(1, under);
   ctx.save();
   ctx.globalAlpha = alpha;
   for (let x = shift - d.tile; x < W + d.tile; x += d.tile) {
-    ctx.drawImage(d.texture, Math.round(x), Math.round(y - d.base));
+    ctx.save();
+    ctx.translate(Math.round(x), Math.round(y));
+    if (d.kind !== "cirrus") {
+      // Crisp slate underside peeking out below the lit body.
+      ctx.translate(0, Math.round(d.thick * 0.07));
+      ctx.fillStyle = under;
+      ctx.fill(d.shape);
+      ctx.translate(0, -Math.round(d.thick * 0.07));
+    }
+    ctx.fillStyle = g;
+    ctx.fill(d.shape);
+    ctx.restore();
   }
   ctx.restore();
 }
