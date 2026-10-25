@@ -23,6 +23,7 @@ const WEIGHTS = { tall: 0.25, walls: 0.25, symmetry: 0.15, calm: 0.2, count: 0.1
 export function scoreSketch(strokes: Stroke[]): SketchScore {
   // Work in isotropic units (x scaled by the napkin's aspect) so angles and lengths are honest.
   const paths = strokes
+    .filter((s) => s?.detail !== true)
     .map((s) => (Array.isArray(s?.points) ? s.points : []).filter(valid).map(([x, y]): Point => [x * NAPKIN_ASPECT, y]))
     .filter((p) => p.length > 0);
   const all = paths.flat();

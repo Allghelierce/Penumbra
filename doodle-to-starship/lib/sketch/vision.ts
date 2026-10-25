@@ -110,6 +110,7 @@ export function buildReadPrompt(hint: SketchReading): string {
     "First judge honestly whether it actually depicts a launch vehicle. A scribble, a random shape or something else is not one: say so with isLaunchVehicle false, a low confidence and a one-sentence problem.",
     `Scale: the napkin is ${NAPKIN_WIDTH_M} m wide and ${NAPKIN_HEIGHT_M} m tall. Coordinates are normalized 0..1 with x to the right and y down.`,
     "Stages: list them bottom first. A horizontal line across the body or a change in width marks a stage boundary.",
+    "Thin repeated lines inside tanks are weld seams, and small struts or ticks are detail: neither is a stage separation, a leg or an engine.",
     "Engines: for each stage, count the bells drawn under it and measure a typical bell's width in metres at the scale above. Do not convert bells into engine counts yourself; only fill writtenEngineCount when a number is written. Use the engine named on the sketch if any; otherwise raptor-3 for the first stage and raptor-vacuum for upper stages, with methalox.",
     "tankVolumeM3: π × (diameter/2)² × that stage's tank section height × 0.8, using the scale above.",
     "payloadMassKg: use a written figure if any; otherwise estimate from the payload section's size.",

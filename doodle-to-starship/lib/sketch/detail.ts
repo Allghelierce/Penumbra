@@ -14,7 +14,7 @@ type Box = Part["box"];
 export function detailStrokes(reading: SketchReading): Stroke[] {
   if ((reading.confidence ?? 1) < 0.5 || reading.parts.length === 0) return [];
   const rand = seeded(hashParts(reading.parts));
-  const pen = (points: Point[]): Stroke => ({ points: hand(points, rand) });
+  const pen = (points: Point[]): Stroke => ({ points: hand(points, rand), detail: true });
   const of = (kind: Part["kind"]) => reading.parts.filter((p) => p.kind === kind);
 
   const tanks = of("tank").sort((a, b) => a.box[1] - b.box[1]);

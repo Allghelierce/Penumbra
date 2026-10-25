@@ -270,6 +270,8 @@ function cleanStrokes(strokes: unknown): Stroke[] {
   if (!Array.isArray(strokes)) return [];
   const out: Stroke[] = [];
   for (const stroke of strokes) {
+    // "Add detail" strokes are decoration (welds, bells, struts), never structure.
+    if ((stroke as Stroke | null)?.detail === true) continue;
     const raw: unknown = (stroke as Stroke | null)?.points;
     if (!Array.isArray(raw)) continue;
     const points = raw

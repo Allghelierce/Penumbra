@@ -25,6 +25,17 @@ describe("detailStrokes", () => {
     }
   });
 
+  it("marks every detail stroke, and kept detail doesn't change what the sketch reads as", () => {
+    for (const d of DEMO_SKETCHES) {
+      const before = readFromGeometry(d.strokes, d.destination);
+      const detail = detailStrokes(before);
+      expect(detail.every((s) => s.detail === true), d.id).toBe(true);
+      const after = readFromGeometry([...d.strokes, ...detail], d.destination);
+      expect(after.design, d.id).toEqual(before.design);
+      expect(after.confidence, d.id).toBe(before.confidence);
+    }
+  });
+
   it("adds nothing to a low-confidence scribble", () => {
     let seed = 3;
     const rand = () => ((seed = (seed * 16807) % 2147483647) / 2147483647);
