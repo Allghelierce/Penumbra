@@ -20,7 +20,7 @@ const caveat = Caveat({
 });
 
 export const metadata: Metadata = {
-  title: "Doodle to Starship",
+  title: "Penumbra",
   description: "Sketch a spacecraft on a napkin. Find out if it flies.",
 };
 

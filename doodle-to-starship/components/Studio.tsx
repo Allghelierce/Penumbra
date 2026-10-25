@@ -292,7 +292,7 @@ export default function Studio() {
     <div className="flex h-dvh flex-col overflow-hidden">
       <header className="flex flex-wrap items-center gap-x-8 gap-y-2 px-8 pt-5">
         <h1 className="font-hand text-[36px] font-bold leading-none">
-          Doodle <span className="text-redpen">→</span> Starship
+          <span className="text-redpen">Pen</span>umbra
         </h1>
         <nav className="flex items-center gap-1" aria-label="Destination">
           <span className="mr-2 font-hand text-xl text-ink-muted">headed to</span>

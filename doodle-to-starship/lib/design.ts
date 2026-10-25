@@ -238,7 +238,8 @@ export interface ReviewResponse {
 export interface RenderRequest {
   design: Design;
   analysis: Analysis;
-  kind: "concept" | "outcome";
+  /** "patch" is an embroidered mission patch for the design, shown as a sticker on the napkin. */
+  kind: "concept" | "outcome" | "patch";
   /** PNG data URL of the napkin. When present, Imagine edits the sketch into a photo so the render looks like the drawing. */
   sketch?: string;
 }
