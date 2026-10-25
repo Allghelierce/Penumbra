@@ -57,6 +57,11 @@ const SILENT_LINE_MS = 900;
 /** Ends the browser line in progress (cancel() doesn't always fire onend). */
 let endBrowserLine: (() => void) | null = null;
 
+/** Module-level clock, so it's plainly not called during render. */
+const clock = () => Date.now();
+/** The same line in the same phase within this window is a duplicate and isn't spoken again. */
+const DEDUPE_MS = 4000;
+
 /** Bumped by every hush(), so a line still fetching its audio knows it was cancelled. */
 let hushes = 0;
 
@@ -307,9 +312,24 @@ export default function VoiceDock({
   const utteranceId = useRef(0);
   // Grok Voice bills per connected minute and needs the mic, so only push-to-talk opens a session;
   // until then (and after it idles out) lines go through xAI text-to-speech or the browser's voice.
+  const lastSaid = useRef({ text: "", phase: "", at: 0 });
   sayReply.current = (text: string, speaker: Speaker = "Engineer") => {
+    const at = clock();
+    const last = lastSaid.current;
+    if (last.text === text && last.phase === phaseRef.current && at - last.at < DEDUPE_MS) return;
+    lastSaid.current = { text, phase: phaseRef.current, at };
     void speakLineRef.current(text, speaker);
   };
+
+  // One voice at a time across phases: a new phase cuts off whatever the last one was still saying.
+  // Declared before the narration and offer effects, so the new phase's own line still plays.
+  const lastPhase = useRef(phase);
+  useEffect(() => {
+    if (lastPhase.current === phase) return;
+    lastPhase.current = phase;
+    hush();
+    sessionRef.current?.interrupt();
+  }, [phase]);
 
   // Narration: speak whenever it changes. Launch callouts get the Quindar tones first, like the loops.
   const lastNarration = useRef<string | null>(null);
