@@ -87,6 +87,16 @@ function addCost(ticks: number) {
   }
 }
 
+/** False with no key, or once today's metered spend has reached the daily budget. */
+export function paidCallsAllowed(): boolean {
+  return hasXai() && spentTodayUsd() < dailyBudgetUsd();
+}
+
+/** Count a cost xAI bills outside these helpers (e.g. a Grok Voice session) toward today's budget. */
+export function recordEstimatedCost(usd: number) {
+  addCost(usd * TICKS_PER_USD);
+}
+
 /** The most recent failure (any route), the most recent success and today's spend, for /api/xai-status. */
 export function xaiHealth() {
   return {

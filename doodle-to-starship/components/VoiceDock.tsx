@@ -64,7 +64,7 @@ const HINTS: Record<Phase, string> = {
 /** How long to wait for the parent to re-analyze after an edit before replying anyway. */
 const ANALYSIS_WAIT_MS = 1500;
 /** Grok Voice bills for every connected minute, so the session closes after this long with nothing said. */
-const IDLE_CLOSE_MS = 60_000;
+const IDLE_CLOSE_MS = 30_000;
 
 async function mintToken(): Promise<string> {
   const res = await fetch("/api/voice-token", { method: "POST" });
@@ -250,8 +250,10 @@ export default function VoiceDock({
   const utteranceId = useRef(0);
   sayReply.current = (text: string) => {
     setReplyCaption(text);
-    if (mode === "grok") {
-      ensureSession().say(text);
+    // Grok Voice bills per connected minute and needs the mic, so only push-to-talk opens a session;
+    // until then (and after it idles out) lines are spoken by the browser.
+    if (mode === "grok" && sessionRef.current) {
+      sessionRef.current.say(text);
       return;
     }
     const id = ++utteranceId.current;
@@ -290,8 +292,8 @@ export default function VoiceDock({
         };
         const safety = setTimeout(finish, estimateMs * 2 + 1500);
         setReplyCaption(text);
-        if (modeRef.current === "grok") {
-          const session = ensureSession();
+        const session = modeRef.current === "grok" ? sessionRef.current : null;
+        if (session) {
           session.say(text);
           // force_message has no completion event: wait about as long as the line, then until Grok goes quiet.
           const started = Date.now();
@@ -305,7 +307,7 @@ export default function VoiceDock({
         }
         speak(speakable(text), { onEnd: finish, ...voice });
       }),
-    [ensureSession],
+    [],
   );
 
   // ---- The GO/NO-GO poll: read each controller's line, lighting its tile as it starts.
