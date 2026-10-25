@@ -63,6 +63,8 @@ export default function NapkinCanvas({ strokes, onChange, disabled, children, hi
   function handleDown(e: PointerEvent<HTMLCanvasElement>) {
     if (disabled || e.button > 0) return;
     e.currentTarget.setPointerCapture(e.pointerId);
+    // Pen down: everything layered over the drawing steps aside until the stroke ends.
+    boxRef.current?.setAttribute("data-drawing", "true");
     live.current = [toPoint(e)];
   }
 
@@ -80,6 +82,7 @@ export default function NapkinCanvas({ strokes, onChange, disabled, children, hi
   }
 
   function handleUp() {
+    boxRef.current?.removeAttribute("data-drawing");
     const points = live.current;
     live.current = null;
     if (points && points.length > 0) onChange([...strokes, { points }]);
@@ -99,8 +102,8 @@ export default function NapkinCanvas({ strokes, onChange, disabled, children, hi
         onPointerUp={handleUp}
         onPointerCancel={handleUp}
       />
-      {strokes.length === 0 && (hint ?? <EmptyHint />)}
-      <div className="pointer-events-none absolute inset-0">{children}</div>
+      {strokes.length === 0 && <div className="napkin-overlay">{hint ?? <EmptyHint />}</div>}
+      <div className="napkin-overlay pointer-events-none absolute inset-0">{children}</div>
     </div>
   );
 }

@@ -502,3 +502,13 @@ details > summary::-webkit-details-marker {
     animation: none !important;
   }
 }
+
+/* Pen down: the overlays on the drawing area (hint, tags, red pen, render, sticker) step aside. */
+.napkin-overlay {
+  transition: opacity 250ms ease-out 120ms;
+}
+.napkin[data-drawing] .napkin-overlay {
+  opacity: 0 !important;
+  pointer-events: none !important;
+  transition: opacity 120ms ease-out;
+}
