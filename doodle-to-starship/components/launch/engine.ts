@@ -20,16 +20,20 @@ import {
   clamp01,
   drawAurora,
   drawBoundaries,
-  drawClouds,
   drawGround,
   drawHorizonGlow,
-  drawLimb,
+  drawDeck,
+  drawEarth,
+  earthTopY,
+  drawISS,
+  deckY,
   drawOzone,
   drawSky,
   drawStars,
   drawTargetBody,
   glowSprite,
-  makeClouds,
+  makeCityLights,
+  makeDecks,
   makePad,
   makeStars,
   mix,
@@ -222,7 +226,11 @@ export function startLaunch(
   const piecePaths = pieces.map((p) => pencilPath(p.lines));
   const padPath = polyPath(makePad(doodle, GROUND * Hn, seeded(11)));
   const stars = makeStars(seeded(5));
-  const clouds = makeClouds(seeded(41));
+  const decks = makeDecks(seeded(41));
+  const cityLights = makeCityLights(seeded(73));
+  const maxQAt = plan.cues.find((c) => c.event.kind === "max-q")?.at ?? null;
+  /** Screen-space streaks rushing past while it's fast and still in the air. */
+  const speedLines: { x: number; y: number; vx: number; vy: number; age: number; life: number; len: number; a: number }[] = [];
   const topKm = ladderTop(design.destination);
   const displayFont =
     getComputedStyle(document.documentElement).getPropertyValue("--font-barlow-condensed").trim() || "sans-serif";
@@ -417,7 +425,7 @@ export function startLaunch(
     const hw = (n.w / 2) * (1 + 0.7 * plume) * (0.85 + 0.15 * thr);
     c.save();
     c.globalCompositeOperation = "lighter";
-    c.globalAlpha = 0.55 * thr * alpha;
+    c.globalAlpha = 0.35 * thr * alpha;
     c.drawImage(sprites.fire, n.x - hw * 3, n.y - hw * 1.2, hw * 6, L * 1.15 + hw * 2);
     const g = c.createLinearGradient(0, n.y, 0, n.y + L);
     g.addColorStop(0, rgba(pal.flameHot, 0.95));
@@ -433,6 +441,24 @@ export function startLaunch(
     c.fillStyle = core;
     teardrop(n.x, n.y, hw * 0.55, L * 0.5);
     c.fill();
+    // Shock diamonds: crisp bright nodes in the dense low-altitude plume; they fade as it widens.
+    const dia = (1 - clamp01(plume / 0.35)) * thr;
+    if (dia > 0.05) {
+      c.fillStyle = "rgba(255,250,232,1)";
+      for (let i = 0; i < 4; i++) {
+        const yy = n.y + L * (0.42 + 0.13 * i);
+        const w = hw * (0.42 - 0.07 * i);
+        const h = L * 0.04;
+        c.globalAlpha = alpha * dia * (0.95 - 0.2 * i);
+        c.beginPath();
+        c.moveTo(n.x, yy - h);
+        c.lineTo(n.x + w, yy);
+        c.lineTo(n.x, yy + h);
+        c.lineTo(n.x - w, yy);
+        c.closePath();
+        c.fill();
+      }
+    }
     // A pencil outline that redraws itself a dozen times a second, like a flipbook.
     const r = seeded(Math.floor(t * 12) * 31 + seed);
     c.globalCompositeOperation = "source-over";
@@ -477,10 +503,10 @@ export function startLaunch(
     c.lineJoin = "round";
     if (chalk > 0.01) {
       c.strokeStyle = rgba(CHALK_GLOW, 1);
-      c.globalAlpha = alpha * chalk * 0.12;
+      c.globalAlpha = alpha * chalk * 0.05;
       c.lineWidth = lw * 4.5;
       c.stroke(path);
-      c.globalAlpha = alpha * chalk * 0.25;
+      c.globalAlpha = alpha * chalk * 0.14;
       c.lineWidth = lw * 2.4;
       c.stroke(path);
     }
@@ -713,7 +739,7 @@ export function startLaunch(
     const layerCenter = H * 0.47;
     const limbRise = orbitish ? easeOut((t - plan.finaleAt + 0.3) / 1.6) : 0;
     drawOzone(c, W, H, altKm, layerCenter);
-    drawAurora(c, W, H, clamp01((altKm - 85) / 25) * (1 - limbRise) * night, t);
+    drawAurora(c, W, H, clamp01((altKm - 85) / 25) * (1 - limbRise) * night, t, earthTopY(H, flying ? altKm : 0, limbRise) - 6);
     const meteorK = flying ? clamp01((altKm - 45) / 8) * clamp01((88 - altKm) / 8) : 0;
     if (meteorK > 0 && Math.random() < 7 * meteorK * dt) {
       const ang = rnd(0.55, 0.95) * Math.PI;
@@ -751,11 +777,49 @@ export function startLaunch(
       c.restore();
     }
     if (flying || plan.liftoffAt === null) drawBoundaries(c, W, H, altKm, layerCenter, displayFont, pal.chalk, night);
-    drawClouds(c, W, H, clouds, altKm, flying ? s.down : 0, layerCenter, sprites.puff, pal.chalk, night * (flying ? 1 : 0));
+    const downKm = flying ? s.down : 0;
+    drawEarth(c, W, H, flying ? altKm : 0, downKm / 6371 + finaleK * 0.01, limbRise, cityLights, t);
+    const issK = clamp01((altKm - 120) / 30) * (1 - limbRise);
+    if (issK > 0) drawISS(c, ((t * 55) % (W + 300)) - 150, H * 0.17, 1.3, issK, displayFont);
+    const deckAlpha = night * (flying ? 1 : 0);
+    // Decks the rocket isn't inside are scenery behind it; the one it's punching through is drawn again in front.
+    const crossing = decks.filter((d) => Math.abs(deckY(d, altKm, layerCenter, H) - layerCenter) < d.thick * 0.55);
+    for (const d of decks) drawDeck(c, W, H, d, altKm, downKm, layerCenter, t, deckAlpha);
+
+    // Speed lines while it's fast and the air is thick enough to show it.
+    const rush = flying && !exploded ? clamp01((s.speed - 200) / 600) * clamp01((60 - altKm) / 25) : 0;
+    if (rush > 0) {
+      const n = 70 * rush * dt;
+      for (let i = 0; i < Math.floor(n) + (Math.random() < n % 1 ? 1 : 0); i++) {
+        const sp = rnd(1800, 2800);
+        speedLines.push({ x: rnd(0, W), y: rnd(-0.2, 1) * H, vx: -Math.sin(pitch) * sp, vy: Math.cos(pitch) * sp, age: 0, life: rnd(0.2, 0.4), len: rnd(40, 130), a: rnd(0.12, 0.3) });
+      }
+    }
+    if (speedLines.length) {
+      c.save();
+      c.strokeStyle = "#ffffff";
+      c.lineWidth = 1;
+      for (let i = speedLines.length - 1; i >= 0; i--) {
+        const l = speedLines[i];
+        l.age += dt;
+        if (l.age >= l.life) {
+          speedLines.splice(i, 1);
+          continue;
+        }
+        l.x += l.vx * dt;
+        l.y += l.vy * dt;
+        const sp = Math.hypot(l.vx, l.vy);
+        c.globalAlpha = l.a * (1 - l.age / l.life);
+        c.beginPath();
+        c.moveTo(Math.round(l.x) + 0.5, Math.round(l.y));
+        c.lineTo(Math.round(l.x - (l.vx / sp) * l.len) + 0.5, Math.round(l.y - (l.vy / sp) * l.len));
+        c.stroke();
+      }
+      c.restore();
+    }
 
     const groundY = SY(groundLevel);
-    drawHorizonGlow(c, W, H, Math.min(groundY, H * 1.02), padK * (1 - clamp01(altKm / 150)), 1 - clamp01(altKm / 15));
-    if (orbitish) drawLimb(c, W, H, limbRise, pal.chalk);
+    drawHorizonGlow(c, W, H, Math.min(groundY, H * 1.02), padK * (1 - clamp01(altKm / 12)), 1 - clamp01(altKm / 15));
     if (body) drawTargetBody(c, W, H, body, easeOutBack((t - plan.finaleAt - 0.5) / 0.9), pal);
     drawGround(c, W, H, groundY, padK, horizon, pal.chalk);
     if (padK > 0.01 && groundY > -H && groundY < H * 3) {
@@ -803,8 +867,33 @@ export function startLaunch(
       drawParticles(local, (p) => [p.x, p.y, 1]);
       pieces.forEach((_, i) => withPiece(i, (a) => strokeDoodle(piecePaths[i], a, chalk, Z)));
       if (reentry > 0.02) drawReentry(reentry, [focus[0], top], Z);
+      // Vapor cone around Max-Q: a crisp condensation collar as it goes transonic.
+      const vapor = maxQAt !== null && flying ? 1 - clamp01(Math.abs(t - maxQAt) / 1.1) : 0;
+      if (vapor > 0.02) {
+        const b = doodle.box;
+        const h = b.maxY - b.minY;
+        const vcx = (b.minX + b.maxX) / 2;
+        const half = (b.maxX - b.minX) / 2;
+        const y0 = b.minY + 0.28 * h;
+        const y1 = b.minY + 0.62 * h;
+        c.beginPath();
+        c.moveTo(vcx - half * 0.55, y0);
+        c.quadraticCurveTo(vcx, y0 - 0.05 * h, vcx + half * 0.55, y0);
+        c.lineTo(vcx + half * 1.05, y1);
+        c.quadraticCurveTo(vcx, y1 + 0.09 * h, vcx - half * 1.05, y1);
+        c.closePath();
+        c.globalAlpha = vapor * (0.24 + 0.06 * Math.sin(t * 40));
+        c.fillStyle = "#ffffff";
+        c.fill();
+        c.globalAlpha = vapor * 0.55;
+        c.strokeStyle = "#ffffff";
+        c.lineWidth = 1 / Z;
+        c.stroke();
+        c.globalAlpha = 1;
+      }
       c.restore();
     }
+    for (const d of crossing) drawDeck(c, W, H, d, altKm, downKm, layerCenter, t, deckAlpha * 0.6);
 
     drawParticles(world, (p) => [SX(p.x), SY(p.y), Z]);
     if (frags.length) {

@@ -12,11 +12,11 @@ export interface Layer {
 }
 
 export const LAYERS: Layer[] = [
-  { name: "Troposphere", from: 0, to: 12, color: "#5d93c9" },
-  { name: "Stratosphere", from: 12, to: 50, color: "#3c6fa6" },
-  { name: "Mesosphere", from: 50, to: 80, color: "#5b5fa8" },
-  { name: "Thermosphere", from: 80, to: 700, color: "#4cc38a" },
-  { name: "Exosphere", from: 700, to: Infinity, color: "#8a97a8" },
+  { name: "Troposphere", from: 0, to: 12, color: "#e6e6e6" },
+  { name: "Stratosphere", from: 12, to: 50, color: "#bdbdbd" },
+  { name: "Mesosphere", from: 50, to: 80, color: "#949494" },
+  { name: "Thermosphere", from: 80, to: 700, color: "#6b6b6b" },
+  { name: "Exosphere", from: 700, to: Infinity, color: "#474747" },
 ];
 
 export interface Boundary {

@@ -84,14 +84,14 @@ export function glowSprite(c: RGB, size = 64): HTMLCanvasElement {
 }
 
 /** Dusk blue in the troposphere, darkening through the stratosphere, black by the Kármán line. */
-function skyColors(altKm: number, pal: Palette): [RGB, RGB] {
+function skyColors(altKm: number): [RGB, RGB] {
   const stops: [number, RGB, RGB][] = [
     [0, [24, 62, 116], [70, 118, 176]],
     [12, [18, 48, 96], [52, 98, 156]],
     [30, [12, 30, 64], [32, 66, 116]],
     [50, [8, 16, 36], [17, 36, 70]],
     [80, [6, 9, 19], [10, 18, 36]],
-    [100, pal.night, [7, 11, 22]],
+    [100, [0, 0, 0], [2, 3, 5]],
   ];
   for (let i = 1; i < stops.length; i++) {
     const [km, top, bottom] = stops[i];
@@ -106,7 +106,7 @@ function skyColors(altKm: number, pal: Palette): [RGB, RGB] {
 }
 
 export function drawSky(ctx: CanvasRenderingContext2D, W: number, H: number, pal: Palette, altKm: number, alpha: number) {
-  const [top, bottom] = skyColors(Math.max(0, altKm), pal);
+  const [top, bottom] = skyColors(Math.max(0, altKm));
   const g = ctx.createLinearGradient(0, 0, 0, H);
   g.addColorStop(0, rgba(top, 1));
   g.addColorStop(1, rgba(bottom, 1));
@@ -196,7 +196,7 @@ export function drawGround(
 ) {
   if (y >= H + 4 || alpha <= 0.01) return;
   ctx.globalAlpha = alpha;
-  ctx.fillStyle = "#080b12";
+  ctx.fillStyle = "#050505";
   ctx.fillRect(0, y, W, H - y + 4);
   ctx.strokeStyle = rgba(chalk, 0.55);
   ctx.lineWidth = 1.6;
@@ -256,43 +256,6 @@ export function makePad(d: Doodle, ground: number, rand: () => number): Vec[][] 
   lines.push(wob([[x1, 0.78 * h], [d.box.minX - 0.01 * h, 0.8 * h]]));
   lines.push(wob([[(x1 + x2) / 2, top], [(x1 + x2) / 2, top + 0.1 * h]]));
   return lines;
-}
-
-/** Earth's limb rising from the bottom of the screen, rise 0..1. */
-export function drawLimb(ctx: CanvasRenderingContext2D, W: number, H: number, rise: number, chalk: RGB) {
-  if (rise <= 0) return;
-  const R = Math.max(W, H) * 1.6;
-  const cx = W / 2;
-  const cy = H + R - rise * H * 0.24;
-  const top = cy - R;
-  const g = ctx.createLinearGradient(0, top, 0, top + H * 0.3);
-  g.addColorStop(0, "#1d4f80");
-  g.addColorStop(0.18, "#0f2c4d");
-  g.addColorStop(1, "#060c18");
-  ctx.fillStyle = g;
-  ctx.beginPath();
-  ctx.arc(cx, cy, R, Math.PI, Math.PI * 2);
-  ctx.fill();
-
-  ctx.save();
-  ctx.globalCompositeOperation = "lighter";
-  for (const [lw, a] of [
-    [44, 0.05],
-    [20, 0.1],
-    [7, 0.3],
-  ] as const) {
-    ctx.lineWidth = lw;
-    ctx.strokeStyle = `rgba(110,170,255,${a})`;
-    ctx.beginPath();
-    ctx.arc(cx, cy, R + lw * 0.25, Math.PI, Math.PI * 2);
-    ctx.stroke();
-  }
-  ctx.restore();
-  ctx.strokeStyle = rgba(chalk, 0.85);
-  ctx.lineWidth = 2;
-  ctx.beginPath();
-  ctx.arc(cx, cy, R, Math.PI, Math.PI * 2);
-  ctx.stroke();
 }
 
 export type TargetBody = "moon" | "mars" | "europa";
@@ -432,73 +395,10 @@ export function drawOzone(ctx: CanvasRenderingContext2D, W: number, H: number, a
   ctx.fillRect(0, Math.max(0, yTop), W, Math.min(H, yBot) - Math.max(0, yTop));
 }
 
-export interface Cloud {
-  km: number;
-  x: number;
-  w: number;
-  /** dx, dy, r as fractions of the cloud's width. */
-  puffs: [number, number, number][];
-}
-
-export function makeClouds(rand: () => number): Cloud[] {
-  return Array.from({ length: 18 }, () => {
-    const n = 4 + Math.floor(rand() * 4);
-    const puffs: [number, number, number][] = [];
-    for (let k = 0; k < n; k++) {
-      const f = k / (n - 1);
-      puffs.push([(f - 0.5) * 0.85 + (rand() - 0.5) * 0.08, -0.1 * Math.sin(Math.PI * f) + (rand() - 0.5) * 0.06, 0.13 + rand() * 0.11]);
-    }
-    return { km: 1.2 + rand() * 9.6, x: rand(), w: 0.16 + rand() * 0.3, puffs };
-  });
-}
-
-/** Chalk-outlined clouds in the troposphere, falling past as the rocket climbs through them. */
-export function drawClouds(
-  ctx: CanvasRenderingContext2D,
-  W: number,
-  H: number,
-  clouds: Cloud[],
-  altKm: number,
-  downKm: number,
-  centerY: number,
-  sprite: HTMLCanvasElement,
-  chalk: RGB,
-  alpha: number,
-) {
-  if (alpha <= 0.01 || altKm > 16) return;
-  ctx.save();
-  ctx.lineWidth = 1.5;
-  ctx.lineCap = "round";
-  ctx.strokeStyle = rgba(chalk, 1);
-  for (const c of clouds) {
-    const w = c.w * W;
-    const y = layerY(altKm, c.km, centerY, H * 0.32);
-    if (y < -w * 0.4 || y > H + w * 0.4) continue;
-    const x = wrap(c.x * W * 1.4 - downKm * 30, W * 1.4) - W * 0.2;
-    ctx.globalAlpha = alpha * 0.3;
-    for (const [dx, dy, r] of c.puffs) {
-      const R = r * w * 1.3;
-      ctx.drawImage(sprite, x + dx * w - R, y + dy * w - R, R * 2, R * 2);
-    }
-    ctx.globalAlpha = alpha * 0.5;
-    ctx.beginPath();
-    for (const [dx, dy, r] of c.puffs) {
-      const R = r * w * 0.62;
-      const cx = x + dx * w;
-      const cy = y + dy * w;
-      ctx.moveTo(cx + Math.cos(Math.PI * 1.08) * R, cy + Math.sin(Math.PI * 1.08) * R);
-      ctx.arc(cx, cy, R, Math.PI * 1.08, Math.PI * 1.92);
-    }
-    ctx.stroke();
-  }
-  ctx.restore();
-}
-
 /** Thermosphere aurora: green-to-violet curtains shimmering low on the screen, k 0..1. */
-export function drawAurora(ctx: CanvasRenderingContext2D, W: number, H: number, k: number, t: number) {
+export function drawAurora(ctx: CanvasRenderingContext2D, W: number, H: number, k: number, t: number, base: number) {
   if (k <= 0.01) return;
-  const base = H * 0.92;
-  const g = ctx.createLinearGradient(0, base - H * 0.5, 0, base);
+  const g = ctx.createLinearGradient(0, base - H * 0.3, 0, base);
   g.addColorStop(0, "rgba(150,90,220,0)");
   g.addColorStop(0.35, "rgba(150,90,220,0.55)");
   g.addColorStop(0.75, "rgba(76,195,138,0.9)");
@@ -509,11 +409,265 @@ export function drawAurora(ctx: CanvasRenderingContext2D, W: number, H: number, 
   for (let band = 0; band < 2; band++) {
     for (let x = -8; x < W + 8; x += 4) {
       const ph = x * 0.005 + t * (0.3 + band * 0.18) + band * 2.1;
-      const y = base - H * (0.06 + band * 0.08) + Math.sin(ph) * H * 0.035 + Math.sin(ph * 2.3 + 1) * H * 0.015;
-      const h = H * (0.1 + 0.12 * (0.5 + 0.5 * Math.sin(ph * 1.7 + t * 0.8)));
+      const y = base - H * (0.01 + band * 0.03) + Math.sin(ph) * H * 0.012 + Math.sin(ph * 2.3 + 1) * H * 0.006;
+      const h = H * (0.06 + 0.1 * (0.5 + 0.5 * Math.sin(ph * 1.7 + t * 0.8)));
       ctx.globalAlpha = Math.max(0, k * (0.09 + 0.07 * Math.sin(x * 0.04 + t * 2.6 + band)));
       ctx.fillRect(x, y - h, 4, h);
     }
   }
+  ctx.restore();
+}
+
+// --- Detailed layer art: crisp shapes, no blur ---
+
+export interface Deck {
+  km: number;
+  kind: "cumulus" | "alto" | "cirrus";
+  /** Parallax: how fast the deck slides sideways. */
+  depth: number;
+  /** One tile of the deck's shape, `tile` px wide, drawn repeatedly across the screen. */
+  shape: Path2D;
+  rim: Path2D;
+  tile: number;
+  thick: number;
+}
+
+/** Three cloud decks: puffy cumulus low, patchy altocumulus mid, cirrus streaks near the tropopause. */
+export function makeDecks(rand: () => number): Deck[] {
+  const decks: Deck[] = [];
+  const cumulus = (km: number, depth: number, thick: number) => {
+    const tile = 1800;
+    const shape = new Path2D();
+    const rim = new Path2D();
+    let x = 0;
+    while (x < tile) {
+      const w = 140 + rand() * 260;
+      const bodyH = thick * (0.35 + rand() * 0.4);
+      shape.rect(x, -bodyH * 0.25, w, bodyH * 0.6);
+      // Billowing tops: many overlapping domes, tallest in the middle.
+      const domes = 6 + Math.floor(rand() * 4);
+      for (let k = 0; k < domes; k++) {
+        const f = k / (domes - 1);
+        const r = w * (0.07 + rand() * 0.07) * (0.7 + 0.6 * Math.sin(Math.PI * f));
+        const cx = x + w * (0.06 + 0.88 * f) + (rand() - 0.5) * 12;
+        const cy = -bodyH * (0.1 + 0.35 * Math.sin(Math.PI * f) * (0.6 + rand() * 0.4));
+        shape.moveTo(cx + r, cy);
+        shape.arc(cx, cy, r, 0, Math.PI * 2);
+        rim.moveTo(cx + r * Math.cos(Math.PI * 1.15), cy + r * Math.sin(Math.PI * 1.15));
+        rim.arc(cx, cy, r, Math.PI * 1.15, Math.PI * 1.85);
+      }
+      x += w + 60 + rand() * 260;
+    }
+    decks.push({ km, kind: "cumulus", depth, shape, rim, tile, thick });
+  };
+  const alto = (km: number, depth: number) => {
+    const tile = 1500;
+    const shape = new Path2D();
+    const rim = new Path2D();
+    for (let i = 0; i < 70; i++) {
+      const cx = rand() * tile;
+      const cy = (rand() - 0.5) * 50;
+      const r = 8 + rand() * 18;
+      shape.moveTo(cx + r * 1.6, cy);
+      shape.ellipse(cx, cy, r * 1.6, r * 0.8, 0, 0, Math.PI * 2);
+      rim.moveTo(cx - r * 1.4, cy - r * 0.3);
+      rim.ellipse(cx, cy, r * 1.6, r * 0.8, 0, Math.PI * 1.1, Math.PI * 1.9);
+    }
+    decks.push({ km, kind: "alto", depth, shape, rim, tile, thick: 60 });
+  };
+  const cirrus = (km: number, depth: number) => {
+    const tile = 2000;
+    const shape = new Path2D();
+    for (let i = 0; i < 26; i++) {
+      const cx = rand() * tile;
+      const cy = (rand() - 0.5) * 70;
+      const rx = 90 + rand() * 260;
+      const ry = 1.5 + rand() * 3.5;
+      shape.moveTo(cx + rx, cy);
+      shape.ellipse(cx, cy, rx, ry, (rand() - 0.5) * 0.08, 0, Math.PI * 2);
+    }
+    decks.push({ km, kind: "cirrus", depth, shape, rim: new Path2D(), tile, thick: 40 });
+  };
+  cumulus(1.6, 1, 220);
+  cumulus(3.2, 0.8, 160);
+  alto(6, 0.6);
+  cirrus(10.5, 0.4);
+  return decks;
+}
+
+/** Screen y of a cloud deck at `km` while the rocket (at `centerY`) is at `altKm`. */
+export const deckY = (d: Deck, altKm: number, centerY: number, H: number) => centerY + (altKm - d.km) * H * 0.32;
+
+/** Draws one deck: lit tops, slate undersides, crisp edges. */
+export function drawDeck(
+  ctx: CanvasRenderingContext2D,
+  W: number,
+  H: number,
+  d: Deck,
+  altKm: number,
+  downKm: number,
+  centerY: number,
+  t: number,
+  alpha: number,
+) {
+  const y = deckY(d, altKm, centerY, H);
+  if (alpha <= 0.01 || y < -d.thick * 2 || y > H + d.thick * 2) return;
+  const shift = -(((downKm * 60 + t * 12) * d.depth) % d.tile);
+  const top = d.kind === "cirrus" ? "rgba(255,236,222,0.55)" : "rgba(255,236,220,0.97)";
+  const under = d.kind === "cirrus" ? "rgba(200,210,230,0.35)" : "rgba(104,120,148,0.97)";
+  const g = ctx.createLinearGradient(0, y - d.thick * 0.6, 0, y + d.thick * 0.35);
+  g.addColorStop(0, top);
+  g.addColorStop(1, under);
+  ctx.save();
+  ctx.globalAlpha = alpha;
+  for (let x = shift - d.tile; x < W + d.tile; x += d.tile) {
+    ctx.save();
+    ctx.translate(Math.round(x), Math.round(y));
+    if (d.kind !== "cirrus") {
+      // Crisp slate underside peeking out below the lit body.
+      ctx.translate(0, Math.round(d.thick * 0.07));
+      ctx.fillStyle = under;
+      ctx.fill(d.shape);
+      ctx.translate(0, -Math.round(d.thick * 0.07));
+    }
+    ctx.fillStyle = g;
+    ctx.fill(d.shape);
+    ctx.restore();
+  }
+  ctx.restore();
+}
+
+export interface CityLight {
+  /** Angle from the top of the globe, radians. */
+  a: number;
+  /** Depth below the limb, as a fraction of the screen height. */
+  d: number;
+  b: number;
+}
+
+export function makeCityLights(rand: () => number): CityLight[] {
+  return Array.from({ length: 260 }, () => ({ a: (rand() - 0.5) * 1.6, d: 0.004 + Math.pow(rand(), 1.8) * 0.2, b: 0.3 + rand() * 0.7 }));
+}
+
+/**
+ * The night-side Earth seen edge-on: a curved limb that rises and bends more as the rocket
+ * climbs, with the thin layered glow of the atmosphere along it, noctilucent clouds above
+ * the mesopause and city lights below. `lift` (0..1) raises it further for the orbit finale.
+ */
+/** Screen y of the top of Earth's limb at this altitude (lift raises it for the orbit finale). */
+export function earthTopY(H: number, altKm: number, lift: number): number {
+  const k = clamp01((altKm - 1) / 180);
+  return H * (1.03 - 0.17 * Math.pow(k, 0.6) - 0.1 * lift);
+}
+
+export function drawEarth(
+  ctx: CanvasRenderingContext2D,
+  W: number,
+  H: number,
+  altKm: number,
+  spin: number,
+  lift: number,
+  lights: CityLight[],
+  t: number,
+) {
+  const k = clamp01((altKm - 1) / 180);
+  if (k <= 0 && lift <= 0) return;
+  const R = W * (14 - 12.4 * Math.pow(Math.max(k, lift * 0.9), 0.55));
+  const top = earthTopY(H, altKm, lift);
+  const cx = W / 2;
+  const cy = top + R;
+  const span = Math.min(Math.PI / 2, Math.asin(Math.min(1, (W * 0.75) / R)) + 0.05);
+  const a0 = -Math.PI / 2 - span;
+  const a1 = -Math.PI / 2 + span;
+
+  // Surface.
+  const g = ctx.createLinearGradient(0, top, 0, top + H * 0.25);
+  g.addColorStop(0, "#0e1621");
+  g.addColorStop(1, "#040506");
+  ctx.fillStyle = g;
+  ctx.beginPath();
+  ctx.arc(cx, cy, R, a0, a1);
+  ctx.lineTo(W + 10, H + 10);
+  ctx.lineTo(-10, H + 10);
+  ctx.closePath();
+  ctx.fill();
+
+  // City lights, turning slowly with the planet.
+  ctx.fillStyle = "rgb(255,205,140)";
+  for (const l of lights) {
+    const a = l.a + spin;
+    const r = R - l.d * H;
+    const x = cx + r * Math.sin(a);
+    const y = cy - r * Math.cos(a);
+    if (x < 0 || x > W || y > H) continue;
+    ctx.globalAlpha = l.b * 0.7 * (0.5 + 0.5 * k);
+    ctx.fillRect(Math.round(x), Math.round(y), 1, 1);
+  }
+  ctx.globalAlpha = 1;
+
+  // The atmosphere edge-on: thin, layered bands hugging the limb (twilight orange
+  // at the bottom, then blue, fading out), each a crisp arc.
+  const bands: [number, number, string][] = [
+    [0, 1.5, "rgba(255,150,90,0.75)"],
+    [2, 2, "rgba(150,205,255,0.95)"],
+    [4.5, 2, "rgba(110,175,255,0.7)"],
+    [7, 2, "rgba(80,140,240,0.45)"],
+    [10, 3, "rgba(60,110,220,0.25)"],
+    [14, 4, "rgba(50,90,200,0.12)"],
+  ];
+  ctx.lineCap = "butt";
+  for (const [off, w, color] of bands) {
+    ctx.strokeStyle = color;
+    ctx.lineWidth = w;
+    ctx.beginPath();
+    ctx.arc(cx, cy, R + off + w / 2, a0, a1);
+    ctx.stroke();
+  }
+
+  // Noctilucent clouds: electric-blue wisps riding just above the band (seen from the mesosphere up).
+  const nlc = clamp01((altKm - 50) / 30) * (1 - lift * 0.5);
+  if (nlc > 0) {
+    ctx.strokeStyle = "rgba(170,230,255,1)";
+    ctx.lineWidth = 1;
+    for (let i = 0; i < 9; i++) {
+      const mid = -Math.PI / 2 + (i - 4) * 0.035 * (W / R) * 6 + Math.sin(i * 7.3) * 0.02 + spin * 0.6;
+      const len = (0.02 + 0.015 * Math.sin(i * 3.1 + 1)) * (W / R) * 6;
+      ctx.globalAlpha = nlc * (0.25 + 0.2 * Math.sin(t * 0.7 + i));
+      ctx.beginPath();
+      ctx.arc(cx, cy, R + 18 + (i % 3) * 3, mid - len, mid + len);
+      ctx.stroke();
+    }
+    ctx.globalAlpha = 1;
+  }
+}
+
+/** A small crisp ISS silhouette crossing the sky, with its label. */
+export function drawISS(ctx: CanvasRenderingContext2D, x: number, y: number, s: number, alpha: number, font: string) {
+  if (alpha <= 0.01) return;
+  ctx.save();
+  ctx.globalAlpha = alpha;
+  ctx.translate(Math.round(x), Math.round(y));
+  ctx.strokeStyle = "#ffffff";
+  ctx.fillStyle = "#1c2a3c";
+  ctx.lineWidth = 1;
+  // Truss.
+  ctx.fillRect(-26 * s, -0.75 * s, 52 * s, 1.5 * s);
+  // Solar arrays: four pairs.
+  for (const ax of [-23, -15, 15, 23]) {
+    for (const sy of [-1, 1]) {
+      ctx.fillRect((ax - 3) * s, sy > 0 ? 2 * s : -11 * s, 6 * s, 9 * s);
+      ctx.strokeRect((ax - 3) * s, sy > 0 ? 2 * s : -11 * s, 6 * s, 9 * s);
+    }
+  }
+  // Pressurised modules down the middle.
+  ctx.fillStyle = "#d9d9d9";
+  ctx.fillRect(-1.5 * s, -6 * s, 3 * s, 12 * s);
+  ctx.fillRect(-6 * s, -1.5 * s, 12 * s, 3 * s);
+  ctx.font = `600 10px ${font}`;
+  if ("letterSpacing" in ctx) (ctx as CanvasRenderingContext2D & { letterSpacing: string }).letterSpacing = "1.5px";
+  ctx.fillStyle = "#ffffff";
+  ctx.globalAlpha = alpha * 0.8;
+  ctx.textAlign = "center";
+  ctx.fillText("ISS · 408 KM", 0, -16 * s);
   ctx.restore();
 }

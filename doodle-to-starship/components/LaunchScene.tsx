@@ -313,7 +313,7 @@ function LaunchRun(props: RunProps) {
 
       <div
         ref={hudRef}
-        className="pointer-events-none absolute inset-x-0 bottom-0 bg-gradient-to-t from-night/80 to-transparent opacity-0 transition-opacity duration-700"
+        className="pointer-events-none absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/85 to-transparent opacity-0 transition-opacity duration-700"
       >
         <div className="flex items-end gap-6 px-4 pb-4 pt-12 sm:gap-10 sm:px-6 sm:pb-5">
           <div className="flex gap-5 sm:gap-8">
