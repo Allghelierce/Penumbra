@@ -1,4 +1,4 @@
-# Doodle → Starship
+# Penumbra
 
 > Every spacecraft in history started as a sketch. We give your sketch 70 years of NASA and SpaceX experience in 60 seconds.
 

@@ -1,4 +1,4 @@
-# Demo script: Doodle → Starship
+# Demo script: Penumbra
 
 The live demo takes two minutes, and there is a 30-second cut and a backup plan below it. **Bold** text is UI you click. Text in quotes is what you say out loud. Lines starting with 🎙 are spoken into the voice dock: hold the red button (or Space), talk, release.
 
@@ -25,7 +25,7 @@ The live demo takes two minutes, and there is a 30-second cut and a backup plan 
 | 1:00–1:15 | Click **LAUNCH**. | "Now your doodle flies. Those are your actual strokes, on real physics." When it stops: "It ran dry [X] km/s short of Mars, exactly where the math said it would." | Physics on real data |
 | 1:15–1:35 | 🎙 "Add a stage." Wait for the red pen to redraw, then 🎙 "Light it up." | "So let's fix it the way SpaceX would: put a bigger booster under it." When it arrives: "That's Mars. Same napkin, two sentences later." | Grok Voice API, physics |
 | 1:35–1:50 | Point at the polaroid in the verdict panel, then at the outcome image at the end of the flight. | "Grok Imagine turned the napkin into this concept render, and the outcome shot is drawn from how the flight actually went." | **Grok Imagine API (required)** |
-| 1:50–2:00 | Point at the **NASA PRIOR ART** cards. | "And nothing in rocketry is really new. These are real NASA technical reports on what you just drew. [Read the top title and year.] Your napkin, 70 years of NASA and SpaceX. That's Doodle to Starship." | NASA literature no human can read all of |
+| 1:50–2:00 | Point at the **NASA PRIOR ART** cards. | "And nothing in rocketry is really new. These are real NASA technical reports on what you just drew. [Read the top title and year.] Your napkin, 70 years of NASA and SpaceX. That's Penumbra." | NASA literature no human can read all of |
 
 **If the fix in 1:15–1:35 isn't enough,** don't improvise numbers. Try these in order:
 
@@ -53,7 +53,7 @@ Then say "Light it up." A second failure still makes the point, because the red 
 | 0:05–0:12 | Click **Napkin Hopper**, then **check my napkin ✎**. | "Grok vision reads the doodle, real engine physics judges it, and the red pen marks what's wrong." |
 | 0:12–0:18 | Click **LAUNCH**. | "It falls short, exactly where the math says." |
 | 0:18–0:25 | 🎙 "Add a stage, then light it up." | "The red pen said add a stage. Grok Voice does it… and it makes orbit." |
-| 0:25–0:30 | Point at the polaroid, then the NASA cards. | "Grok Imagine renders it, NASA's archive shows who tried it first. Doodle to Starship." |
+| 0:25–0:30 | Point at the polaroid, then the NASA cards. | "Grok Imagine renders it, NASA's archive shows who tried it first. Penumbra." |
 
 ## How the demo covers the judging criteria
 
