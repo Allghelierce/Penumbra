@@ -121,6 +121,22 @@ async function runWarm(jobs: WarmJob[], log: (line: string) => void) {
   log("done");
 }
 
+/** Renders just the three demo concepts (isolated on black), for pinning as fixed assets. */
+async function pinDemoConcepts(log: (line: string) => void) {
+  for (const demo of DEMO_SKETCHES) {
+    const sketch = strokesToPng(demo.strokes);
+    const reading = readFromGeometry(demo.strokes, demo.destination);
+    const r = await post<RenderResponse>("/api/render", {
+      design: reading.design,
+      analysis: analyze(reading.design),
+      kind: "concept",
+      sketch,
+    });
+    log(`PIN ${demo.id} ${r.json.url ?? "none"} ${r.costUsd != null ? `$${r.costUsd.toFixed(3)}` : "cached"}`);
+  }
+  log("done");
+}
+
 export default function XaiDevPage() {
   const [status, setStatus] = useState<Status | null>(null);
   const [warmLog, setWarmLog] = useState<string[] | null>(null);
@@ -288,6 +304,17 @@ export default function XaiDevPage() {
           }}
         >
           warm demo cache (concept + outcome, ≈$0.60)
+        </button>
+        <button
+          className="rounded border border-neutral-900 px-3 py-1.5 disabled:opacity-40"
+          disabled={warmLog !== null && warmLog.at(-1) !== "done"}
+          onClick={() => {
+            if (!window.confirm("Render the 3 demo concepts (3 edits, ≈ $0.15)?")) return;
+            setWarmLog([]);
+            void pinDemoConcepts((line) => setWarmLog((lines) => [...(lines ?? []), line]));
+          }}
+        >
+          pin demo concepts (≈$0.15)
         </button>
         <span className="text-neutral-600">spent this page: ${totalCost.toFixed(4)}</span>
       </div>
