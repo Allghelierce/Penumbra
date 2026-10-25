@@ -22,6 +22,7 @@ import {
   drawBoundaries,
   drawGround,
   drawHorizonGlow,
+  drawCloudSea,
   drawDeck,
   drawEarth,
   earthTopY,
@@ -779,6 +780,7 @@ export function startLaunch(
     if (flying || plan.liftoffAt === null) drawBoundaries(c, W, H, altKm, layerCenter, displayFont, pal.chalk, night);
     const downKm = flying ? s.down : 0;
     drawEarth(c, W, H, flying ? altKm : 0, downKm / 6371 + finaleK * 0.01, limbRise, cityLights, t);
+    drawCloudSea(c, W, H, decks, flying ? altKm : 0, downKm, Math.min(earthTopY(H, flying ? altKm : 0, limbRise), H * 0.9), night * (flying ? 1 : 0));
     const issK = clamp01((altKm - 120) / 30) * (1 - limbRise);
     if (issK > 0) drawISS(c, ((t * 55) % (W + 300)) - 150, H * 0.17, 1.3, issK, displayFont);
     const deckAlpha = night * (flying ? 1 : 0);
