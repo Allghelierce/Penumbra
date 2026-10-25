@@ -23,7 +23,7 @@ const VIDEO_OPTIONS = { duration: 6, resolution: "480p" };
  */
 export function timeouts() {
   return {
-    vision: envNumber("XAI_VISION_TIMEOUT_MS", 12_000),
+    vision: envNumber("XAI_VISION_TIMEOUT_MS", 8_000),
     text: envNumber("XAI_TEXT_TIMEOUT_MS", 6_000),
     image: envNumber("XAI_IMAGE_TIMEOUT_MS", 25_000),
     video: envNumber("XAI_VIDEO_TIMEOUT_MS", 15_000),
@@ -168,11 +168,14 @@ interface VideoJob {
 }
 
 async function request<T>(method: "GET" | "POST", path: string, body: unknown, timeoutMs: number): Promise<T | null> {
+  // Name the model in logs and /api/xai-status so a slow vision read can be told from a slow rewrite.
+  const model = (body as { model?: unknown } | undefined)?.model;
+  const label = typeof model === "string" ? `${path} (${model})` : path;
   const key = process.env.XAI_API_KEY;
   if (!key) return null;
   // Spend brake: paid calls fall back like no-key mode; polls (GET) are free and keep working.
   if (method === "POST" && spentTodayUsd() >= dailyBudgetUsd()) {
-    recordError(path, null, "budget", `daily xAI budget of $${dailyBudgetUsd()} reached`);
+    recordError(label, null, "budget", `daily xAI budget of $${dailyBudgetUsd()} reached`);
     return null;
   }
   try {
@@ -185,7 +188,7 @@ async function request<T>(method: "GET" | "POST", path: string, body: unknown, t
     });
     if (!res.ok) {
       const detail = await res.text().catch(() => "");
-      recordError(path, res.status, kindOf(res.status, detail), detail);
+      recordError(label, res.status, kindOf(res.status, detail), detail);
       return null;
     }
     const json = (await res.json()) as T & { usage?: { cost_in_usd_ticks?: number } };
@@ -196,7 +199,7 @@ async function request<T>(method: "GET" | "POST", path: string, body: unknown, t
   } catch (err) {
     const name = err instanceof Error ? err.name : "";
     const kind = name === "TimeoutError" || name === "AbortError" ? "timeout" : "network";
-    recordError(path, null, kind, err instanceof Error ? err.message : String(err));
+    recordError(label, null, kind, `${err instanceof Error ? err.message : String(err)} after ${timeoutMs} ms`);
     return null;
   }
 }
@@ -245,7 +248,8 @@ export async function visionJson<T>(opts: {
   messages.push({
     role: "user",
     content: [
-      { type: "image_url", image_url: { url: opts.image, detail: "high" } },
+      // "auto" rather than "high": a napkin doodle doesn't need full-resolution tiles, and it's faster.
+      { type: "image_url", image_url: { url: opts.image, detail: "auto" } },
       { type: "text", text: opts.prompt },
     ],
   });

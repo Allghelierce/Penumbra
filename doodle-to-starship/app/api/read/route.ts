@@ -2,7 +2,7 @@ import type { ReadRequest, ReadResponse } from "@/lib/design";
 import { readFromGeometry } from "@/lib/sketch/geometry";
 import { isDestinationId } from "@/lib/sketch/ids";
 import { buildReadPrompt, READ_SYSTEM, READING_SCHEMA, sanitizeReading, type GrokReading } from "@/lib/sketch/vision";
-import { hasXai, metered, visionJson } from "@/lib/xai";
+import { metered, paidCallsAllowed, visionJson } from "@/lib/xai";
 
 export function POST(request: Request) {
   return metered(() => handle(request));
@@ -16,7 +16,8 @@ async function handle(request: Request) {
     const geometry = readFromGeometry(body?.strokes ?? [], destination);
 
     const image = body?.image;
-    if (hasXai() && typeof image === "string" && image.startsWith("data:image/")) {
+    // No key or no budget left: answer from geometry at once rather than queueing a call that can't run.
+    if (paidCallsAllowed() && typeof image === "string" && image.startsWith("data:image/")) {
       const raw = await visionJson<GrokReading>({
         image,
         system: READ_SYSTEM,
