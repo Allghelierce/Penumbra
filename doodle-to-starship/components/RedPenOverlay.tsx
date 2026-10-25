@@ -27,6 +27,8 @@ interface RedPenOverlayProps {
   onSelectMark?: (markIndex: number) => void;
   /** The sketch couldn't be read as a vehicle: the red pen writes a big "?" and this sentence. */
   problem?: string | null;
+  /** Marks not to draw (e.g. the ones for issues that are fine), by index. */
+  hidden?: boolean[];
 }
 
 /** Where a mark's issue number sits: the start of an arrow, dimension or leader; the top-left of a circle or outline. */
@@ -58,7 +60,7 @@ function markDelays(marks: RedPenMark[], start: number): number[] {
   return delays;
 }
 
-export default function RedPenOverlay({ parts, marks, playKey, scanning, onFix, numbers, selectedMark = null, onSelectMark, problem }: RedPenOverlayProps) {
+export default function RedPenOverlay({ parts, marks, playKey, scanning, onFix, numbers, selectedMark = null, onSelectMark, problem, hidden }: RedPenOverlayProps) {
   const penStart = 0.3;
   const delays = markDelays(marks, penStart);
   return (
@@ -93,7 +95,7 @@ export default function RedPenOverlay({ parts, marks, playKey, scanning, onFix, 
             ))}
         </g>
         <g>
-          {marks.map((mark, i) => (
+          {marks.map((mark, i) => hidden?.[i] ? null : (
             <g key={i} className="transition-opacity duration-200" opacity={selectedMark !== null && selectedMark !== i ? 0.3 : 1}>
               <Mark mark={mark} seed={i + 1} delay={delays[i]} onFix={onFix} />
             </g>
@@ -103,7 +105,7 @@ export default function RedPenOverlay({ parts, marks, playKey, scanning, onFix, 
         <g>
           {marks.map((mark, i) => {
             const n = numbers?.[i];
-            if (!n) return null;
+            if (!n || hidden?.[i]) return null;
             const [bx, by] = scale(badgeAt(mark));
             const active = selectedMark === i;
             return (
@@ -326,7 +328,16 @@ function Mark({ mark, seed, delay, onFix }: { mark: RedPenMark; seed: number; de
     return (
       <g>
         <path className="pen-draw" style={draw} pathLength={1} d={d} fill="none" stroke="var(--redpen)" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" />
-        <Note x={x0 + 2} y={Math.max(11, y0 - 4)} anchor="start" text={mark.note} style={write} onClick={fix} size={12} />
+        {/* Label the part beside its box (callouts take the other margin), not above it, where the box above would be. */}
+        <Note
+          x={x1 > W * 0.8 ? x0 - 5 : x1 + 5}
+          y={Math.min(H - 4, y0 + 12)}
+          anchor={x1 > W * 0.8 ? "end" : "start"}
+          text={mark.note}
+          style={write}
+          onClick={fix}
+          size={12}
+        />
       </g>
     );
   }

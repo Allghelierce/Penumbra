@@ -601,6 +601,7 @@ export default function Studio() {
                     playKey={String(reviewKey)}
                     scanning={phase === "reading"}
                     numbers={markNumbers}
+                    hidden={(review?.marks ?? []).map((_, i) => issues.some((issue) => issue.markIndex === i && issue.severity === "ok"))}
                     selectedMark={selectedMark}
                     onSelectMark={(markIndex) => selectIssue(issues.findIndex((issue) => issue.markIndex === markIndex))}
                     problem={reviewed && unreadable ? unreadable.problem : null}
