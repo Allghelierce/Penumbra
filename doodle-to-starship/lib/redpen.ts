@@ -96,18 +96,17 @@ export function buildReview(reading: SketchReading, analysis: Analysis): Review 
   const lands = LANDING_DESTINATIONS.has(design.destination);
   const needsLegs = lands && !hasFeature(design, parts, "landing-legs");
   const needsShield = design.destination === "mars-surface" && !hasFeature(design, parts, "heat-shield");
-  // A new-stage outline already sits under the rocket on the open side, so legs come in from the other.
-  const legsSide = marks.some((m) => m.kind === "ghost-line") ? -sketch.openSide() : sketch.openSide();
-  if (needsLegs) marks.push(arrowTo(sketch.bottomCenter(), legsSide as 1 | -1, 0.06, "needs legs"));
+  if (needsLegs) marks.push(arrowTo(sketch.bottomCenter(), sketch.openSide(), 0.06, "needs legs"));
   if (needsShield) marks.push(arrowTo(sketch.capsuleSide(), sketch.openSide(), -0.06, "heat shield!"));
 
   const flies = !stuck && !marginal && !short && !needsLegs && !needsShield;
   // A tick beside the upper body; the markup already outlines the whole vehicle part by part.
   if (flies) marks.push(arrowTo(sketch.upperSide(), sketch.openSide(), 0, "flies!"));
 
+  const issues = spreadNotes(marks.slice(0, MAX_MARKS));
   return {
     // The engineer's markup (outlines, specs, dimensions) first, then the numbered issue marks.
-    marks: [...engineerMarkup(design, analysis, parts, sketch, marks.slice(0, MAX_MARKS)), ...marks.slice(0, MAX_MARKS)],
+    marks: [...engineerMarkup(design, analysis, parts, sketch, issues), ...issues],
     summary: summarize(design, analysis, { extraEngines, sensibleEngines, fix, flyableAnalysis, needsLegs, needsShield }),
   };
 }
@@ -528,44 +527,57 @@ function engineerMarkup(
 ): RedPenMark[] {
   if (parts.length === 0) return [];
   const kept = outlines(design, parts);
+  const specs = callouts(design, analysis, parts, sketch);
   return [
     ...kept.map(({ box }): RedPenMark => ({ kind: "outline", box: clampBox(box), note: "" })),
     ...dimensions(design, sketch),
-    ...callouts(design, analysis, parts, sketch),
-    ...partLabels(kept, sketch, issues),
+    ...specs,
+    ...partLabels(kept, sketch, issues, specs),
   ];
 }
 
 /** The mission-patch sticker sits in the napkin's top-right corner; no label goes there. */
-const PATCH = { x: 0.78, y: 0.18 };
+const PATCH = { x: 0.68, y: 0.24 };
 
 function inPatch(x0: number, x1: number, y: number) {
   return y < PATCH.y && x1 > PATCH.x && x0 < 1;
 }
 
 /**
- * Part names in the open margin with a short leader to each outline, never inside a box.
- * A name that would sit on another label, an issue note or the mission patch is dropped.
+ * Part names in a margin with a short leader to each outline, never inside a box: the open
+ * margin if there's a free row, else the other one. A name with no free row anywhere (another
+ * label, an issue note or the mission patch in the way) is dropped.
  */
-function partLabels(kept: { box: Box; note: string }[], sketch: Sketch, issues: RedPenMark[]): RedPenMark[] {
-  const side = sketch.openSide();
+function partLabels(
+  kept: { box: Box; note: string }[],
+  sketch: Sketch,
+  issues: RedPenMark[],
+  specs: RedPenMark[],
+): RedPenMark[] {
   const whole = sketch.whole();
-  const labelX = clamp(side > 0 ? whole[0] + whole[2] + 0.05 : whole[0] - 0.05, EDGE, 1 - EDGE);
-  // Rows already taken on this side: issue notes are written at their arrow tails.
-  const taken = issues.flatMap((m) =>
-    m.kind === "arrow" && Math.sign(m.from[0] - m.to[0]) === side ? [m.from[1]] : m.kind === "ghost-line" ? [m.points.at(-1)![1]] : [],
-  );
+  // Rows already taken in each margin: issue notes at their arrow tails, ghost notes below their
+  // last point, and the spec callouts.
+  const taken: Record<number, number[]> = { [-1]: [], [1]: [] };
+  for (const m of [...issues, ...specs]) {
+    if (m.kind === "arrow") taken[Math.sign(m.from[0] - m.to[0]) || 1].push(m.from[1]);
+    if (m.kind === "ghost-line") taken[Math.sign(m.points.at(-1)![0] - m.points[0][0]) || 1].push(m.points.at(-1)![1] + 0.025);
+    if (m.kind === "callout") taken[Math.sign(m.label[0] - m.anchor[0]) || 1].push(m.label[1]);
+  }
   const out: RedPenMark[] = [];
   for (const { box, note } of [...kept].sort((a, b) => a.box[1] - b.box[1])) {
     const width = note.length * CALLOUT_CHAR_WIDTH;
-    const [x0, x1] = side > 0 ? [labelX, labelX + width] : [labelX - width, labelX];
-    if (x0 < 0 || x1 > 1) continue;
-    let y = clamp(box[1] + box[3] / 2, EDGE, 1 - EDGE);
-    if (inPatch(x0, x1, y)) y = PATCH.y + 0.01;
-    if (taken.some((t) => Math.abs(t - y) < CALLOUT_LINE)) continue;
-    taken.push(y);
-    const anchor: Point = [clamp(side > 0 ? box[0] + box[2] : box[0], EDGE, 1 - EDGE), clamp(box[1] + box[3] / 2, EDGE, 1 - EDGE)];
-    out.push({ kind: "callout", anchor, label: [labelX, y], note });
+    // The open margin first, then the other one.
+    for (const side of [sketch.openSide(), -sketch.openSide() as 1 | -1]) {
+      const labelX = clamp(side > 0 ? whole[0] + whole[2] + 0.05 : whole[0] - 0.05, EDGE, 1 - EDGE);
+      const [x0, x1] = side > 0 ? [labelX, labelX + width] : [labelX - width, labelX];
+      if (x0 < 0 || x1 > 1) continue;
+      const y = clamp(box[1] + box[3] / 2, EDGE, 1 - EDGE);
+      if (inPatch(x0, x1, y) || taken[side].some((t) => Math.abs(t - y) < CALLOUT_LINE)) continue;
+      taken[side].push(y);
+      const anchor: Point = [clamp(side > 0 ? box[0] + box[2] : box[0], EDGE, 1 - EDGE), y];
+      out.push({ kind: "callout", anchor, label: [labelX, y], note });
+      break;
+    }
   }
   return out;
 }
@@ -691,4 +703,39 @@ function clampBox([x, y, w, h]: Box): Box {
 
 function metres(m: number) {
   return m >= 10 ? String(Math.round(m)) : m.toFixed(1);
+}
+
+/** Vertical room one handwritten issue note needs, as a fraction of the napkin's height. */
+const NOTE_LINE = 0.055;
+
+/**
+ * Stacks the issue notes on each side at least a line apart, moving arrow tails up from the
+ * bottom (where engines, legs and a new stage crowd together). Ghost-line notes stay put and the
+ * arrows make room around them; arrowheads never move.
+ */
+function spreadNotes(marks: RedPenMark[]): RedPenMark[] {
+  const sideOf = (m: RedPenMark) =>
+    m.kind === "arrow" ? Math.sign(m.from[0] - m.to[0]) : m.kind === "ghost-line" ? Math.sign(m.points.at(-1)![0] - m.points[0][0]) || 1 : 0;
+  const out = [...marks];
+  for (const side of [-1, 1]) {
+    // The overlay writes a ghost-line note just below its last point.
+    const placed = out.flatMap((m) => (m.kind === "ghost-line" && sideOf(m) === side ? [m.points.at(-1)![1] + 0.025] : []));
+    const arrows = out
+      .map((m, i) => ({ m, i }))
+      .filter(({ m }) => m.kind === "arrow" && sideOf(m) === side)
+      .sort((a, b) => (b.m as { from: Point }).from[1] - (a.m as { from: Point }).from[1]);
+    for (const { m, i } of arrows) {
+      if (m.kind !== "arrow") continue;
+      let y = m.from[1];
+      for (let guard = 0; guard < 20; guard++) {
+        const clash = placed.filter((p) => Math.abs(p - y) < NOTE_LINE);
+        if (clash.length === 0) break;
+        y = Math.min(...clash) - NOTE_LINE;
+      }
+      y = clamp(y, EDGE, 1 - EDGE);
+      placed.push(y);
+      out[i] = { ...m, from: [m.from[0], y] };
+    }
+  }
+  return out;
 }

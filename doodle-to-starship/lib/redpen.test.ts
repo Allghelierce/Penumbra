@@ -294,14 +294,25 @@ describe("every review", () => {
     }
   });
 
-  it("brings the legs arrow in from the other side of a new-stage outline", () => {
-    const { review: r } = review(falconLike({ stages: [falconLike().stages[0]], destination: "moon-surface" }));
-    const ghost = r.marks.find((m) => m.kind === "ghost-line");
-    const legs = r.marks.find((m) => m.note === "needs legs");
-    expect(ghost && legs).toBeTruthy();
-    if (ghost?.kind === "ghost-line" && legs?.kind === "arrow") {
-      const ghostSide = Math.sign(ghost.points.at(-1)![0] - ghost.points[0][0]);
-      expect(Math.sign(legs.from[0] - legs.to[0])).toBe(-ghostSide);
+  it("stacks issue notes on each side at least a line apart, even when they crowd the engines", () => {
+    const crowdedBottom = partsFor(everythingWrong).map((p): Part => ({ ...p, box: [p.box[0], p.box[1] + 0.12, p.box[2], p.box[3]] }));
+    for (const [design, parts] of [
+      [everythingWrong, crowdedBottom],
+      [falconLike({ stages: [falconLike().stages[0]], destination: "moon-surface" }), partsFor(everythingWrong)],
+      [falconLike({ destination: "mars-surface" }), undefined],
+    ] as const) {
+      const marks = review(design, parts ? [...parts] : undefined).review.marks;
+      for (const side of [-1, 1]) {
+        const rows = marks.flatMap((m) =>
+          m.kind === "arrow" && Math.sign(m.from[0] - m.to[0]) === side
+            ? [m.from[1]]
+            : m.kind === "ghost-line" && Math.sign(m.points.at(-1)![0] - m.points[0][0]) === side
+              ? [m.points.at(-1)![1] + 0.025]
+              : [],
+        );
+        rows.sort((a, b) => a - b);
+        for (let i = 1; i < rows.length; i++) expect(rows[i] - rows[i - 1]).toBeGreaterThanOrEqual(0.055 - 1e-9);
+      }
     }
   });
 
@@ -338,9 +349,13 @@ describe("the engineer's markup", () => {
       expect(m.box[0] + m.box[2]).toBeLessThanOrEqual(1);
       expect(m.box[1] + m.box[3]).toBeLessThanOrEqual(1);
     }
+    // Drawn lower, clear of the mission patch, the merged top gets its name in the margin.
+    const lower = parts.map((p): Part => ({ ...p, box: [p.box[0], p.box[1] + 0.15, p.box[2], p.box[3]] }));
+    const lowerNames = review(design, lower).full.marks.flatMap((m) => (m.kind === "callout" ? [m.note] : []));
+    expect(lowerNames).toContain("Nose / payload");
     const names = of("callout").map((c) => c.note);
-    expect(names).toContain("Nose / payload");
     expect(names).not.toContain("Payload bay");
+    expect(names).not.toContain("Nose / fairing");
     // The second fin part sits mostly inside the first fin outline's merged box, so it's one outline.
     expect(names.filter((n) => n === "Fins").length).toBeLessThanOrEqual(1);
 
