@@ -68,52 +68,35 @@ async function post<T>(path: string, body?: unknown) {
   return { json, ms: since(t0), costUsd: cost === null ? null : Number(cost), ok: res.ok };
 }
 
-/** Poll a replay job until it's done or gives up. Returns the video URL or null. */
-async function waitForReplay(id: string): Promise<string | null> {
-  const t0 = now();
-  while (since(t0) < POLL_LIMIT_MS) {
-    await new Promise((resolve) => setTimeout(resolve, id.startsWith("cached-") ? 0 : POLL_MS));
-    const poll = (await fetch(`/api/replay/${id}`).then((r) => r.json())) as ReplayPollResponse;
-    if (poll.status === "done") return poll.url;
-    if (poll.status !== "pending") return null;
-  }
-  return null;
-}
-
 const isEdit = (fix: DesignAction | undefined): fix is DesignAction =>
   Boolean(fix) && fix!.type !== "launch" && fix!.type !== "review";
 
+/** Rough price of one sketch-to-photo render: $0.04 per image plus the input image. */
+const RENDER_ESTIMATE_USD = 0.05;
+
+interface WarmJob {
+  label: string;
+  design: Design;
+  analysis: Analysis;
+  kind: RenderRequest["kind"];
+  sketch: string;
+}
+
 /**
- * Renders everything the offline demo can ask for, so /api/render caches it under public/renders:
- * for each demo sketch read by geometry (what an offline read produces), the concept, the patch and
- * the outcome, then the outcome after each red-pen fix and after all of them (one per new verdict),
- * plus one replay video. Cached items come back instantly and free.
+ * What the offline demo shows for each demo sketch read by geometry (what an offline read produces):
+ * the concept and the outcome, plus the outcome after its red-pen fixes (one per new verdict, since
+ * outcome renders are keyed by sketch + verdict + destination). No patches or videos, to save credit.
  */
-async function warmDemoCache(log: (line: string) => void) {
-  let replayed = false;
+function planWarm(): WarmJob[] {
+  const jobs: WarmJob[] = [];
   for (const demo of DEMO_SKETCHES) {
     const sketch = strokesToPng(demo.strokes);
     const reading = readFromGeometry(demo.strokes, demo.destination);
     const base = analyze(reading.design);
-    const renderOne = async (label: string, design: Design, analysis: Analysis, kind: RenderRequest["kind"]) => {
-      const r = await post<RenderResponse>("/api/render", {
-        design,
-        analysis,
-        kind,
-        ...(kind === "patch" ? {} : { sketch }),
-      });
-      const cost = r.costUsd != null ? `$${r.costUsd.toFixed(3)}` : r.json.url ? "cached" : "-";
-      log(`${demo.id} · ${label}: ${r.json.url ?? "no image"} · ${r.ms} ms · ${cost}`);
-      return r.json.url;
-    };
-
-    const [, , outcomeUrl] = await Promise.all([
-      renderOne("concept", reading.design, base, "concept"),
-      renderOne("patch", reading.design, base, "patch"),
-      renderOne(`outcome ${base.verdict}`, reading.design, base, "outcome"),
-    ]);
-
-    // Outcome renders are keyed by sketch + verdict + destination, so one per new verdict covers every fix.
+    const job = (label: string, design: Design, analysis: Analysis, kind: RenderRequest["kind"]) =>
+      jobs.push({ label: `${demo.id} · ${label}`, design, analysis, kind, sketch });
+    job("concept", reading.design, base, "concept");
+    job(`outcome ${base.verdict}`, reading.design, base, "outcome");
     const fixes = buildReview(reading, base).marks.map((m) => m.fix).filter(isEdit);
     const variants = [...fixes.map((f) => applyAction(reading.design, f)), fixes.reduce(applyAction, reading.design)];
     const seen = new Set<string>([`${base.verdict}/${reading.design.destination}`]);
@@ -122,15 +105,18 @@ async function warmDemoCache(log: (line: string) => void) {
       const id = `${analysis.verdict}/${design.destination}`;
       if (seen.has(id)) continue;
       seen.add(id);
-      await renderOne(`outcome after fix ${analysis.verdict}`, design, analysis, "outcome");
+      job(`outcome after fix ${analysis.verdict}`, design, analysis, "outcome");
     }
+  }
+  return jobs;
+}
 
-    if (!replayed && outcomeUrl && demo.id === "two-stage-orbiter") {
-      replayed = true;
-      const start = await post<ReplayStartResponse>("/api/replay", { imageUrl: outcomeUrl, verdict: base.verdict });
-      const video = start.json.id ? await waitForReplay(start.json.id) : null;
-      log(`${demo.id} · replay: ${video ?? start.json.status}`);
-    }
+/** Runs the jobs one at a time (so the server's budget brake stops it cleanly). Cached ones are free. */
+async function runWarm(jobs: WarmJob[], log: (line: string) => void) {
+  for (const { label, design, analysis, kind, sketch } of jobs) {
+    const r = await post<RenderResponse>("/api/render", { design, analysis, kind, sketch });
+    const cost = r.costUsd != null ? `$${r.costUsd.toFixed(3)}` : r.json.url ? "cached" : "-";
+    log(`${label}: ${r.json.url ?? "no image (budget, key or error: see /api/xai-status)"} · ${r.ms} ms · ${cost}`);
   }
   log("done");
 }
@@ -292,13 +278,16 @@ export default function XaiDevPage() {
           className="rounded border border-neutral-900 px-3 py-1.5 disabled:opacity-40"
           disabled={warmLog !== null && warmLog.at(-1) !== "done"}
           onClick={() => {
-            setWarmLog([]);
-            void warmDemoCache((line) => setWarmLog((lines) => [...(lines ?? []), line])).catch((err) =>
+            const jobs = planWarm();
+            const estimate = (jobs.length * RENDER_ESTIMATE_USD).toFixed(2);
+            if (!window.confirm(`Warm the demo cache: ${jobs.length} renders, up to ≈ $${estimate} (cached ones are free). Continue?`)) return;
+            setWarmLog([`${jobs.length} renders planned, ≈ $${estimate} at most`]);
+            void runWarm(jobs, (line) => setWarmLog((lines) => [...(lines ?? []), line])).catch((err) =>
               setWarmLog((lines) => [...(lines ?? []), `error: ${err instanceof Error ? err.message : err}`, "done"]),
             );
           }}
         >
-          warm demo cache (≈$1)
+          warm demo cache (concept + outcome, ≈$0.60)
         </button>
         <span className="text-neutral-600">spent this page: ${totalCost.toFixed(4)}</span>
       </div>
