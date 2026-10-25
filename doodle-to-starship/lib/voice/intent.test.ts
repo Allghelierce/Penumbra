@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { Design } from "../design";
+import { applyAction } from "../actions";
 import { normalizeNumbers, parseCommand } from "./intent";
 
 const design: Design = {
@@ -85,6 +86,14 @@ describe("parseCommand", () => {
       { type: "scale-tanks", stageIndex: 0, factor: 1.3 },
       { type: "launch" },
     ]);
+  });
+
+  it("reads each clause against the design the earlier clauses produced", () => {
+    const actions = parse("add a stage and add ten more engines");
+    expect(actions[0]).toEqual({ type: "add-stage" });
+    const withStage = applyAction(design, { type: "add-stage" });
+    const bottom = withStage.stages[0].engines[0];
+    expect(actions[1]).toEqual({ type: "set-engines", stageIndex: 0, engine: bottom.engine, count: bottom.count + 10 });
   });
 
   it("ignores chatter", () => {

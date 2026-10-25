@@ -2,6 +2,7 @@
 // regexes. Used when Grok Voice isn't available (no XAI_API_KEY) and by the
 // typed-command box in the dock.
 
+import { applyAction } from "../actions";
 import type { Design, DesignAction, DestinationId, EngineId } from "../design";
 
 const UNITS: Record<string, number> = {
@@ -210,12 +211,16 @@ export function parseCommand(text: string, design: Design | null): DesignAction[
   const cleaned = clean(text);
   const clauses = cleaned.split(/\s*(?:,|;|\band then\b|\bthen\b|\band\b|\bafter\b|\bbefore\b|\bplus\b|\balso\b)\s*/);
   const actions: DesignAction[] = [];
+  // Each clause is read against the design as the earlier clauses left it, so
+  // "add a stage and add ten more engines" counts from the new bottom stage.
+  let current = design;
   for (const clause of clauses) {
-    const action = parseClause(clause.trim(), design);
+    const action = parseClause(clause.trim(), current);
     if (!action) continue;
     const prev = actions[actions.length - 1];
     if (prev && JSON.stringify(prev) === JSON.stringify(action)) continue;
     actions.push(action);
+    if (current) current = applyAction(current, action);
   }
   // "Launch" always goes last so edits land before liftoff.
   const launches = actions.filter((a) => a.type === "launch");
