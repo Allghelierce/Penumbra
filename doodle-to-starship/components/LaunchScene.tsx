@@ -32,6 +32,12 @@ export interface LaunchSceneProps {
   trace: FlightTrace;
   /** Grok Imagine outcome image; may arrive late or never. */
   renderUrl: string | null;
+  /**
+   * Optional: where the render stands. "loading" keeps the end card's frame pending; "done"
+   * or "none" with no URL shows the user's sketch instead. Without it, the sketch takes
+   * over if no URL has arrived ~20 s after the launch started.
+   */
+  renderState?: "loading" | "done" | "none";
   /** Fired as each trace event plays. */
   onEvent?: (e: FlightEvent) => void;
   /** "Back to the napkin". */
@@ -205,6 +211,12 @@ function LaunchRun(props: RunProps) {
   const [finale, setFinale] = useState<Finale | null>(null);
   const [ended, setEnded] = useState(false);
   const stats = useMemo(() => flightStats(input.trace), [input]);
+  const [renderGaveUp, setRenderGaveUp] = useState(false);
+  useEffect(() => {
+    const h = window.setTimeout(() => setRenderGaveUp(true), 20_000);
+    return () => window.clearTimeout(h);
+  }, []);
+  const renderPending = props.renderState ? props.renderState === "loading" : !renderGaveUp;
   const marks = useMemo(() => milestones(planFor(input)), [input]);
 
   useEffect(() => {
@@ -389,6 +401,8 @@ function LaunchRun(props: RunProps) {
           maxAltKm={stats.maxAltKm}
           maxSpeedMps={stats.maxSpeedMps}
           renderUrl={props.renderUrl}
+          renderPending={renderPending}
+          strokes={input.strokes}
           video={props.video}
           onVideo={props.onVideo}
           onDone={props.onDone}

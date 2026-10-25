@@ -1,7 +1,17 @@
 "use client";
 
 import { useState } from "react";
-import type { Analysis, Design, DesignAction, DestinationId, Improvement, Recap, Verdict } from "@/lib/design";
+import {
+  NAPKIN_ASPECT,
+  type Analysis,
+  type Design,
+  type DesignAction,
+  type DestinationId,
+  type Improvement,
+  type Recap,
+  type Stroke,
+  type Verdict,
+} from "@/lib/design";
 import { fmtKm } from "./plan";
 import type { ReplayState } from "./useReplay";
 
@@ -12,6 +22,9 @@ interface EndCardProps {
   maxAltKm: number;
   maxSpeedMps: number;
   renderUrl: string | null;
+  /** False once we know no render is coming: the frame shows the sketch instead. */
+  renderPending: boolean;
+  strokes: Stroke[];
   video: ReplayState;
   onVideo: () => void;
   onDone: () => void;
@@ -76,7 +89,8 @@ function verdictCopy({ outcome, design, analysis, maxAltKm }: EndCardProps): { g
 }
 
 export default function EndCard(props: EndCardProps) {
-  const { design, analysis, maxAltKm, maxSpeedMps, renderUrl, video, onVideo, onDone, onReplay, recap, onImprove } = props;
+  const { design, analysis, maxAltKm, maxSpeedMps, renderUrl, renderPending, strokes, video, onVideo, onDone, onReplay, recap, onImprove } =
+    props;
   const { go, headline, line } = verdictCopy(props);
   const findings = (analysis.findings ?? []).slice(0, 3);
   const improvements = (recap?.improvements ?? []).slice(0, 3);
@@ -87,7 +101,7 @@ export default function EndCard(props: EndCardProps) {
     <div className="ls-fade absolute inset-0 flex items-start justify-center overflow-y-auto bg-umbra/70 px-4 py-8 backdrop-blur-[3px] sm:items-center">
       <div className="ls-rise w-full max-w-3xl overflow-hidden rounded-[3px] border border-rule bg-panel text-starlight shadow-[0_30px_80px_rgba(0,0,0,0.55)]">
         <div className="grid sm:grid-cols-[minmax(0,16rem)_1fr]">
-          <RenderFrame url={renderUrl} name={design.name} video={video} />
+          <RenderFrame url={renderUrl} pending={renderPending} strokes={strokes} name={design.name} video={video} />
           <div className="flex min-w-0 flex-col justify-center p-5 sm:p-7">
             <div className="flex flex-wrap items-center gap-3">
               <span
@@ -225,10 +239,60 @@ function VideoButton({ video, onVideo }: { video: ReplayState; onVideo: () => vo
   }
 }
 
-function RenderFrame({ url, name, video }: { url: string | null; name: string; video: ReplayState }) {
+/** The user's own doodle in chalk on night, for when there's no render to show. */
+function SketchView({ strokes, name }: { strokes: Stroke[]; name: string }) {
+  const lines = strokes.map((s) => s.points.map(([x, y]) => [x * NAPKIN_ASPECT, y] as const)).filter((l) => l.length > 0);
+  const xs = lines.flat().map((p) => p[0]);
+  const ys = lines.flat().map((p) => p[1]);
+  if (xs.length === 0) return null;
+  const minX = Math.min(...xs);
+  const maxX = Math.max(...xs);
+  const minY = Math.min(...ys);
+  const maxY = Math.max(...ys);
+  const pad = Math.max(maxX - minX, maxY - minY) * 0.12 + 0.01;
+  // Same curve-through-midpoints smoothing as the napkin's pencil.
+  const d = lines
+    .map((l) => {
+      let path = `M${l[0][0].toFixed(4)} ${l[0][1].toFixed(4)}`;
+      for (let i = 1; i < l.length - 1; i++) {
+        const mx = (l[i][0] + l[i + 1][0]) / 2;
+        const my = (l[i][1] + l[i + 1][1]) / 2;
+        path += ` Q${l[i][0].toFixed(4)} ${l[i][1].toFixed(4)} ${mx.toFixed(4)} ${my.toFixed(4)}`;
+      }
+      const end = l[l.length - 1];
+      return `${path} L${end[0].toFixed(4)} ${end[1].toFixed(4)}`;
+    })
+    .join(" ");
+  return (
+    <svg
+      role="img"
+      aria-label={`${name}, as sketched`}
+      viewBox={`${minX - pad} ${minY - pad} ${maxX - minX + pad * 2} ${maxY - minY + pad * 2}`}
+      preserveAspectRatio="xMidYMid meet"
+      className="ls-fade absolute inset-0 h-full w-full p-4"
+    >
+      <path d={d} fill="none" stroke="#ffffff" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" vectorEffect="non-scaling-stroke" />
+    </svg>
+  );
+}
+
+function RenderFrame({
+  url,
+  pending,
+  strokes,
+  name,
+  video,
+}: {
+  url: string | null;
+  pending: boolean;
+  strokes: Stroke[];
+  name: string;
+  video: ReplayState;
+}) {
   const [failed, setFailed] = useState<string | null>(null);
   const show = url !== null && failed !== url;
   const playing = video.phase === "done";
+  const sketch = !playing && !show && (!pending || (url !== null && failed === url));
   return (
     <figure className="relative border-b border-rule sm:border-b-0 sm:border-r">
       <div className="relative aspect-[4/3] h-full w-full overflow-hidden bg-night sm:aspect-auto sm:min-h-[16rem]">
@@ -253,6 +317,8 @@ function RenderFrame({ url, name, video }: { url: string | null; name: string; v
             className="ls-fade absolute inset-0 h-full w-full object-cover"
             onError={() => setFailed(url)}
           />
+        ) : sketch ? (
+          <SketchView strokes={strokes} name={name} />
         ) : (
           <div className="absolute inset-0 flex items-center justify-center bg-[repeating-linear-gradient(135deg,rgba(255,255,255,0.03)_0_10px,transparent_10px_20px)]">
             <span className="ls-pending text-xs font-semibold uppercase tracking-[0.18em] text-haze">Render pending</span>
@@ -260,7 +326,7 @@ function RenderFrame({ url, name, video }: { url: string | null; name: string; v
         )}
       </div>
       <figcaption className="absolute left-3 top-3 rounded-[3px] bg-umbra/75 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-[0.16em] text-haze">
-        {playing ? "Grok Imagine replay" : "Grok Imagine render"}
+        {playing ? "Grok Imagine replay" : sketch ? "Napkin sketch" : "Grok Imagine render"}
       </figcaption>
     </figure>
   );

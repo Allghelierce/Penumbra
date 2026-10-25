@@ -15,11 +15,11 @@ export default function LaunchDevPage() {
   const runs = useRef(0);
   const [napkinRect, setNapkinRect] = useState<{ left: number; top: number; width: number; height: number } | null>(null);
 
-  function play(fixture: LaunchFixture) {
+  function play(fixture: LaunchFixture, m: RenderMode = mode) {
     window.clearTimeout(timer.current);
     setLog([]);
-    setRenderUrl(mode === "now" ? FIXTURE_RENDER : null);
-    if (mode === "late") timer.current = window.setTimeout(() => setRenderUrl(FIXTURE_RENDER), 15_000);
+    setRenderUrl(m === "now" ? FIXTURE_RENDER : null);
+    if (m === "late") timer.current = window.setTimeout(() => setRenderUrl(FIXTURE_RENDER), 15_000);
     setActive({ fixture, run: ++runs.current });
   }
 
@@ -30,9 +30,13 @@ export default function LaunchDevPage() {
     if (!fixture) return;
     // ?rect=left,top,width,height pretends the napkin sat there on screen.
     const [left, top, width, height] = (params.get("rect") ?? "").split(",").map(Number);
+    // ?render=late|now|none picks when (or whether) the stand-in render arrives.
+    const r = params.get("render");
+    const m: RenderMode = r === "now" || r === "none" || r === "late" ? r : mode;
     const h = window.setTimeout(() => {
       if (height > 0) setNapkinRect({ left, top, width, height });
-      play(fixture);
+      setMode(m);
+      play(fixture, m);
     }, 0);
     return () => window.clearTimeout(h);
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -100,6 +104,7 @@ export default function LaunchDevPage() {
           analysis={active.fixture.analysis}
           trace={active.fixture.trace}
           renderUrl={renderUrl}
+          renderState={mode === "none" ? "none" : renderUrl ? "done" : "loading"}
           napkinRect={napkinRect}
           recap={SAMPLE_RECAP}
           onImprove={(fix) => {
