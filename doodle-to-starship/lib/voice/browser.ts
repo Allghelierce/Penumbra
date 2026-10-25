@@ -122,7 +122,10 @@ function pickVoice(): SpeechSynthesisVoice | null {
 }
 
 /** Speak text, cancelling anything already being said. onEnd fires when it finishes or is interrupted. */
-export function speak(text: string, handlers: { onStart?: () => void; onEnd?: () => void } = {}): void {
+export function speak(
+  text: string,
+  handlers: { onStart?: () => void; onEnd?: () => void; pitch?: number; rate?: number } = {},
+): void {
   if (!canSynthesize() || !text.trim()) {
     handlers.onEnd?.();
     return;
@@ -132,8 +135,8 @@ export function speak(text: string, handlers: { onStart?: () => void; onEnd?: ()
   const utterance = new SpeechSynthesisUtterance(text);
   const voice = pickVoice();
   if (voice) utterance.voice = voice;
-  utterance.rate = 1.05;
-  utterance.pitch = 0.85;
+  utterance.rate = handlers.rate ?? 1.05;
+  utterance.pitch = handlers.pitch ?? 0.85;
   utterance.onstart = () => handlers.onStart?.();
   utterance.onend = () => handlers.onEnd?.();
   utterance.onerror = () => handlers.onEnd?.();

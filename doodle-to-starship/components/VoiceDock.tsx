@@ -1,10 +1,20 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState, type FormEvent } from "react";
-import { unlockLaunchAudio } from "@/components/LaunchScene";
+import { playQuindar, unlockLaunchAudio } from "@/components/LaunchScene";
 import TypeOut from "@/components/TypeOut";
-import type { Analysis, Design, DesignAction, Phase, Review } from "@/lib/design";
-import { canRecognize, listen, openMicMeter, speak, stopSpeaking, type Listener, type MicMeter } from "@/lib/voice/browser";
+import type { Analysis, Design, DesignAction, Phase, Poll, PollCall, Review } from "@/lib/design";
+import { parseReply } from "@/lib/mission-control";
+import {
+  canRecognize,
+  canSynthesize,
+  listen,
+  openMicMeter,
+  speak,
+  stopSpeaking,
+  type Listener,
+  type MicMeter,
+} from "@/lib/voice/browser";
 import { parseCommand } from "@/lib/voice/intent";
 import { ackLine, buildInstructions, deltaLine, nudge, speakable, toolResult, verdictLine } from "@/lib/voice/persona";
 import { createRealtimeSession, type RealtimeSession } from "@/lib/voice/realtime";
@@ -18,7 +28,27 @@ export interface VoiceDockProps {
   /** Spoken out loud whenever it changes (launch callouts, review summary). */
   narration: string | null;
   onAction: (action: DesignAction) => void;
+  /** The GO/NO-GO poll to read out while phase is "poll". */
+  poll?: Poll | null;
+  /** Called as each poll line starts, with how many calls are now lit. */
+  onPollReveal?: (revealed: number) => void;
+  /** The user said or typed GO, SCRUB or FIX during the poll. */
+  onPollReply?: (reply: "go" | "scrub" | "fix") => void;
+  /** After a flight: spoken once; "yes" calls onImprove with its fix. */
+  offer?: { line: string; fix?: DesignAction } | null;
+  onImprove?: (fix?: DesignAction) => void;
 }
+
+/** Each controller sounds a little different in browser voice. */
+const ROLE_VOICE: Record<PollCall["role"], { pitch: number; rate: number }> = {
+  Propulsion: { pitch: 0.75, rate: 1.12 },
+  Structures: { pitch: 1.0, rate: 1.06 },
+  Trajectory: { pitch: 0.9, rate: 1.1 },
+  Landing: { pitch: 1.12, rate: 1.06 },
+  Flight: { pitch: 0.65, rate: 1.0 },
+};
+/** Without speech synthesis the tiles still light, one per this many ms. */
+const SILENT_LINE_MS = 900;
 
 type Mode = "checking" | "grok" | "browser";
 type Talker = "user" | "reviewer" | null;
@@ -43,7 +73,19 @@ async function mintToken(): Promise<string> {
   return body.token;
 }
 
-export default function VoiceDock({ phase, design, analysis, review, narration, onAction }: VoiceDockProps) {
+export default function VoiceDock({
+  phase,
+  design,
+  analysis,
+  review,
+  narration,
+  onAction,
+  poll = null,
+  onPollReveal,
+  onPollReply,
+  offer = null,
+  onImprove,
+}: VoiceDockProps) {
   const [mode, setMode] = useState<Mode>("checking");
   const [holding, setHolding] = useState(false);
   const [talker, setTalker] = useState<Talker>(null);
@@ -59,11 +101,22 @@ export default function VoiceDock({ phase, design, analysis, review, narration, 
   const analysisRef = useRef(analysis);
   const reviewRef = useRef(review);
   const onActionRef = useRef(onAction);
+  const phaseRef = useRef(phase);
+  const pollRef = useRef(poll);
+  const modeRef = useRef<Mode>("checking");
+  const onPollRevealRef = useRef(onPollReveal);
+  const onPollReplyRef = useRef(onPollReply);
+  const onImproveRef = useRef(onImprove);
   useEffect(() => {
     designRef.current = design;
     analysisRef.current = analysis;
     reviewRef.current = review;
     onActionRef.current = onAction;
+    phaseRef.current = phase;
+    pollRef.current = poll;
+    onPollRevealRef.current = onPollReveal;
+    onPollReplyRef.current = onPollReply;
+    onImproveRef.current = onImprove;
   });
 
   const listenerRef = useRef<Listener | null>(null);
@@ -105,6 +158,12 @@ export default function VoiceDock({ phase, design, analysis, review, narration, 
     };
   }, []);
 
+  useEffect(() => {
+    modeRef.current = mode;
+  }, [mode]);
+  /** Poll answers and the post-flight offer; set below, used by Grok transcripts and typed or spoken commands. */
+  const handleReplyRef = useRef<(text: string) => boolean>(() => false);
+
   const closeSession = useCallback(() => {
     if (idleTimer.current) clearTimeout(idleTimer.current);
     idleTimer.current = null;
@@ -133,9 +192,10 @@ export default function VoiceDock({ phase, design, analysis, review, narration, 
       instructions: buildInstructions(designRef.current, analysisRef.current, reviewRef.current),
       tools: VOICE_TOOLS,
       handlers: {
-        onUserTranscript: (text) => {
+        onUserTranscript: (text, final) => {
           setUserCaption(text);
           touch();
+          if (final) handleReplyRef.current(text);
         },
         onReplyTranscript: (text) => {
           setReplyCaption(text);
@@ -149,6 +209,11 @@ export default function VoiceDock({ phase, design, analysis, review, narration, 
           touch();
           const result = toolCallToAction(name, args, designRef.current);
           if ("error" in result) return { ok: false, error: result.error };
+          // During the poll a spoken "launch" is the GO call, answered once.
+          if (phaseRef.current === "poll" && result.action.type === "launch") {
+            handleReplyRef.current("go");
+            return { ok: true, note: "GO for launch. Say a few words at most." };
+          }
           onActionRef.current(result.action);
           if (result.action.type === "launch") return { ok: true, note: "Launching now. Say a few words at most." };
           await waitForAnalysis();
@@ -198,14 +263,131 @@ export default function VoiceDock({ phase, design, analysis, review, narration, 
     });
   };
 
-  // Narration: speak whenever it changes.
+  // Narration: speak whenever it changes. Launch callouts get the Quindar tones first, like the loops.
   const lastNarration = useRef<string | null>(null);
   useEffect(() => {
     if (!narration || narration === lastNarration.current || mode === "checking") return;
     lastNarration.current = narration;
     if (holdingRef.current) return; // don't talk over the user
+    if (phase === "launch") {
+      const timer = setTimeout(() => sayReply.current(narration), playQuindar() * 1000);
+      return () => clearTimeout(timer); // a newer callout replaces one still waiting on its tones
+    }
     sayReply.current(narration);
-  }, [narration, mode]);
+  }, [narration, mode, phase]);
+
+  /** Speaks one line and resolves when it has been said, with a timeout in case no end event comes. */
+  const speakLine = useCallback(
+    (text: string, voice?: { pitch: number; rate: number }) =>
+      new Promise<void>((resolve) => {
+        const estimateMs = 600 + text.split(/\s+/).length * 340;
+        let finished = false;
+        const finish = () => {
+          if (finished) return;
+          finished = true;
+          clearTimeout(safety);
+          resolve();
+        };
+        const safety = setTimeout(finish, estimateMs * 2 + 1500);
+        setReplyCaption(text);
+        if (modeRef.current === "grok") {
+          const session = ensureSession();
+          session.say(text);
+          // force_message has no completion event: wait about as long as the line, then until Grok goes quiet.
+          const started = Date.now();
+          const wait = () => (Date.now() - started >= estimateMs && !session.busy() ? finish() : setTimeout(wait, 150));
+          setTimeout(wait, 300);
+          return;
+        }
+        if (!canSynthesize()) {
+          setTimeout(finish, SILENT_LINE_MS);
+          return;
+        }
+        speak(speakable(text), { onEnd: finish, ...voice });
+      }),
+    [ensureSession],
+  );
+
+  // ---- The GO/NO-GO poll: read each controller's line, lighting its tile as it starts.
+  const pollRun = useRef(0);
+  const pollAnswered = useRef(false);
+  useEffect(() => {
+    if (phase !== "poll" || !poll || mode === "checking") return;
+    const run = ++pollRun.current;
+    pollAnswered.current = false;
+    void (async () => {
+      for (let i = 0; i < poll.calls.length; i++) {
+        if (run !== pollRun.current) return;
+        onPollRevealRef.current?.(i + 1);
+        await speakLine(poll.calls[i].line, ROLE_VOICE[poll.calls[i].role]);
+      }
+      if (run === pollRun.current) setReplyCaption(pollPrompt(poll));
+    })();
+    return () => {
+      pollRun.current++;
+      stopSpeaking();
+      sessionRef.current?.interrupt();
+    };
+  }, [phase, poll, mode, speakLine]);
+
+  // Esc skips the readout and lights every tile.
+  useEffect(() => {
+    if (phase !== "poll" || !poll) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== "Escape") return;
+      pollRun.current++;
+      stopSpeaking();
+      sessionRef.current?.interrupt();
+      onPollRevealRef.current?.(poll.calls.length);
+      setReplyCaption(pollPrompt(poll));
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [phase, poll]);
+
+  // ---- After the flight: offer the best improvement once, and wait for a yes.
+  const offerRef = useRef(offer);
+  const lastOffer = useRef<string | null>(null);
+  useEffect(() => {
+    offerRef.current = offer;
+    if (!offer || offer.line === lastOffer.current || mode === "checking") return;
+    lastOffer.current = offer.line;
+    if (!holdingRef.current) sayReply.current(offer.line);
+  }, [offer, mode]);
+
+  handleReplyRef.current = (text: string): boolean => {
+    const reply = parseReply(text);
+    const currentPoll = pollRef.current;
+    if (phaseRef.current === "poll" && currentPoll) {
+      if (pollAnswered.current) return true;
+      const answer = reply === "yes" ? "go" : reply === "no" ? "scrub" : reply;
+      if (!answer) {
+        sayReply.current("Say go, fix it, or scrub.");
+        return true;
+      }
+      if (answer === "fix" && !currentPoll.calls.some((c) => !c.go && c.fix)) {
+        sayReply.current("No fix on the board. Go or scrub?");
+        return true;
+      }
+      pollAnswered.current = true;
+      pollRun.current++;
+      sayReply.current(answer === "go" ? "Copy. GO for launch." : answer === "scrub" ? "Copy. Scrubbing." : "Copy. Applying the fix.");
+      onPollReplyRef.current?.(answer);
+      return true;
+    }
+    const pending = offerRef.current;
+    if (pending && reply) {
+      offerRef.current = null;
+      if (reply === "yes" || reply === "go" || reply === "fix") {
+        sayReply.current(pending.fix ? "Copy. Making the change." : "Copy.");
+        onImproveRef.current?.(pending.fix);
+      } else {
+        sayReply.current("Copy. Standing by.");
+      }
+      return true;
+    }
+    return false;
+  };
 
   // Close the mic and any session when the dock goes away.
   useEffect(
@@ -227,6 +409,7 @@ export default function VoiceDock({ phase, design, analysis, review, narration, 
         sayReply.current("Didn't catch that. Hold the button the whole time you talk.");
         return;
       }
+      if (handleReplyRef.current(text)) return;
       if (mode === "grok") {
         ensureSession().sendText(text);
         touch();
@@ -419,6 +602,13 @@ export default function VoiceDock({ phase, design, analysis, review, narration, 
       </div>
     </div>
   );
+}
+
+function pollPrompt(poll: Poll): string {
+  if (poll.go) return `${poll.summary} Say “go”.`;
+  return poll.calls.some((c) => !c.go && c.fix)
+    ? `${poll.summary} Say “fix it”, “go” or “scrub”.`
+    : `${poll.summary} Say “go” or “scrub”.`;
 }
 
 function ModeBadge({ mode }: { mode: Mode }) {
