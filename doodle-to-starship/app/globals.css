@@ -1,0 +1,143 @@
+@import "tailwindcss";
+
+/* Napkin & red pen. The studio is always light (it's paper); the launch scene is always night. */
+:root {
+  --table: #f4efe4;
+  --napkin: #fbf8f1;
+  --napkin-edge: #e3dccb;
+  --graphite: #2d2d2d;
+  --ink-muted: #8a8170;
+  --redpen: #d62d20;
+  --go: #2e7d32;
+  --night: #05070d;
+  --night-high: #0b1a33;
+  --flame: #ff5a1f;
+  --flame-hot: #ffb347;
+}
+
+@theme inline {
+  --color-table: var(--table);
+  --color-napkin: var(--napkin);
+  --color-napkin-edge: var(--napkin-edge);
+  --color-graphite: var(--graphite);
+  --color-ink-muted: var(--ink-muted);
+  --color-redpen: var(--redpen);
+  --color-go: var(--go);
+  --color-night: var(--night);
+  --color-night-high: var(--night-high);
+  --color-flame: var(--flame);
+  --color-flame-hot: var(--flame-hot);
+  --font-sans: var(--font-geist-sans);
+  --font-mono: var(--font-plex-mono);
+  --font-hand: var(--font-caveat);
+}
+
+body {
+  background: var(--table);
+  color: var(--graphite);
+  font-family: var(--font-geist-sans), system-ui, sans-serif;
+}
+
+/* The napkin: soft fold creases, an embossed dotted border and a paper shadow. */
+.napkin {
+  background-color: var(--napkin);
+  background-image:
+    linear-gradient(90deg, transparent calc(50% - 1px), rgba(120, 100, 60, 0.07) 50%, rgba(255, 255, 255, 0.75) calc(50% + 1px), transparent calc(50% + 2px)),
+    linear-gradient(0deg, transparent calc(50% - 1px), rgba(120, 100, 60, 0.06) 50%, rgba(255, 255, 255, 0.75) calc(50% + 1px), transparent calc(50% + 2px)),
+    radial-gradient(ellipse at 30% 20%, rgba(255, 255, 255, 0.85), transparent 60%),
+    radial-gradient(ellipse at 80% 90%, rgba(120, 100, 60, 0.06), transparent 55%);
+  box-shadow:
+    0 0 0 1px var(--napkin-edge),
+    0 2px 4px rgba(70, 50, 20, 0.08),
+    0 28px 50px -30px rgba(70, 50, 20, 0.5);
+  border-radius: 3px;
+}
+.napkin::before {
+  content: "";
+  position: absolute;
+  inset: 14px;
+  border: 1.5px dotted rgba(120, 100, 60, 0.2);
+  border-radius: 2px;
+  pointer-events: none;
+}
+
+/* Red pen: strokes draw themselves on, then the handwriting appears. */
+.pen-draw {
+  stroke-dasharray: 1;
+  stroke-dashoffset: 1;
+  animation: pen-draw 0.7s ease-out forwards;
+}
+@keyframes pen-draw {
+  to {
+    stroke-dashoffset: 0;
+  }
+}
+.pen-note,
+.part-tag {
+  opacity: 0;
+  animation: fade-in 0.45s ease-out forwards;
+}
+@keyframes fade-in {
+  to {
+    opacity: 1;
+  }
+}
+
+/* Scanner sweep while Grok reads the sketch. */
+.scanline {
+  position: absolute;
+  left: 0;
+  right: 0;
+  height: 22%;
+  background: linear-gradient(180deg, transparent, rgba(214, 45, 32, 0.08) 70%, rgba(214, 45, 32, 0.45) 98%, transparent);
+  animation: scan 1.3s ease-in-out infinite;
+  pointer-events: none;
+}
+@keyframes scan {
+  from {
+    top: -22%;
+  }
+  to {
+    top: 100%;
+  }
+}
+
+/* Desk props around the napkin. */
+.index-card {
+  background-color: #fffdf8;
+  background-image:
+    linear-gradient(90deg, transparent 30px, rgba(214, 45, 32, 0.35) 30px, rgba(214, 45, 32, 0.35) 31px, transparent 31px),
+    repeating-linear-gradient(180deg, transparent 0 27px, rgba(70, 120, 200, 0.18) 27px 28px);
+  background-position: 0 0, 0 14px;
+  box-shadow: 0 1px 2px rgba(70, 50, 20, 0.12), 0 14px 28px -18px rgba(70, 50, 20, 0.45);
+}
+.polaroid {
+  background: #fff;
+  padding: 10px 10px 34px;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1), 0 16px 30px -16px rgba(0, 0, 0, 0.45);
+}
+.tape {
+  position: absolute;
+  top: -10px;
+  left: 50%;
+  width: 70px;
+  height: 20px;
+  margin-left: -35px;
+  background: rgba(245, 235, 200, 0.75);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.08);
+  transform: rotate(-3deg);
+}
+.sticky {
+  background: linear-gradient(180deg, #fff6a8, #fdeb74);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.08), 0 12px 20px -14px rgba(90, 70, 0, 0.6);
+}
+.developing {
+  background: linear-gradient(110deg, #23262d 30%, #3a3f49 50%, #23262d 70%);
+  background-size: 200% 100%;
+  animation: developing 1.6s linear infinite;
+}
+@keyframes developing {
+  to {
+    background-position: -200% 0;
+  }
+}
