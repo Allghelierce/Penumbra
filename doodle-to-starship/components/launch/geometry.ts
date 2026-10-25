@@ -76,11 +76,21 @@ export function buildDoodle(strokes: Stroke[], parts: Part[], stageCount: number
 
   const splits = stageSplits(localParts, stageCount, box);
   const edges = [Infinity, ...splits, -Infinity];
+  // A stroke drawn along the stage line (the interstage) stays whole and rides with the
+  // upper stage, instead of being chopped into dashes on both sides.
+  const tol = 0.035 * (box.maxY - box.minY);
+  const along = local.map((l) => {
+    const ys = l.map((p) => p[1]);
+    const lo = Math.min(...ys);
+    const hi = Math.max(...ys);
+    const k = splits.findIndex((s) => hi - lo < 2 * tol && Math.abs((lo + hi) / 2 - s) < tol);
+    return k < 0 ? -1 : k + 1;
+  });
   const pieces: Piece[] = [];
   for (let i = 0; i < edges.length - 1; i++) {
     const top = edges[i + 1];
     const bottom = edges[i];
-    const band = local.flatMap((l) => clipToBand(l, top, bottom));
+    const band = local.flatMap((l, li) => (along[li] < 0 ? clipToBand(l, top, bottom) : along[li] === i ? [l] : []));
     const pb = boxOf(band);
     if (!pb) continue;
     pieces.push({ lines: band, box: pb, nozzle: nozzleFor(band, pb, localParts, pieces.length, top, bottom) });
