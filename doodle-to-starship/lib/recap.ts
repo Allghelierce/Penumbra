@@ -5,7 +5,7 @@
 import { applyAction } from "./actions";
 import type { Analysis, Attempt, Design, DesignAction, DestinationId, Improvement, Recap, RedPenMark } from "./design";
 import { analyze, DESTINATIONS, ENGINES, km, kmShort, kmSpare } from "./physics";
-import { buildReview, DESTINATION_NAMES } from "./redpen";
+import { buildReview, DESTINATION_NAMES, SAFE_TWR } from "./redpen";
 
 const MAX_IMPROVEMENTS = 3;
 /** Margin past which a design counts as over-built and could shed tank volume. */
@@ -108,7 +108,8 @@ function designChanges(before: Design, after: Design): string[] {
 function improvements(design: Design, analysis: Analysis): Improvement[] {
   const out: Improvement[] = [];
   const marks = buildReview({ design, parts: [] }, analysis).marks;
-  const reached = analysis.verdict === "destination";
+  // A marginal liftoff isn't a success yet, whatever the delta-v says.
+  const reached = analysis.verdict === "destination" && analysis.liftoffTwr >= SAFE_TWR;
 
   if (!reached) out.push(...fixesFromRedPen(design, marks));
   out.push(...landingNeeds(design, marks));
@@ -120,9 +121,9 @@ function improvements(design: Design, analysis: Analysis): Improvement[] {
   return out;
 }
 
-/** "Works": off the pad and at the destination. */
+/** "Works": a safe liftoff, and enough delta-v for the destination. */
 function works(a: Analysis) {
-  return a.liftoffTwr >= 1 && a.marginMps >= 0;
+  return a.liftoffTwr >= SAFE_TWR && a.marginMps >= 0;
 }
 
 /** The red pen's computed fixes, phrased as what each one buys, and each re-checked. */
@@ -134,10 +135,11 @@ function fixesFromRedPen(design: Design, marks: RedPenMark[]): Improvement[] {
   const engines = marks.find((m) => m.fix?.type === "set-engines")?.fix;
   if (engines?.type === "set-engines") {
     const fixed = applyAction(design, engines);
-    if (analyze(fixed).liftoffTwr >= 1) {
+    if (analyze(fixed).liftoffTwr >= SAFE_TWR) {
       const extra = engines.count - design.stages[0].engines[0].count;
+      const why = analyze(design).liftoffTwr < 1 ? "to get off the pad" : "for a safe liftoff";
       out.push({
-        text: `Add ${extra} more ${ENGINES[engines.engine].name} engine${extra === 1 ? "" : "s"} to get off the pad`,
+        text: `Add ${extra} more ${ENGINES[engines.engine].name} engine${extra === 1 ? "" : "s"} ${why}`,
         fix: engines,
       });
       base = fixed;
@@ -145,19 +147,25 @@ function fixesFromRedPen(design: Design, marks: RedPenMark[]): Improvement[] {
   }
   const then = base !== design;
 
+  // Fuel fixes only need to leave the pad; a marginal liftoff gets its own engine fix next time.
+  const closes = (a: Analysis) => a.liftoffTwr >= 1 && a.marginMps >= 0;
+  const thenEngines = (a: Analysis) => (a.liftoffTwr < SAFE_TWR ? ", then more engines" : "");
   for (const mark of marks) {
     const fix = mark.fix;
     if (fix?.type === "scale-tanks") {
       const after = analyze(applyAction(base, fix));
-      if (works(after)) {
+      if (closes(after)) {
         const percent = Math.round((fix.factor - 1) * 100);
-        out.push({ text: `${then ? "Then stretch" : "Stretch"} the ${tankName(design, fix.stageIndex)} ${percent}% to ${target}`, fix });
+        out.push({
+          text: `${then ? "Then stretch" : "Stretch"} the ${tankName(design, fix.stageIndex)} ${percent}% to ${target}${thenEngines(after)}`,
+          fix,
+        });
       }
     } else if (fix?.type === "add-stage") {
       const before = analyze(base);
       const after = analyze(applyAction(base, fix));
-      if (works(after)) {
-        out.push({ text: `${then ? "Then add" : "Add"} a stage to ${target}`, fix });
+      if (closes(after)) {
+        out.push({ text: `${then ? "Then add" : "Add"} a stage to ${target}${thenEngines(after)}`, fix });
       } else if (after.liftoffTwr >= 1 && after.totalDeltaVMps > before.totalDeltaVMps) {
         out.push({
           text: `${then ? "Then add" : "Add"} a stage for ${kmSpare(after.totalDeltaVMps, before.totalDeltaVMps)} km/s more (still ${kmShort(after.totalDeltaVMps, after.requiredDeltaVMps)} km/s short)`,

@@ -2,10 +2,15 @@
 // what-if checks. Every function returns a new Design and never mutates its input.
 
 import type { Design, DesignAction, Stage } from "./design";
+import { analyze } from "./physics";
 
 /** A new bottom stage holds this many times the current bottom stage's propellant. */
 const ADDED_STAGE_SCALE = 2.5;
 const ADDED_STAGE_MIN_ENGINES = 3;
+/** The new booster gets enough engines for the whole stack to lift off at this thrust-to-weight... */
+const ADDED_STAGE_TWR = 1.3;
+/** ...but never more than this many (Super Heavy flies 33). */
+const ADDED_STAGE_MAX_ENGINES = 40;
 
 export function applyAction(design: Design, action: DesignAction): Design {
   switch (action.type) {
@@ -15,7 +20,7 @@ export function applyAction(design: Design, action: DesignAction): Design {
 
     case "add-stage":
       if (design.stages.length === 0) return design;
-      return { ...design, stages: [newBottomStage(design), ...design.stages] };
+      return withNewBottomStage(design);
 
     case "remove-stage":
       if (design.stages.length <= 1 || !hasStage(design, action.stageIndex)) return design;
@@ -57,16 +62,36 @@ function scaleTanks(stage: Stage, factor: number): Stage {
   };
 }
 
-/** A booster under the current bottom stage: bigger tanks, the same engines, more of them. */
-function newBottomStage(design: Design): Stage {
+/**
+ * A booster under the current bottom stage: bigger tanks and the same engines, with the
+ * fewest engines (at least 3, at most 40) that lift the whole new stack at TWR 1.3.
+ */
+function withNewBottomStage(design: Design): Design {
   const bottom = design.stages[0];
-  return {
-    label: design.stages.some((s) => s.label === "Booster") ? "Lower booster" : "Booster",
-    engines: bottom.engines.map((cluster) => ({
-      engine: cluster.engine,
-      count: Math.max(ADDED_STAGE_MIN_ENGINES, Math.ceil(ADDED_STAGE_SCALE * cluster.count)),
-    })),
-    propellant: bottom.propellant,
-    tankVolumeM3: bottom.tankVolumeM3 * ADDED_STAGE_SCALE,
+  const main = bottom.engines.reduce((best, c, i, all) => (c.count > all[best].count ? i : best), 0);
+  const withCount = (count: number): Design => {
+    const booster: Stage = {
+      label: design.stages.some((s) => s.label === "Booster") ? "Lower booster" : "Booster",
+      engines: bottom.engines.map((cluster, i) => ({
+        engine: cluster.engine,
+        count: i === main ? count : Math.max(1, Math.ceil(ADDED_STAGE_SCALE * cluster.count)),
+      })),
+      propellant: bottom.propellant,
+      tankVolumeM3: bottom.tankVolumeM3 * ADDED_STAGE_SCALE,
+    };
+    return { ...design, stages: [booster, ...design.stages] };
   };
+
+  // More engines always raise liftoff TWR (each adds more thrust than weight), so bisect.
+  if (analyze(withCount(ADDED_STAGE_MAX_ENGINES)).liftoffTwr < ADDED_STAGE_TWR) {
+    return withCount(ADDED_STAGE_MAX_ENGINES);
+  }
+  let lo = ADDED_STAGE_MIN_ENGINES - 1;
+  let hi = ADDED_STAGE_MAX_ENGINES;
+  while (hi - lo > 1) {
+    const mid = Math.floor((lo + hi) / 2);
+    if (analyze(withCount(mid)).liftoffTwr >= ADDED_STAGE_TWR) hi = mid;
+    else lo = mid;
+  }
+  return withCount(hi);
 }

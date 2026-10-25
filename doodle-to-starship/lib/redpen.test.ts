@@ -76,11 +76,17 @@ function expectOnNapkin(mark: RedPenMark) {
   } else if (mark.kind === "arrow") {
     inside(mark.from);
     inside(mark.to);
-    // The note is written outward from the tail; it needs room on the napkin.
-    const width = mark.note.length * 0.018;
-    const outward = Math.sign(mark.from[0] - mark.to[0]);
-    if (outward > 0) expect(mark.from[0] + width).toBeLessThanOrEqual(1);
-    if (outward < 0) expect(mark.from[0] - width).toBeGreaterThanOrEqual(0);
+    // The overlay writes the note away from the arrowhead: start-anchored when the tail points
+    // right, end-anchored when it points left, centered when the arrow is mostly vertical.
+    const width = mark.note.length * 0.017;
+    const dx = mark.from[0] - mark.to[0];
+    const awayX = dx / Math.hypot(dx, mark.from[1] - mark.to[1]);
+    if (awayX > 0.25) expect(mark.from[0] + width).toBeLessThanOrEqual(1);
+    else if (awayX < -0.25) expect(mark.from[0] - width).toBeGreaterThanOrEqual(0);
+    else {
+      inside([mark.from[0] - width / 2, mark.from[1]]);
+      inside([mark.from[0] + width / 2, mark.from[1]]);
+    }
   } else {
     expect(mark.points.length).toBeGreaterThan(1);
     mark.points.forEach(inside);
@@ -107,25 +113,26 @@ describe("a rocket stuck on the pad", () => {
     ],
   });
 
-  it("circles the engines with the exact number of engines it needs for TWR 1.3", () => {
+  it("points at the engines with the exact number of engines it needs for TWR 1.3", () => {
     const { analysis, review: r } = review(stuck);
     expect(analysis.liftoffTwr).toBeLessThan(1);
 
     const mark = r.marks[0];
-    expect(mark.kind).toBe("circle");
-    const match = mark.note.match(/^TWR (\d\.\d+): needs (\d+) more engines?$/);
+    expect(mark.kind).toBe("arrow");
+    // "TWR 0.21: +6 engines", or just "+6 engines" when the long form doesn't fit.
+    const match = mark.note.match(/^(?:TWR \d\.\d{2,4}: )?\+(\d+) engines?$/);
     expect(match).not.toBeNull();
-    const extra = Number(match![2]);
+    const extra = Number(match![1]);
 
     const twrWith = (count: number) =>
       analyze(applyAction(stuck, { type: "set-engines", stageIndex: 0, engine: "merlin-1d", count })).liftoffTwr;
     expect(twrWith(1 + extra)).toBeGreaterThanOrEqual(1.3);
     expect(twrWith(extra)).toBeLessThan(1.3);
 
-    // Drawn on the engines, not somewhere else on the rocket.
-    if (mark.kind === "circle") {
-      expect(mark.center[0]).toBeCloseTo(ENGINE_BOX[0] + ENGINE_BOX[2] / 2, 1);
-      expect(mark.center[1]).toBeGreaterThan(0.7);
+    // Points at the engines, not somewhere else on the rocket.
+    if (mark.kind === "arrow") {
+      expect(mark.to[1]).toBeCloseTo(ENGINE_BOX[1] + ENGINE_BOX[3] / 2, 2);
+      expect(mark.to[0]).toBeCloseTo(ENGINE_BOX[0] + ENGINE_BOX[2], 2);
     }
     expect(r.summary).toContain("never leaves the pad");
     expect(r.summary).toContain(`add ${extra} engine`);
@@ -194,20 +201,20 @@ describe("a rocket short of its destination", () => {
 });
 
 describe("fins", () => {
-  it("circles the fins when the destination is past low Earth orbit", () => {
+  it("points at the fins when the destination is past low Earth orbit", () => {
     const { review: r } = review(falconLike({ features: ["fins"], destination: "gto" }));
-    const mark = r.marks.find((m) => m.note === "fins do nothing in vacuum");
-    expect(mark?.kind).toBe("circle");
-    if (mark?.kind === "circle") {
-      expect(mark.center[0]).toBeCloseTo(FIN_BOX[0] + FIN_BOX[2] / 2, 2);
-      expect(mark.center[1]).toBeCloseTo(FIN_BOX[1] + FIN_BOX[3] / 2, 2);
+    const mark = r.marks.find((m) => m.note === "useless in vacuum");
+    expect(mark?.kind).toBe("arrow");
+    if (mark?.kind === "arrow") {
+      expect([FIN_BOX[0], FIN_BOX[0] + FIN_BOX[2]]).toContainEqual(expect.closeTo(mark.to[0], 5));
+      expect(mark.to[1]).toBeCloseTo(FIN_BOX[1] + FIN_BOX[3] / 2, 2);
     }
   });
 
   it("leaves fins alone for low Earth orbit and for Mars, which has air", () => {
     for (const destination of ["leo", "mars-surface"] as const) {
       const { review: r } = review(falconLike({ features: ["fins"], destination }));
-      expect(notes(r.marks)).not.toContain("fins do nothing in vacuum");
+      expect(notes(r.marks)).not.toContain("useless in vacuum");
     }
   });
 });
@@ -276,7 +283,7 @@ describe("every review", () => {
   });
 
   it("only offers tap-to-fix on marks with a concrete edit", () => {
-    const advisory = ["flies!", "fins do nothing in vacuum", "needs legs", "heat shield!"];
+    const advisory = ["flies!", "useless in vacuum", "needs legs", "heat shield!"];
     for (const d of [falconLike(), everythingWrong, falconLike({ destination: "mars-surface", features: ["fins"] })]) {
       for (const m of review(d).review.marks) {
         if (advisory.includes(m.note)) expect(m.fix).toBeUndefined();

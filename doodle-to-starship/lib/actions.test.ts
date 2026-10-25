@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import { applyAction } from "./actions";
 import type { Design } from "./design";
+import { analyze } from "./physics";
 
 function deepFreeze<T>(value: T): T {
   if (value && typeof value === "object") {
@@ -61,28 +62,36 @@ describe("scale-tanks", () => {
 });
 
 describe("add-stage", () => {
-  it("puts a 2.5x booster with 2.5x the engines under the rocket", () => {
+  it("puts a 2.5x booster under the rocket with just enough engines for TWR 1.3", () => {
     const design = falconLike();
     const next = applyAction(design, { type: "add-stage" });
     expect(next.stages).toHaveLength(3);
-    expect(next.stages[0]).toEqual({
-      label: "Lower booster",
-      engines: [{ engine: "merlin-1d", count: 23 }],
-      propellant: "kerolox",
-      tankVolumeM3: 1000,
-    });
+    expect(next.stages[0]).toMatchObject({ label: "Lower booster", propellant: "kerolox", tankVolumeM3: 1000 });
     expect(next.stages.slice(1)).toEqual(design.stages);
+
+    const count = next.stages[0].engines[0].count;
+    expect(next.stages[0].engines[0].engine).toBe("merlin-1d");
+    expect(analyze(next).liftoffTwr).toBeGreaterThanOrEqual(1.3);
+    const oneFewer = { ...next, stages: [{ ...next.stages[0], engines: [{ engine: "merlin-1d" as const, count: count - 1 }] }, ...next.stages.slice(1)] };
+    expect(analyze(oneFewer).liftoffTwr).toBeLessThan(1.3);
   });
 
-  it("gives a new booster at least 3 engines", () => {
+  it("gives a new booster at least 3 engines and at most 40", () => {
     const single: Design = {
       ...falconLike(),
       stages: [{ label: "Ship", engines: [{ engine: "raptor-3", count: 1 }], propellant: "methalox", tankVolumeM3: 100 }],
     };
     const next = applyAction(single, { type: "add-stage" });
     expect(next.stages[0].label).toBe("Booster");
-    expect(next.stages[0].engines).toEqual([{ engine: "raptor-3", count: 3 }]);
+    expect(next.stages[0].engines[0].engine).toBe("raptor-3");
+    expect(next.stages[0].engines[0].count).toBeGreaterThanOrEqual(3);
     expect(next.stages[0].propellant).toBe("methalox");
+
+    const huge: Design = {
+      ...falconLike(),
+      stages: [{ label: "Ship", engines: [{ engine: "rutherford", count: 1 }], propellant: "kerolox", tankVolumeM3: 5_000 }],
+    };
+    expect(applyAction(huge, { type: "add-stage" }).stages[0].engines[0].count).toBe(40);
   });
 });
 

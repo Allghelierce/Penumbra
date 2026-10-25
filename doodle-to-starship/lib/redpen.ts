@@ -21,8 +21,13 @@ import { analyze } from "./physics";
 type Box = [x: number, y: number, w: number, h: number];
 
 const MAX_MARKS = 4;
-/** "Needs N more engines" aims for this liftoff thrust-to-weight, not the bare minimum of 1. */
+/** Real launchers lift off at about 1.2 or more; below that the red pen calls it marginal. */
+export const SAFE_TWR = 1.2;
+/** "+N engines" aims for this liftoff thrust-to-weight. */
 const TARGET_TWR = 1.3;
+/** Past this many extra engines the advice is to rethink the booster, not to add engines. */
+const MAX_SENSIBLE_EXTRA_ENGINES = 200;
+const FINS_NOTE = "useless in vacuum";
 /** Stretch the tanks at most +150% before suggesting a new stage instead. */
 const MAX_STRETCH = 2.5;
 const MAX_EXTRA_ENGINES = 500;
@@ -35,8 +40,9 @@ const CIRCLE_PAD = 0.03;
 const MIN_RADIUS = 0.04;
 /** Keeps arrow ends and outlines off the very edge of the napkin. */
 const EDGE = 0.02;
-/** About how wide one handwritten note character is, as a fraction of the napkin's width. */
-const NOTE_CHAR_WIDTH = 0.018;
+/** About how wide one handwritten note character is, as a fraction of the napkin's width (measured in QA). */
+const NOTE_CHAR_WIDTH = 0.017;
+const MIN_ARROW = 0.06;
 /** Stand-in for the rocket when the reading found no parts at all. */
 const DEFAULT_ROCKET: Box = [0.38, 0.08, 0.24, 0.84];
 
@@ -66,26 +72,33 @@ export function buildReview(reading: SketchReading, analysis: Analysis): Review 
   const marks: RedPenMark[] = [];
 
   const stuck = analysis.liftoffTwr < 1;
-  const extraEngines = stuck ? enginesForTwr(design, TARGET_TWR) : null;
-  if (stuck) {
-    const twr = formatTwr(analysis.liftoffTwr);
-    if (extraEngines === null) {
-      marks.push(circleAround(sketch.engines(), `TWR ${twr}: needs more thrust`));
+  const marginal = !stuck && analysis.liftoffTwr < SAFE_TWR;
+  const extraEngines = stuck || marginal ? enginesForTwr(design, TARGET_TWR) : null;
+  const sensibleEngines = extraEngines !== null && extraEngines <= MAX_SENSIBLE_EXTRA_ENGINES;
+  if (stuck || marginal) {
+    // Notes beside the rocket, not inside a circle on top of the drawing.
+    const twr = `TWR ${formatTwr(analysis.liftoffTwr)}`;
+    if (sensibleEngines) {
+      const more = `+${extraEngines} engine${extraEngines === 1 ? "" : "s"}`;
+      const fix = engineFix(design, extraEngines);
+      marks.push({ ...arrowTo(sketch.enginesSide(), sketch.openSide(), 0, `${twr}: ${more}`, more), ...(fix && { fix }) });
     } else {
-      const note = `TWR ${twr}: needs ${extraEngines} more engine${extraEngines === 1 ? "" : "s"}`;
-      marks.push({ ...circleAround(sketch.engines(), note), fix: engineFix(design, extraEngines) });
+      marks.push(arrowTo(sketch.enginesSide(), sketch.openSide(), 0, `${twr}: too heavy`, "too heavy"));
     }
   }
 
-  // A stuck rocket's delta-v counts as 0, so judge its fuel as if the engine fix were made.
-  const flyable = !stuck ? design : extraEngines === null ? null : withExtraEngines(design, extraEngines);
+  // A stuck or marginal rocket's fuel is judged as if the engine fix were made.
+  const flyable = !(stuck || marginal) ? design : sensibleEngines ? withExtraEngines(design, extraEngines) : null;
   const flyableAnalysis = flyable === design ? analysis : flyable && analyze(flyable);
   const short = flyableAnalysis !== null && flyableAnalysis.marginMps < 0;
   const fix = short ? planShortfallFix(flyable!, flyableAnalysis, sketch) : null;
   if (fix) marks.push(shortfallMark(fix, sketch));
 
   if (VACUUM_DESTINATIONS.has(design.destination) && hasFeature(design, parts, "fins")) {
-    marks.push(circleAround(sketch.fins(), "fins do nothing in vacuum"));
+    // Fins are symmetric, so this arrow takes the side the other notes leave free, if the note fits there.
+    const other = -sketch.openSide() as 1 | -1;
+    const side = noteFits(sketch.finSide(other), other, FINS_NOTE) ? other : sketch.openSide();
+    marks.push(arrowTo(sketch.finSide(side), side, -0.04, FINS_NOTE));
   }
 
   const lands = LANDING_DESTINATIONS.has(design.destination);
@@ -96,12 +109,12 @@ export function buildReview(reading: SketchReading, analysis: Analysis): Review 
   if (needsLegs) marks.push(arrowTo(sketch.bottomCenter(), legsSide as 1 | -1, 0.06, "needs legs"));
   if (needsShield) marks.push(arrowTo(sketch.capsuleSide(), sketch.openSide(), -0.06, "heat shield!"));
 
-  const flies = !stuck && !short && !needsLegs && !needsShield;
+  const flies = !stuck && !marginal && !short && !needsLegs && !needsShield;
   if (flies) marks.push(circleAround(sketch.whole(), "flies!"));
 
   return {
     marks: marks.slice(0, MAX_MARKS),
-    summary: summarize(design, analysis, { extraEngines, fix, flyableAnalysis, needsLegs, needsShield }),
+    summary: summarize(design, analysis, { extraEngines, sensibleEngines, fix, flyableAnalysis, needsLegs, needsShield }),
   };
 }
 
@@ -156,32 +169,43 @@ type ShortfallFix = {
 
 function planShortfallFix(design: Design, analysis: Analysis, sketch: Sketch): ShortfallFix | null {
   if (design.stages.length === 0) return null;
-  const stageIndex = stageToStretch(design, sketch);
+  // A fix has to still leave the pad. If it leaves the liftoff marginal, the next review
+  // flags that with its own "+N engines" fix, so the user gets there in two taps.
   const keepsLiftoff = (a: Analysis) => a.liftoffTwr >= 1;
 
-  const stretched = (factor: number) =>
-    analyze(applyAction(design, { type: "scale-tanks", stageIndex, factor }));
-
+  // The drawn biggest tank first, then any other stage that stretches less.
+  const preferred = stageToStretch(design, sketch);
+  let stageIndex = preferred;
   let stretchPercent: number | null = null;
-  if (stretched(MAX_STRETCH).marginMps >= 0) {
-    // More propellant means more delta-v, so bisect for where the margin turns positive.
-    let lo = 1;
-    let hi = MAX_STRETCH;
-    for (let i = 0; i < 30; i++) {
-      const mid = (lo + hi) / 2;
-      if (stretched(mid).marginMps >= 0) hi = mid;
-      else lo = mid;
+  for (const index of [preferred, ...design.stages.map((_, i) => i).filter((i) => i !== preferred)]) {
+    const percent = smallestStretch(design, index, keepsLiftoff);
+    if (percent !== null && (stretchPercent === null || percent < stretchPercent)) {
+      stretchPercent = percent;
+      stageIndex = index;
     }
-    const percent = Math.ceil((hi - 1) * 100 - 1e-9);
-    const check = stretched(1 + percent / 100);
-    // Bigger tanks also mean a heavier liftoff, so make sure it still clears the pad.
-    if (check.marginMps >= 0 && keepsLiftoff(check)) stretchPercent = percent;
   }
 
   const staged = analyze(applyAction(design, { type: "add-stage" }));
   const withStage = staged.totalDeltaVMps > analysis.totalDeltaVMps && keepsLiftoff(staged) ? staged : null;
 
   return { stageIndex, stretchPercent, withStage };
+}
+
+/** Smallest whole-percent stretch of one stage, up to +150%, that closes the gap and keeps liftoff. */
+function smallestStretch(design: Design, stageIndex: number, keepsLiftoff: (a: Analysis) => boolean): number | null {
+  const stretched = (factor: number) => analyze(applyAction(design, { type: "scale-tanks", stageIndex, factor }));
+  if (stretched(MAX_STRETCH).marginMps < 0) return null;
+  // More propellant means more delta-v, so bisect for where the margin turns positive.
+  let lo = 1;
+  let hi = MAX_STRETCH;
+  for (let i = 0; i < 30; i++) {
+    const mid = (lo + hi) / 2;
+    if (stretched(mid).marginMps >= 0) hi = mid;
+    else lo = mid;
+  }
+  const percent = Math.ceil((hi - 1) * 100 - 1e-9);
+  const check = stretched((100 + percent) / 100);
+  return check.marginMps >= 0 && keepsLiftoff(check) ? percent : null;
 }
 
 /** The stage holding the biggest tank drawn, or else the stage with the most tank volume. */
@@ -194,8 +218,8 @@ function stageToStretch(design: Design, sketch: Sketch): number {
 function shortfallMark(fix: ShortfallFix, sketch: Sketch): RedPenMark {
   if (fix.stretchPercent !== null) {
     return {
-      ...arrowTo(sketch.tankSide(), sketch.openSide(), -0.08, `stretch +${fix.stretchPercent}%`),
-      fix: { type: "scale-tanks", stageIndex: fix.stageIndex, factor: 1 + fix.stretchPercent / 100 },
+      ...arrowTo(sketch.tankSide(fix.stageIndex), sketch.openSide(), -0.08, `stretch +${fix.stretchPercent}%`),
+      fix: { type: "scale-tanks", stageIndex: fix.stageIndex, factor: (100 + fix.stretchPercent) / 100 },
     };
   }
   if (fix.withStage) {
@@ -203,7 +227,8 @@ function shortfallMark(fix: ShortfallFix, sketch: Sketch): RedPenMark {
     const note = fix.withStage.marginMps >= 0 ? "add a stage" : "a stage isn't enough";
     return { kind: "ghost-line", points: sketch.newStageOutline(), note, fix: { type: "add-stage" } };
   }
-  return arrowTo(sketch.tankSide(), sketch.openSide(), -0.08, "not enough fuel");
+  // Nothing single closes the gap; the summary says so and names what it can reach.
+  return arrowTo(sketch.tankSide(), sketch.openSide(), -0.08, "out of reach");
 }
 
 // ---------------------------------------------------------------------------
@@ -214,6 +239,8 @@ function summarize(
   analysis: Analysis,
   found: {
     extraEngines: number | null;
+    /** False when the engine count is absurd (or no count works). */
+    sensibleEngines: boolean;
     fix: ShortfallFix | null;
     /** The design's analysis, or the engine-fixed one if it was stuck. */
     flyableAnalysis: Analysis | null;
@@ -223,14 +250,20 @@ function summarize(
 ): string {
   const deltaV = `${km(analysis.totalDeltaVMps)} of ${km(analysis.requiredDeltaVMps)} km/s`;
   const destination = DESTINATION_NAMES[design.destination];
-  const fuelFix = found.fix && found.flyableAnalysis ? shortfallAdvice(found.fix, found.flyableAnalysis) : null;
+  const fuelFix =
+    found.fix && found.flyableAnalysis ? shortfallAdvice(found.fix, found.flyableAnalysis, design.destination) : null;
 
-  if (analysis.liftoffTwr < 1) {
-    const thrust =
-      found.extraEngines === null
-        ? "it needs far more thrust"
-        : `add ${found.extraEngines} engine${found.extraEngines === 1 ? "" : "s"} to clear the pad`;
-    return `Liftoff TWR is ${formatTwr(analysis.liftoffTwr)}, so it never leaves the pad: ${thrust}${fuelFix ? `, then ${fuelFix}` : ""}.`;
+  const twr = formatTwr(analysis.liftoffTwr);
+  if (analysis.liftoffTwr < SAFE_TWR) {
+    const n = found.extraEngines;
+    const thrust = !found.sensibleEngines
+      ? `it needs ${MAX_SENSIBLE_EXTRA_ENGINES}+ more engines, so rethink the booster`
+      : `add ${n} engine${n === 1 ? "" : "s"} ${analysis.liftoffTwr < 1 ? "to clear the pad" : "for a safe liftoff"}`;
+    const start =
+      analysis.liftoffTwr < 1
+        ? `Liftoff TWR is ${twr}, so it never leaves the pad`
+        : `Liftoff TWR is ${twr}, too marginal to launch safely`;
+    return `${start}: ${thrust}${fuelFix ? `, then ${fuelFix}` : ""}.`;
   }
   if (fuelFix) return `${deltaV}: ${fuelFix}.`;
 
@@ -241,7 +274,7 @@ function summarize(
   return `${deltaV}: it reaches ${destination} with ${kmSpare(analysis.totalDeltaVMps, analysis.requiredDeltaVMps)} km/s to spare.`;
 }
 
-function shortfallAdvice(fix: ShortfallFix, analysis: Analysis): string {
+function shortfallAdvice(fix: ShortfallFix, analysis: Analysis, destination: DestinationId): string {
   const options: string[] = [];
   if (fix.stretchPercent !== null) options.push(`stretch the tanks ${fix.stretchPercent}%`);
   if (fix.withStage && fix.withStage.marginMps >= 0) options.push("add a stage");
@@ -250,9 +283,10 @@ function shortfallAdvice(fix: ShortfallFix, analysis: Analysis): string {
   if (fix.withStage) {
     return `even a new stage leaves it ${kmShort(fix.withStage.totalDeltaVMps, fix.withStage.requiredDeltaVMps)} km/s short`;
   }
-  return analysis.furthestReachable
+  const reach = analysis.furthestReachable
     ? `it can reach ${DESTINATION_NAMES[analysis.furthestReachable]} at most`
-    : `it's ${kmShort(analysis.totalDeltaVMps, analysis.requiredDeltaVMps)} km/s short and can't make orbit`;
+    : `it's ${kmShort(analysis.totalDeltaVMps, analysis.requiredDeltaVMps)} km/s short of orbit`;
+  return `no single fix reaches ${DESTINATION_NAMES[destination]}; ${reach}`;
 }
 
 // ---------------------------------------------------------------------------
@@ -290,10 +324,26 @@ class Sketch {
     );
   }
 
-  /** The middle of the biggest tank's outer side, on whichever side of the napkin has more room. */
-  tankSide(): Point {
-    const [x, y, w, h] = this.biggestTankPart()?.box ?? slice(this.whole(), 0.25, 0.75);
+  /** The middle of a tank's outer side: that stage's biggest tank if given, else the biggest drawn. */
+  tankSide(stageIndex?: number): Point {
+    const area = (p: Part) => p.box[2] * p.box[3];
+    const ofStage = this.ofKind("tank")
+      .filter((p) => p.stageIndex === stageIndex)
+      .reduce<Part | undefined>((best, p) => (!best || area(p) > area(best) ? p : best), undefined);
+    const [x, y, w, h] = (ofStage ?? this.biggestTankPart())?.box ?? slice(this.whole(), 0.25, 0.75);
     return [this.openSide() > 0 ? x + w : x, y + h / 2];
+  }
+
+  /** The middle of the engines' outer side. */
+  enginesSide(): Point {
+    const [x, y, w, h] = this.engines();
+    return [this.openSide() > 0 ? x + w : x, y + h / 2];
+  }
+
+  /** The middle of the fins' outer edge on `side`. */
+  finSide(side: 1 | -1): Point {
+    const [x, y, w, h] = this.fins();
+    return [side > 0 ? x + w : x, y + h / 2];
   }
 
   bottomCenter(): Point {
@@ -351,16 +401,33 @@ function circleAround([x, y, w, h]: Box, note: string): RedPenMark {
   return { kind: "circle", center, radius, note };
 }
 
+/** Whether an arrow to `to` from `side` has room on the napkin for `note` past its tail. */
+function noteFits([tx]: Point, side: 1 | -1, note: string) {
+  const reach = MIN_ARROW + EDGE + note.length * NOTE_CHAR_WIDTH;
+  return side > 0 ? tx + reach <= 1 : tx - reach >= 0;
+}
+
 /**
- * An arrow coming in from `side` (1 = right, -1 = left). The note is written outward from the
- * tail, so the tail keeps enough napkin beyond it for the text.
+ * An arrow coming in from `side` (1 = right, -1 = left), with its note written outward from
+ * the tail. If the note has no room there, it tries the short form of the note, then the other
+ * direction, so the text always lands on the napkin.
  */
-function arrowTo([tx, ty]: Point, side: 1 | -1, rise: number, note: string): RedPenMark {
+function arrowTo([tx, ty]: Point, side: 1 | -1, rise: number, note: string, shortNote?: string): RedPenMark {
   const to: Point = [clamp(tx, EDGE, 1 - EDGE), clamp(ty, EDGE, 1 - EDGE)];
-  const room = EDGE + note.length * NOTE_CHAR_WIDTH;
-  const fromX = side > 0 ? Math.min(to[0] + 0.2, 1 - room) : Math.max(to[0] - 0.2, room);
-  const from: Point = [clamp(fromX, EDGE, 1 - EDGE), clamp(to[1] + rise, EDGE, 1 - EDGE)];
-  return { kind: "arrow", from, to, note };
+  const tries: [string, 1 | -1][] = [[note, side]];
+  if (shortNote) tries.push([shortNote, side]);
+  tries.push([note, -side as 1 | -1]);
+  if (shortNote) tries.push([shortNote, -side as 1 | -1]);
+
+  for (const [text, dir] of tries) {
+    const room = EDGE + text.length * NOTE_CHAR_WIDTH;
+    const fits = dir > 0 ? to[0] + MIN_ARROW <= 1 - room : to[0] - MIN_ARROW >= room;
+    if (!fits) continue;
+    const fromX = dir > 0 ? Math.min(to[0] + 0.2, 1 - room) : Math.max(to[0] - 0.2, room);
+    return { kind: "arrow", from: [fromX, clamp(to[1] + rise, EDGE, 1 - EDGE)], to, note: text };
+  }
+  const fromX = clamp(to[0] + side * MIN_ARROW, EDGE, 1 - EDGE);
+  return { kind: "arrow", from: [fromX, clamp(to[1] + rise, EDGE, 1 - EDGE)], to, note: shortNote ?? note };
 }
 
 function union(boxes: Box[]): Box | null {
@@ -396,8 +463,15 @@ function hasFeature(design: Design, parts: Part[], feature: "fins" | "landing-le
 
 
 /** One decimal, but never round a TWR just under 1 up to "1.0". */
+/**
+ * Two decimals, like the rest of the screen (four below 0.01), but never rounded up across
+ * a threshold: 0.996 reads "0.99", not "1.00", and 1.199 reads "1.19", not "1.20".
+ */
 function formatTwr(twr: number) {
-  return twr < 1 && twr >= 0.95 ? (Math.floor(twr * 100) / 100).toFixed(2) : twr.toFixed(1);
+  if (twr !== 0 && twr < 0.01) return twr.toFixed(4);
+  const shown = twr.toFixed(2);
+  const crosses = (twr < 1 && shown === "1.00") || (twr < SAFE_TWR && shown === SAFE_TWR.toFixed(2));
+  return crosses ? (Math.floor(twr * 100) / 100).toFixed(2) : shown;
 }
 
 function clamp(value: number, lo: number, hi: number) {
