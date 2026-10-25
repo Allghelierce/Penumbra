@@ -4,12 +4,14 @@ import type { ReactNode } from "react";
 import CountUp from "@/components/CountUp";
 import SpecimenDrawing from "@/components/SpecimenDrawing";
 import TypeOut from "@/components/TypeOut";
-import type { Analysis, Design, DestinationId, Phase, PriorArtResult, Review, Verdict } from "@/lib/design";
+import type { Analysis, Attempt, Design, DestinationId, Phase, PriorArtResult, Review, Verdict } from "@/lib/design";
 import { DESTINATIONS, ENGINES } from "@/lib/physics";
 import { km, kmShort, kmSpare } from "@/lib/physics/format";
 import { closestAnalogs, historyLine } from "@/lib/analogs";
 
 interface VerdictPanelProps {
+  /** Every launch of this sketch so far, oldest first. */
+  attempts: Attempt[];
   phase: Phase;
   design: Design | null;
   analysis: Analysis | null;
@@ -120,6 +122,8 @@ export default function VerdictPanel(props: VerdictPanelProps) {
         </div>
       </Module>
 
+      {props.attempts.length > 0 && <FlightLog attempts={props.attempts} />}
+
       <Module
         title="Delta-v budget"
         meta={
@@ -209,6 +213,44 @@ export default function VerdictPanel(props: VerdictPanelProps) {
         </Module>
       )}
     </aside>
+  );
+}
+
+const OUTCOME: Record<Verdict, { text: string; tone: string }> = {
+  destination: { text: "Arrived", tone: "text-go-signal" },
+  orbit: { text: "Orbit", tone: "text-white" },
+  suborbital: { text: "Suborbital", tone: "text-nogo" },
+  "stuck-on-pad": { text: "On the pad", tone: "text-nogo" },
+};
+
+const altitude = (km: number) => (km < 1 ? "0 km" : `${Math.round(km).toLocaleString("en-US")} km`);
+
+/** One row per launch, newest first, with how much better (or worse) each did than the one before. */
+function FlightLog({ attempts }: { attempts: Attempt[] }) {
+  const rows = [...attempts].reverse();
+  return (
+    <Module title="Flight log" meta={<span className="text-[12px] text-haze">{attempts.length} {attempts.length === 1 ? "flight" : "flights"}</span>}>
+      <ol className="divide-y divide-rule">
+        {rows.map((a, i) => {
+          const prev = rows[i + 1];
+          const gain = prev ? a.analysis.totalDeltaVMps - prev.analysis.totalDeltaVMps : null;
+          const outcome = OUTCOME[a.analysis.verdict];
+          return (
+            <li key={a.n} className={`grid grid-cols-[2.5rem_5.5rem_1fr_auto] items-baseline gap-2 px-4 py-1.5 text-[13px] ${i === 0 ? "" : "opacity-70"}`}>
+              <span className="font-space text-[12px] font-semibold tracking-[0.12em] text-haze">#{a.n}</span>
+              <span className={`font-space text-[11px] font-semibold uppercase tracking-[0.14em] ${outcome.tone}`}>{outcome.text}</span>
+              <span className="text-white">
+                {km(a.analysis.totalDeltaVMps)} km/s
+                <span className="ml-2 text-haze">max {altitude(a.maxAltitudeKm)}</span>
+              </span>
+              <span className={`text-[12px] ${gain === null ? "text-haze" : gain >= 0 ? "text-go-signal" : "text-nogo"}`}>
+                {gain === null ? "first flight" : `${gain >= 0 ? "+" : "−"}${km(Math.abs(gain))} km/s`}
+              </span>
+            </li>
+          );
+        })}
+      </ol>
+    </Module>
   );
 }
 

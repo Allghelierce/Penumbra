@@ -16,6 +16,7 @@ import { replaySketch } from "@/lib/attract";
 import { DEMO_SKETCHES } from "@/lib/demo-sketches";
 import type {
   Analysis,
+  Attempt,
   Design,
   DesignAction,
   DestinationId,
@@ -35,6 +36,7 @@ import type {
 import { strokesToPng } from "@/lib/napkin";
 import { buildReview } from "@/lib/redpen";
 import { readFromGeometry } from "@/lib/sketch/geometry";
+import { recap } from "@/lib/recap";
 import { analyze, DESTINATIONS, simulateFlight } from "@/lib/physics";
 
 const DESTINATION_CHIPS: { id: DestinationId; label: string }[] = [
@@ -106,6 +108,9 @@ export default function Studio() {
   const [patchUrl, setPatchUrl] = useState<string | null>(null);
   const [flight, setFlight] = useState<{ trace: FlightTrace; renderUrl: string | null; napkinRect: NapkinRect | null } | null>(null);
   const [narration, setNarration] = useState<string | null>(null);
+  // Every launch of this sketch, oldest first: the visible record of iterating on it.
+  const [attempts, setAttempts] = useState<Attempt[]>([]);
+  const flightRecap = useMemo(() => (attempts.length > 0 ? recap(attempts) : null), [attempts]);
   const [error, setError] = useState<string | null>(null);
 
   const analysis = useMemo(() => safeAnalyze(design), [design]);
@@ -240,7 +245,9 @@ export default function Studio() {
     if (!current || !read || !currentAnalysis) return;
     const box = napkinArea.current?.querySelector(".napkin")?.getBoundingClientRect();
     const napkinRect = box ? { left: box.left, top: box.top, width: box.width, height: box.height } : null;
-    setFlight({ trace: simulateFlight(current, currentAnalysis), renderUrl: null, napkinRect });
+    const trace = simulateFlight(current, currentAnalysis);
+    setFlight({ trace, renderUrl: null, napkinRect });
+    setAttempts((prev) => [...prev, { n: prev.length + 1, design: current, analysis: currentAnalysis, maxAltitudeKm: trace.maxAltitudeKm }]);
     setPhase("launch");
     const body: RenderRequest = {
       design: current,
@@ -277,6 +284,17 @@ export default function Studio() {
     [requestReview, startLaunch],
   );
 
+  /** From the end card: apply the fix, let the red pen re-mark the napkin, then fly again. */
+  const relaunch = useRef<ReturnType<typeof setTimeout> | null>(null);
+  function improveAndFly(fix: DesignAction) {
+    unlockLaunchAudio(); // still inside the click, for Safari
+    setFlight(null);
+    setPhase("reviewed");
+    handleAction(fix);
+    if (relaunch.current) clearTimeout(relaunch.current);
+    relaunch.current = setTimeout(startLaunch, 1500);
+  }
+
   function changeStrokes(next: Stroke[]) {
     setStrokes(next);
     if (reading) setStale(true);
@@ -291,6 +309,7 @@ export default function Studio() {
     for (const key of Object.keys(runs.current) as (keyof typeof runs.current)[]) runs.current[key]++;
     checking.current = false;
     rendered.current = null;
+    setAttempts([]);
     setStrokes([]);
     setReading(null);
     setDesign(null);
@@ -482,6 +501,7 @@ export default function Studio() {
 
         <section className="min-h-0 overflow-y-auto border-l border-rule bg-black">
           <VerdictPanel
+            attempts={attempts}
             phase={phase}
             design={design}
             analysis={analysis}
@@ -524,6 +544,8 @@ export default function Studio() {
             setFlight(null);
             setPhase("reviewed");
           }}
+          recap={flightRecap}
+          onImprove={improveAndFly}
         />
       )}
     </div>
