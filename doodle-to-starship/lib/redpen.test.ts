@@ -96,13 +96,13 @@ function expectOnNapkin(mark: RedPenMark) {
 }
 
 describe("a rocket that works", () => {
-  it("gets one circle around the whole rocket saying it flies", () => {
+  it("gets one tick saying it flies, and no circles anywhere", () => {
     const { analysis, review: r } = review(falconLike());
     expect(analysis.liftoffTwr).toBeGreaterThanOrEqual(1);
     expect(analysis.marginMps).toBeGreaterThanOrEqual(0);
 
     expect(r.marks).toHaveLength(1);
-    expect(r.marks[0]).toMatchObject({ kind: "circle", note: "flies!" });
+    expect(r.marks[0]).toMatchObject({ kind: "arrow", note: "flies!" });
     expect(r.summary).toMatch(/^\d+\.\d of \d+\.\d km\/s: it reaches low Earth orbit with \d+\.\d km\/s to spare\.$/);
   });
 });
@@ -268,6 +268,7 @@ describe("every review", () => {
     expect(r.marks.length).toBeGreaterThanOrEqual(1);
     expect(r.marks.length).toBeLessThanOrEqual(4);
     r.marks.forEach(expectOnNapkin);
+    r.marks.forEach((m) => expect(m.kind).not.toBe("circle"));
     r.marks.forEach((m) => expect(m.note.length).toBeGreaterThan(0));
     expect(r.summary).toMatch(/\.$/);
   });
@@ -328,15 +329,44 @@ describe("the engineer's markup", () => {
     });
   });
 
-  it("outlines every part once per kind and stage, named for what it is", () => {
-    const notes = of("outline").map((m) => m.note);
-    expect(notes).toEqual(expect.arrayContaining(["Nose / fairing", "Payload bay", "Engines", "Booster LOX/RP-1", "Stage 2 LOX/RP-1"]));
-    expect(notes.filter((n) => n === "Fins")).toHaveLength(1);
-    for (const m of of("outline")) {
+  it("outlines each part once, merging nose and payload, and skips one mostly inside another", () => {
+    const outlines = of("outline");
+    expect(outlines.every((m) => m.note === "")).toBe(true);
+    for (const m of outlines) {
       expect(m.box[0]).toBeGreaterThanOrEqual(0);
       expect(m.box[1]).toBeGreaterThanOrEqual(0);
       expect(m.box[0] + m.box[2]).toBeLessThanOrEqual(1);
       expect(m.box[1] + m.box[3]).toBeLessThanOrEqual(1);
+    }
+    const names = of("callout").map((c) => c.note);
+    expect(names).toContain("Nose / payload");
+    expect(names).not.toContain("Payload bay");
+    // The second fin part sits mostly inside the first fin outline's merged box, so it's one outline.
+    expect(names.filter((n) => n === "Fins").length).toBeLessThanOrEqual(1);
+
+    const legs: Part = { kind: "landing-legs", label: "legs", box: [0.45, 0.5, 0.1, 0.2], stageIndex: 0 };
+    const crowded = review(design, [...partsFor(design), legs]).full.marks.filter((m) => m.kind === "outline");
+    // Legs drawn inside the booster tank's box add no outline of their own.
+    expect(crowded).toHaveLength(of("outline").length);
+  });
+
+  it("names parts in the margin with leaders, never inside a box, on the patch or on another label", () => {
+    const labels = of("callout");
+    const outlines = of("outline").map((m) => m.box);
+    for (const c of labels) {
+      const width = c.note.length * 0.012;
+      const [x0, x1] = c.label[0] < c.anchor[0] ? [c.label[0] - width, c.label[0]] : [c.label[0], c.label[0] + width];
+      expect(x0).toBeGreaterThanOrEqual(0);
+      expect(x1).toBeLessThanOrEqual(1);
+      expect(c.label[1] < 0.18 && x1 > 0.78).toBe(false);
+      for (const [bx, by, bw, bh] of outlines) {
+        const insideBox = c.label[0] > bx && c.label[0] < bx + bw && c.label[1] > by && c.label[1] < by + bh;
+        expect(insideBox).toBe(false);
+      }
+    }
+    for (const side of [-1, 1]) {
+      const ys = labels.filter((c) => Math.sign(c.label[0] - c.anchor[0]) === side).map((c) => c.label[1]).sort((a, b) => a - b);
+      for (let i = 1; i < ys.length; i++) expect(ys[i] - ys[i - 1]).toBeGreaterThanOrEqual(0.05 - 1e-9);
     }
   });
 
@@ -350,7 +380,8 @@ describe("the engineer's markup", () => {
   });
 
   it("calls out real numbers from the physics, in the margin, without overlapping", () => {
-    const callouts = of("callout");
+    // Spec callouts live in the margin away from the issue notes (the left, for this centered rocket).
+    const callouts = of("callout").filter((c) => c.label[0] < c.anchor[0]);
     expect(callouts.length).toBeGreaterThanOrEqual(3);
     expect(callouts.length).toBeLessThanOrEqual(6);
     const boosterProp = Math.round(analysis.stages[0].propellantMassKg / 1000).toLocaleString("en-US");

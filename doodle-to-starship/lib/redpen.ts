@@ -4,7 +4,6 @@
 
 import { applyAction } from "./actions";
 import {
-  NAPKIN_ASPECT,
   type Analysis,
   type Design,
   type DesignAction,
@@ -32,12 +31,6 @@ const FINS_NOTE = "useless in vacuum";
 const MAX_STRETCH = 2.5;
 const MAX_EXTRA_ENGINES = 500;
 
-/** The overlay draws a circle's vertical radius at about 0.85 of its horizontal one. */
-const CIRCLE_SQUASH = 0.85;
-/** Room for the pen loop's overshoot past its radius. */
-const CIRCLE_OVERSHOOT = 1.1;
-const CIRCLE_PAD = 0.03;
-const MIN_RADIUS = 0.04;
 /** Keeps arrow ends and outlines off the very edge of the napkin. */
 const EDGE = 0.02;
 /** About how wide one handwritten note character is, as a fraction of the napkin's width (measured in QA). */
@@ -109,11 +102,12 @@ export function buildReview(reading: SketchReading, analysis: Analysis): Review 
   if (needsShield) marks.push(arrowTo(sketch.capsuleSide(), sketch.openSide(), -0.06, "heat shield!"));
 
   const flies = !stuck && !marginal && !short && !needsLegs && !needsShield;
-  if (flies) marks.push(circleAround(sketch.whole(), "flies!"));
+  // A tick beside the upper body; the markup already outlines the whole vehicle part by part.
+  if (flies) marks.push(arrowTo(sketch.upperSide(), sketch.openSide(), 0, "flies!"));
 
   return {
     // The engineer's markup (outlines, specs, dimensions) first, then the numbered issue marks.
-    marks: [...engineerMarkup(design, analysis, parts, sketch), ...marks.slice(0, MAX_MARKS)],
+    marks: [...engineerMarkup(design, analysis, parts, sketch, marks.slice(0, MAX_MARKS)), ...marks.slice(0, MAX_MARKS)],
     summary: summarize(design, analysis, { extraEngines, sensibleEngines, fix, flyableAnalysis, needsLegs, needsShield }),
   };
 }
@@ -334,6 +328,12 @@ class Sketch {
     return [this.openSide() > 0 ? x + w : x, y + h / 2];
   }
 
+  /** A point on the open side of the upper body, below the mission-patch corner. */
+  upperSide(): Point {
+    const [x, y, w, h] = this.whole();
+    return [this.openSide() > 0 ? x + w : x, Math.max(y + h * 0.3, 0.2)];
+  }
+
   /** The middle of the engines' outer side. */
   enginesSide(): Point {
     const [x, y, w, h] = this.engines();
@@ -387,20 +387,6 @@ class Sketch {
   }
 }
 
-/** A loop around a box, shrunk and nudged as needed to stay on the napkin. */
-function circleAround([x, y, w, h]: Box, note: string): RedPenMark {
-  // Box heights are fractions of the napkin's height; the radius is a fraction of its width.
-  const wanted = Math.max(w, h / NAPKIN_ASPECT) / 2 + CIRCLE_PAD;
-  const xReach = CIRCLE_OVERSHOOT;
-  const yReach = CIRCLE_OVERSHOOT * CIRCLE_SQUASH * NAPKIN_ASPECT;
-  const radius = clamp(wanted, MIN_RADIUS, 0.5 / Math.max(xReach, yReach));
-  const center: Point = [
-    clamp(x + w / 2, radius * xReach, 1 - radius * xReach),
-    clamp(y + h / 2, radius * yReach, 1 - radius * yReach),
-  ];
-  return { kind: "circle", center, radius, note };
-}
-
 /**
  * An arrow coming in from `side` (1 = right, -1 = left), with its note written outward from
  * the tail. If the note has no room there, it tries the short form of the note, then the other
@@ -418,7 +404,10 @@ function arrowTo([tx, ty]: Point, side: 1 | -1, rise: number, note: string, shor
     const fits = dir > 0 ? to[0] + MIN_ARROW <= 1 - room : to[0] - MIN_ARROW >= room;
     if (!fits) continue;
     const fromX = dir > 0 ? Math.min(to[0] + 0.2, 1 - room) : Math.max(to[0] - 0.2, room);
-    return { kind: "arrow", from: [fromX, clamp(to[1] + rise, EDGE, 1 - EDGE)], to, note: text };
+    let fromY = clamp(to[1] + rise, EDGE, 1 - EDGE);
+    const [x0, x1] = dir > 0 ? [fromX, fromX + text.length * NOTE_CHAR_WIDTH] : [fromX - text.length * NOTE_CHAR_WIDTH, fromX];
+    if (inPatch(x0, x1, fromY)) fromY = PATCH.y + 0.02;
+    return { kind: "arrow", from: [fromX, fromY], to, note: text };
   }
   const fromX = clamp(to[0] + side * MIN_ARROW, EDGE, 1 - EDGE);
   return { kind: "arrow", from: [fromX, clamp(to[1] + rise, EDGE, 1 - EDGE)], to, note: shortNote ?? note };
@@ -530,26 +519,94 @@ const SHORT_ENGINE: Partial<Record<string, string>> = {
   "generic-solid": "SRM",
 };
 
-function engineerMarkup(design: Design, analysis: Analysis, parts: Part[], sketch: Sketch): RedPenMark[] {
+function engineerMarkup(
+  design: Design,
+  analysis: Analysis,
+  parts: Part[],
+  sketch: Sketch,
+  issues: RedPenMark[],
+): RedPenMark[] {
   if (parts.length === 0) return [];
-  return [...outlines(design, parts), ...dimensions(design, sketch), ...callouts(design, analysis, parts, sketch)];
+  const kept = outlines(design, parts);
+  return [
+    ...kept.map(({ box }): RedPenMark => ({ kind: "outline", box: clampBox(box), note: "" })),
+    ...dimensions(design, sketch),
+    ...callouts(design, analysis, parts, sketch),
+    ...partLabels(kept, sketch, issues),
+  ];
+}
+
+/** The mission-patch sticker sits in the napkin's top-right corner; no label goes there. */
+const PATCH = { x: 0.78, y: 0.18 };
+
+function inPatch(x0: number, x1: number, y: number) {
+  return y < PATCH.y && x1 > PATCH.x && x0 < 1;
+}
+
+/**
+ * Part names in the open margin with a short leader to each outline, never inside a box.
+ * A name that would sit on another label, an issue note or the mission patch is dropped.
+ */
+function partLabels(kept: { box: Box; note: string }[], sketch: Sketch, issues: RedPenMark[]): RedPenMark[] {
+  const side = sketch.openSide();
+  const whole = sketch.whole();
+  const labelX = clamp(side > 0 ? whole[0] + whole[2] + 0.05 : whole[0] - 0.05, EDGE, 1 - EDGE);
+  // Rows already taken on this side: issue notes are written at their arrow tails.
+  const taken = issues.flatMap((m) =>
+    m.kind === "arrow" && Math.sign(m.from[0] - m.to[0]) === side ? [m.from[1]] : m.kind === "ghost-line" ? [m.points.at(-1)![1]] : [],
+  );
+  const out: RedPenMark[] = [];
+  for (const { box, note } of [...kept].sort((a, b) => a.box[1] - b.box[1])) {
+    const width = note.length * CALLOUT_CHAR_WIDTH;
+    const [x0, x1] = side > 0 ? [labelX, labelX + width] : [labelX - width, labelX];
+    if (x0 < 0 || x1 > 1) continue;
+    let y = clamp(box[1] + box[3] / 2, EDGE, 1 - EDGE);
+    if (inPatch(x0, x1, y)) y = PATCH.y + 0.01;
+    if (taken.some((t) => Math.abs(t - y) < CALLOUT_LINE)) continue;
+    taken.push(y);
+    const anchor: Point = [clamp(side > 0 ? box[0] + box[2] : box[0], EDGE, 1 - EDGE), clamp(box[1] + box[3] / 2, EDGE, 1 - EDGE)];
+    out.push({ kind: "callout", anchor, label: [labelX, y], note });
+  }
+  return out;
 }
 
 /** One outline per part kind and stage (duplicates merged), identifying it. */
-function outlines(design: Design, parts: Part[]): RedPenMark[] {
+/**
+ * One outline per part kind and stage (duplicates merged, nose and payload bay as one). Big
+ * parts first; a part whose box is mostly inside one already kept is skipped, so stacked
+ * outlines don't pile up.
+ */
+function outlines(design: Design, parts: Part[]): { box: Box; note: string }[] {
   const groups = new Map<string, { box: Box; note: string }>();
   for (const part of parts) {
     const stage = part.stageIndex !== undefined ? design.stages[part.stageIndex] : undefined;
     const tankStage = stage ?? design.stages[0];
-    const note =
-      part.kind === "tank"
+    const top = part.kind === "nose" || part.kind === "payload";
+    const note = top
+      ? "Nose / payload"
+      : part.kind === "tank"
         ? `${tankStage?.label ?? "Tanks"} ${TANK_NAMES[tankStage?.propellant ?? "kerolox"]}`.slice(0, 22)
         : (PART_NAMES[part.kind] ?? (/interstage/i.test(part.label) ? "Interstage" : part.label.slice(0, 16)));
-    const key = `${part.kind}|${part.stageIndex ?? ""}|${note}`;
+    const key = top ? "top" : `${part.kind}|${part.stageIndex ?? ""}|${note}`;
     const prev = groups.get(key);
     groups.set(key, { box: prev ? union([prev.box, part.box])! : part.box, note });
   }
-  return [...groups.values()].map(({ box, note }) => ({ kind: "outline", box: clampBox(box), note }));
+  const area = (b: Box) => b[2] * b[3];
+  const kept: { box: Box; note: string }[] = [];
+  for (const g of [...groups.values()].sort((a, b) => area(b.box) - area(a.box))) {
+    if (kept.some((k) => overlap(k.box, g.box) > MAX_OUTLINE_OVERLAP * area(g.box))) continue;
+    kept.push(g);
+  }
+  return kept;
+}
+
+/** Outlines overlapping a kept one by more than this share of their own area are skipped. */
+const MAX_OUTLINE_OVERLAP = 0.4;
+
+function overlap(a: Box, b: Box) {
+  const w = Math.min(a[0] + a[2], b[0] + b[2]) - Math.max(a[0], b[0]);
+  const h = Math.min(a[1] + a[3], b[1] + b[3]) - Math.max(a[1], b[1]);
+  return w > 0 && h > 0 ? w * h : 0;
 }
 
 /** Total height beside the rocket, and the body's diameter near the base. */
@@ -616,7 +673,9 @@ function callouts(design: Design, analysis: Analysis, parts: Part[], sketch: Ske
   for (const { anchor, notes } of wanted.slice(0, MAX_CALLOUTS)) {
     const note = notes.find((n) => n.length * CALLOUT_CHAR_WIDTH <= room);
     if (!note) continue;
-    const y = Math.max(anchor[1], lastY + CALLOUT_LINE);
+    let y = Math.max(anchor[1], lastY + CALLOUT_LINE);
+    const width = note.length * CALLOUT_CHAR_WIDTH;
+    if (inPatch(side > 0 ? labelX : labelX - width, side > 0 ? labelX + width : labelX, y)) y = Math.max(y, PATCH.y + 0.01);
     if (y > 1 - EDGE) break;
     lastY = y;
     out.push({ kind: "callout", anchor: [clamp(anchor[0], EDGE, 1 - EDGE), clamp(anchor[1], EDGE, 1 - EDGE)], label: [labelX, y], note });
