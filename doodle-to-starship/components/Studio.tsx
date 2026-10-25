@@ -5,7 +5,9 @@ import AttractMode from "@/components/AttractMode";
 import Link from "next/link";
 import LaunchScene, { unlockLaunchAudio } from "@/components/LaunchScene";
 import NapkinCanvas from "@/components/NapkinCanvas";
+import MissionClock from "@/components/MissionClock";
 import RedPenOverlay from "@/components/RedPenOverlay";
+import Sky from "@/components/Sky";
 import VerdictPanel from "@/components/VerdictPanel";
 import VoiceDock from "@/components/VoiceDock";
 import type { NapkinRect } from "@/components/launch/engine";
@@ -355,17 +357,17 @@ export default function Studio() {
   const reviewed = phase === "reviewed" && reading && design;
 
   return (
-    <div className="flex h-dvh flex-col overflow-hidden bg-umbra text-starlight">
-      <header className="flex h-14 shrink-0 items-center gap-8 border-b border-rule px-6">
-        <h1 className="flex items-center gap-3 font-space text-[17px] uppercase tracking-[0.22em]">
+    <div className="flex h-dvh flex-col overflow-hidden bg-black text-white">
+      <header className="flex h-14 shrink-0 items-center gap-8 border-b border-rule bg-black px-6">
+        <h1 className="flex items-center gap-3 font-space text-[18px] font-semibold uppercase tracking-[0.34em]">
           <EclipseMark />
           Penumbra
         </h1>
         <div className="flex items-center gap-3">
-          <span id="target-label" className="text-[13px] text-haze">
+          <span id="target-label" className="text-[11px] uppercase tracking-[0.2em] text-haze">
             Target
           </span>
-          <div role="radiogroup" aria-labelledby="target-label" className="flex rounded-[3px] border border-rule p-0.5">
+          <div role="radiogroup" aria-labelledby="target-label" className="flex gap-1">
             {DESTINATION_CHIPS.map((chip) => {
               const selected = destination === chip.id;
               return (
@@ -375,8 +377,8 @@ export default function Studio() {
                   role="radio"
                   aria-checked={selected}
                   onClick={() => (design ? handleAction({ type: "set-destination", destination: chip.id }) : setDestination(chip.id))}
-                  className={`rounded-[2px] px-3 py-1 text-[13px] font-medium transition-colors ${
-                    selected ? "bg-starlight text-umbra" : "text-haze hover:text-starlight"
+                  className={`relative px-2.5 py-1.5 text-[12px] font-semibold uppercase tracking-[0.16em] transition-colors after:absolute after:inset-x-2.5 after:-bottom-px after:h-[2px] after:bg-white after:transition-transform ${
+                    selected ? "text-white after:scale-x-100" : "text-haze after:scale-x-0 hover:text-white"
                   }`}
                 >
                   {chip.label}
@@ -386,16 +388,19 @@ export default function Studio() {
           </div>
         </div>
         <div className="ml-auto flex items-center gap-2">
-          <Link href="/about" className="mr-4 text-[13px] text-haze underline-offset-4 transition-colors hover:text-starlight hover:underline">
+          <span className="mr-6">
+            <MissionClock />
+          </span>
+          <Link href="/about" className="mr-4 text-[11px] uppercase tracking-[0.2em] text-haze underline-offset-4 transition-colors hover:text-white hover:underline">
             How it works
           </Link>
-          <span className="mr-1 text-[13px] text-haze">Sample sketches</span>
+          <span className="mr-1 text-[11px] uppercase tracking-[0.2em] text-haze">Samples</span>
           {DEMO_SKETCHES.map((sketch) => (
             <button
               key={sketch.id}
               type="button"
               onClick={() => loadDemo(sketch.id)}
-              className="rounded-[3px] border border-rule px-3 py-1 text-[13px] text-starlight/85 transition-colors hover:border-haze hover:text-starlight"
+              className="btn-outline h-8 px-3 text-[11px]"
             >
               {sketch.title}
             </button>
@@ -404,7 +409,8 @@ export default function Studio() {
       </header>
 
       <main className="grid min-h-0 flex-1 grid-cols-[minmax(0,1fr)_460px]">
-        <section className="aurora flex min-h-0 min-w-0 flex-col items-center gap-4 px-8 pb-4 pt-6">
+        <section className="space-stage flex min-h-0 min-w-0 flex-col items-center gap-4 px-8 pb-4 pt-6">
+          <Sky />
           <div ref={napkinArea} className="flex min-h-0 w-full flex-1 justify-center">
             <NapkinCanvas strokes={strokes} onChange={changeStrokes} disabled={phase === "reading"}>
               {patchUrl && (
@@ -428,7 +434,7 @@ export default function Studio() {
           </div>
 
           <div className="flex w-full items-stretch gap-4">
-            <dl className="grid min-w-0 max-w-[560px] flex-1 grid-cols-[1.25fr_1.35fr_0.95fr_0.45fr] divide-x divide-rule rounded-[3px] border border-rule bg-umbra/70 text-[13px]">
+            <dl className="grid min-w-0 max-w-[560px] flex-1 grid-cols-[1.25fr_1.35fr_0.95fr_0.45fr] divide-x divide-rule border border-rule bg-black text-[13px]">
               <TitleCell label="Drawing" value={design?.name ?? (strokes.length ? "Untitled sketch" : "Blank napkin")} />
               <TitleCell label="Target" value={DESTINATIONS[destination].name} />
               <TitleCell label="Status" value={STATUS[phase === "reviewed" && stale ? "changed" : phase]} />
@@ -439,7 +445,7 @@ export default function Studio() {
                 type="button"
                 onClick={() => setStrokes((s) => s.slice(0, -1))}
                 disabled={strokes.length === 0}
-                className="h-10 px-2 text-[13px] text-haze transition-colors hover:text-starlight disabled:opacity-40"
+                className="h-11 px-2 text-[11px] uppercase tracking-[0.18em] text-haze transition-colors hover:text-white disabled:opacity-40"
               >
                 Undo
               </button>
@@ -447,7 +453,7 @@ export default function Studio() {
                 type="button"
                 onClick={clearAll}
                 disabled={strokes.length === 0}
-                className="h-10 px-2 text-[13px] text-haze transition-colors hover:text-starlight disabled:opacity-40"
+                className="h-11 px-2 text-[11px] uppercase tracking-[0.18em] text-haze transition-colors hover:text-white disabled:opacity-40"
               >
                 Clear
               </button>
@@ -455,7 +461,7 @@ export default function Studio() {
                 type="button"
                 onClick={check}
                 disabled={strokes.length === 0 || phase === "reading"}
-                className="h-10 rounded-[3px] bg-starlight px-5 text-[14px] font-semibold text-umbra transition-opacity hover:opacity-90 disabled:opacity-35"
+                className="btn-outline h-11 px-6 text-[12px]"
               >
                 {phase === "reading" ? "Reading…" : reading && !stale ? "Check again" : "Check design"}
               </button>
@@ -463,7 +469,7 @@ export default function Studio() {
                 type="button"
                 onClick={startLaunch}
                 disabled={!reviewed || !analysis}
-                className="h-10 rounded-[3px] bg-flame px-6 font-display text-[16px] font-semibold tracking-[0.06em] text-white transition-opacity hover:opacity-90 disabled:opacity-30"
+                className="btn-solid h-11 px-8 text-[12px]"
               >
                 Launch
               </button>
@@ -474,7 +480,7 @@ export default function Studio() {
           </p>
         </section>
 
-        <section className="min-h-0 overflow-y-auto border-l border-rule bg-[#0b1016]">
+        <section className="min-h-0 overflow-y-auto border-l border-rule bg-black">
           <VerdictPanel
             phase={phase}
             design={design}
@@ -529,13 +535,14 @@ const STATUS: Record<Phase | "changed", string> = {
   reading: "Reading",
   reviewed: "Reviewed",
   changed: "Changed",
+  poll: "Go/no-go poll",
   launch: "In flight",
 };
 
 function TitleCell({ label, value }: { label: string; value: string }) {
   return (
     <div className="min-w-0 px-3 py-1.5">
-      <dt className="text-[11px] text-haze">{label}</dt>
+      <dt className="text-[10px] uppercase tracking-[0.18em] text-haze">{label}</dt>
       <dd className="truncate text-starlight">{value}</dd>
     </div>
   );
@@ -545,7 +552,7 @@ function TitleCell({ label, value }: { label: string; value: string }) {
 function EclipseMark() {
   return (
     <svg viewBox="0 0 24 24" className="h-5 w-5" aria-hidden>
-      <circle cx="12" cy="12" r="9" fill="var(--starlight)" opacity="0.9" />
+      <circle cx="12" cy="12" r="9" fill="#fff" />
       <circle cx="16" cy="9.5" r="8" fill="var(--umbra)" opacity="0.55" />
       <circle cx="17.5" cy="8.5" r="6.5" fill="var(--umbra)" />
     </svg>

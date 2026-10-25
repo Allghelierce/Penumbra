@@ -28,6 +28,7 @@ const HINTS: Record<Phase, string> = {
   reading: "Reading your sketch…",
   reviewed: "Try “send it to Mars”, “stretch the tanks 30 percent” or “add a booster”.",
   launch: "Say “launch it again” to fly once more.",
+  poll: "Go/no-go poll. Say “go”, “fix it” or “scrub”.",
 };
 
 /** How long to wait for the parent to re-analyze after an edit before replying anyway. */
@@ -352,7 +353,7 @@ export default function VoiceDock({ phase, design, analysis, review, narration, 
   const analyser = talker === "user" ? micAnalyser : talker === "reviewer" ? outputAnalyser : null;
 
   return (
-    <div className="flex h-[76px] w-full shrink-0 items-center gap-5 border-t border-rule bg-panel px-6">
+    <div className="flex h-[76px] w-full shrink-0 items-center gap-5 border-t border-rule bg-black px-6">
       <button
         type="button"
         aria-label="Hold to talk to the engineer"
@@ -366,7 +367,7 @@ export default function VoiceDock({ phase, design, analysis, review, narration, 
         onPointerCancel={endTalk}
         onContextMenu={(e) => e.preventDefault()}
         className={`relative flex h-12 w-12 shrink-0 touch-none select-none items-center justify-center rounded-full transition-colors disabled:opacity-40 ${
-          holding ? "bg-nogo text-white" : "bg-starlight text-umbra hover:bg-white"
+          holding ? "border-2 border-nogo bg-nogo text-white" : "border-2 border-white text-white hover:bg-white hover:text-black"
         }`}
       >
         {holding ? <span className="absolute inset-0 animate-ping rounded-full bg-nogo/40 motion-reduce:hidden" /> : null}
@@ -374,8 +375,8 @@ export default function VoiceDock({ phase, design, analysis, review, narration, 
       </button>
 
       <div className="w-[150px] shrink-0">
-        <p className="font-display text-[16px] font-semibold leading-tight text-starlight">{holding ? "Listening…" : "Talk to the engineer"}</p>
-        <p className="text-[12px] text-haze">Hold the button or Space</p>
+        <p className="font-space text-[12px] font-semibold uppercase tracking-[0.18em] text-white">{holding ? "Listening…" : "Engineer"}</p>
+        <p className="text-[12px] text-haze">Hold to talk, or hold Space</p>
       </div>
 
       <div className="min-w-0 flex-1 border-l border-rule pl-5" aria-live="polite">
@@ -412,7 +413,7 @@ export default function VoiceDock({ phase, design, analysis, review, narration, 
             onChange={(e) => setTyped(e.target.value)}
             placeholder="Or type a command"
             aria-label="Type a command for the engineer"
-            className="h-7 w-full rounded-[3px] border border-rule bg-umbra px-2 text-[13px] text-starlight placeholder:text-haze/70 focus:border-haze focus:outline-none"
+            className="h-7 w-full border border-rule bg-black px-2 text-[13px] text-white placeholder:text-haze/70 focus:border-white focus:outline-none"
           />
         </form>
       </div>

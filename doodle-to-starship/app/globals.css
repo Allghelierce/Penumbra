@@ -14,14 +14,14 @@
   --flame: #ff5a1f;
   --flame-hot: #ffb347;
 
-  /* The studio console: a dark room with one lit napkin in it. */
-  --umbra: #0f141b;
-  --panel: #151c25;
-  --rule: #263040;
-  --starlight: #e8edf3;
-  --haze: #8a97a8;
+  /* The studio: jet black, white type, hairline rules. One lit napkin in the dark. */
+  --umbra: #000000;
+  --panel: #000000;
+  --rule: #2a2a2a;
+  --starlight: #ffffff;
+  --haze: #8f8f8f;
   --go-signal: #4cc38a;
-  --nogo: #f0614d;
+  --nogo: #ff5a4f;
 }
 
 @theme inline {
@@ -45,7 +45,8 @@
   --color-nogo: var(--nogo);
   --font-ui: var(--font-barlow);
   --font-display: var(--font-barlow-condensed);
-  --font-space: var(--font-michroma);
+  /* DIN-style uppercase for headings and readouts, in the manner of SpaceX's D-DIN. */
+  --font-space: var(--font-barlow);
   --font-sans: var(--font-geist-sans);
   --font-mono: var(--font-plex-mono);
   --font-hand: var(--font-caveat);
@@ -95,7 +96,10 @@ body {
   .part-tag,
   .sticker-in,
   .scanline,
-  .aurora::before,
+  .twinkle,
+  .satellite,
+  .bar-grow,
+  .live-dot,
   .caret::after {
     animation: none !important;
     stroke-dashoffset: 0 !important;
@@ -144,54 +148,63 @@ body {
   pointer-events: none;
 }
 
-/* The studio backdrop: a slow aurora over deep space, with grain so it reads as photographed, not drawn. */
-.aurora {
+/* The stage behind the napkin is open space. */
+.space-stage {
   position: relative;
   isolation: isolate;
-  background: radial-gradient(ellipse 120% 90% at 50% 120%, #0d1d24 0%, var(--umbra) 60%);
+  background: #000;
   overflow: hidden;
 }
-.aurora::before {
-  content: "";
-  position: absolute;
-  inset: -30%;
-  z-index: -2;
-  background:
-    radial-gradient(ellipse 38% 18% at 30% 32%, rgba(61, 220, 151, 0.22), transparent 70%),
-    radial-gradient(ellipse 30% 14% at 62% 22%, rgba(56, 189, 248, 0.16), transparent 70%),
-    radial-gradient(ellipse 34% 16% at 78% 40%, rgba(139, 92, 246, 0.16), transparent 72%),
-    radial-gradient(ellipse 26% 12% at 45% 55%, rgba(61, 220, 151, 0.1), transparent 70%);
-  filter: blur(28px);
-  animation: aurora-drift 38s ease-in-out infinite alternate;
-}
-.aurora::after {
+/* The napkin sits in a faint pool of its own light. */
+.space-stage::before {
   content: "";
   position: absolute;
   inset: 0;
   z-index: -1;
-  background:
-    radial-gradient(1px 1px at 12% 18%, rgba(232, 237, 243, 0.7), transparent),
-    radial-gradient(1px 1px at 27% 72%, rgba(232, 237, 243, 0.5), transparent),
-    radial-gradient(1px 1px at 41% 9%, rgba(232, 237, 243, 0.6), transparent),
-    radial-gradient(1px 1px at 68% 83%, rgba(232, 237, 243, 0.45), transparent),
-    radial-gradient(1px 1px at 83% 14%, rgba(232, 237, 243, 0.65), transparent),
-    radial-gradient(1px 1px at 92% 61%, rgba(232, 237, 243, 0.5), transparent),
-    radial-gradient(1.5px 1.5px at 7% 52%, rgba(232, 237, 243, 0.55), transparent),
-    radial-gradient(1px 1px at 55% 38%, rgba(232, 237, 243, 0.35), transparent),
-    /* lamp pool around the napkin */
-    radial-gradient(ellipse 44% 56% at 50% 46%, rgba(255, 236, 200, 0.13), rgba(255, 236, 200, 0.04) 55%, transparent 78%),
-    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='220' height='220'%3E%3Cfilter id='g'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.95' numOctaves='2' stitchTiles='stitch'/%3E%3CfeColorMatrix values='0 0 0 0 1 0 0 0 0 1 0 0 0 0 1 0 0 0 0.06 0'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23g)'/%3E%3C/svg%3E");
+  background: radial-gradient(ellipse 40% 50% at 50% 46%, rgba(255, 248, 235, 0.06), transparent 75%);
   pointer-events: none;
 }
-@keyframes aurora-drift {
-  0% {
-    transform: translate3d(-4%, 0, 0) rotate(-2deg) scaleY(1);
-  }
+.twinkle {
+  animation: twinkle ease-in-out infinite;
+}
+@keyframes twinkle {
   50% {
-    transform: translate3d(3%, -3%, 0) rotate(1deg) scaleY(1.15);
+    opacity: 0.9;
   }
+}
+/* A satellite crosses the field now and then: a steady point on a straight line. */
+.satellite {
+  position: absolute;
+  top: 18%;
+  left: -2%;
+  width: 2px;
+  height: 2px;
+  border-radius: 50%;
+  background: #fff;
+  box-shadow: 0 0 4px rgba(255, 255, 255, 0.8);
+  opacity: 0;
+  animation: satellite 34s linear 3s infinite;
+}
+.satellite-late {
+  top: 64%;
+  animation-delay: 21s;
+  animation-duration: 41s;
+}
+@keyframes satellite {
+  0% {
+    transform: translate(0, 0);
+    opacity: 0;
+  }
+  2% {
+    opacity: 0.85;
+  }
+  40% {
+    opacity: 0.85;
+  }
+  42%,
   100% {
-    transform: translate3d(6%, 2%, 0) rotate(3deg) scaleY(0.95);
+    transform: translate(104vw, 9vh);
+    opacity: 0;
   }
 }
 
@@ -299,7 +312,7 @@ body {
 .module {
   position: relative;
   border: 1px solid var(--rule);
-  background: linear-gradient(180deg, rgba(255, 255, 255, 0.015), transparent 40%), var(--panel);
+  background: #000;
 }
 .module::before,
 .module::after {
@@ -307,7 +320,7 @@ body {
   position: absolute;
   width: 7px;
   height: 7px;
-  border-color: rgba(232, 237, 243, 0.55);
+  border-color: rgba(255, 255, 255, 0.7);
   border-style: solid;
   pointer-events: none;
 }
@@ -329,7 +342,6 @@ body {
   height: 30px;
   padding: 0 12px;
   border-bottom: 1px solid var(--rule);
-  background: rgba(232, 237, 243, 0.025);
 }
 
 /* Shimmer while a Grok Imagine render develops. */
@@ -382,5 +394,59 @@ body {
   to {
     opacity: 1;
     transform: scale(1) rotate(8deg);
+  }
+}
+
+/* SpaceX-style buttons: uppercase, a white outline that fills on hover. */
+.btn-outline {
+  border: 1.5px solid #fff;
+  color: #fff;
+  text-transform: uppercase;
+  letter-spacing: 0.14em;
+  font-weight: 600;
+  transition:
+    background-color 0.18s,
+    color 0.18s;
+}
+.btn-outline:hover:not(:disabled) {
+  background: #fff;
+  color: #000;
+}
+.btn-outline:disabled {
+  border-color: rgba(255, 255, 255, 0.25);
+  color: rgba(255, 255, 255, 0.35);
+}
+.btn-solid {
+  background: #fff;
+  color: #000;
+  text-transform: uppercase;
+  letter-spacing: 0.16em;
+  font-weight: 600;
+  transition: opacity 0.18s;
+}
+.btn-solid:hover:not(:disabled) {
+  opacity: 0.85;
+}
+.btn-solid:disabled {
+  background: rgba(255, 255, 255, 0.14);
+  color: rgba(255, 255, 255, 0.35);
+}
+
+/* A fresh review boots the delta-v bar up from empty; later edits re-flow it by transition. */
+.bar-grow {
+  transform-origin: left center;
+  animation: bar-grow 0.9s cubic-bezier(0.2, 0.8, 0.2, 1) both;
+}
+@keyframes bar-grow {
+  from {
+    transform: scaleX(0);
+  }
+}
+.live-dot {
+  animation: live-dot 2s ease-in-out infinite;
+}
+@keyframes live-dot {
+  50% {
+    opacity: 0.25;
   }
 }

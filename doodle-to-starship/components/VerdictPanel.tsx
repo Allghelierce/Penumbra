@@ -1,6 +1,7 @@
 "use client";
 
 import type { ReactNode } from "react";
+import CountUp from "@/components/CountUp";
 import SpecimenDrawing from "@/components/SpecimenDrawing";
 import TypeOut from "@/components/TypeOut";
 import type { Analysis, Design, DestinationId, Phase, PriorArtResult, Review, Verdict } from "@/lib/design";
@@ -61,7 +62,7 @@ export default function VerdictPanel(props: VerdictPanelProps) {
       <aside className="flex h-full flex-col p-3">
         <Module title="Reference drawing" meta={phase === "reading" ? "Grok vision" : "Two-stage launcher"} className="flex min-h-0 flex-1 flex-col">
           <div className="flex min-h-0 flex-1 flex-col px-5 pb-3 pt-4">
-            <TypeOut key={heading} as="h2" text={heading} className="font-display text-[26px] font-semibold leading-tight text-starlight" />
+            <TypeOut key={heading} as="h2" text={heading} className="font-space text-[20px] font-semibold uppercase leading-tight tracking-[0.08em] text-white" />
             <p className="mt-1 max-w-[46ch] text-[14px] leading-snug text-haze">
               {phase === "reading"
                 ? "Finding the stages, tanks and engines in your strokes."
@@ -89,7 +90,7 @@ export default function VerdictPanel(props: VerdictPanelProps) {
       <Module
         title="Flight readiness"
         meta={
-          <span className={`font-space text-[11px] tracking-[0.12em] ${go ? "text-go-signal" : "text-nogo"}`}>
+          <span className={`font-space text-[12px] font-semibold tracking-[0.2em] ${go ? "text-go-signal" : "text-nogo"}`}>
             <span className={`mr-1.5 inline-block h-1.5 w-1.5 rounded-full align-middle ${go ? "bg-go-signal" : "bg-nogo"}`} />
             {go ? "GO" : "NO GO"}
           </span>
@@ -98,7 +99,7 @@ export default function VerdictPanel(props: VerdictPanelProps) {
         <div className="flex gap-4 px-4 py-3">
           <div className="min-w-0 flex-1">
             <p className="text-[13px] text-haze">Target: {target.name}</p>
-            <TypeOut key={title} as="h2" text={title} cps={40} className="mt-1 block font-display text-[30px] font-semibold leading-[1.05] text-starlight" />
+            <TypeOut key={title} as="h2" text={title} cps={40} className="mt-1 block font-space text-[24px] font-semibold uppercase leading-[1.1] tracking-[0.06em] text-white" />
             {review?.summary && (
               <TypeOut key={review.summary} as="p" text={review.summary} delay={title.length * 25 + 200} cps={90} linger={0} className="mt-2 block text-[14px] leading-snug text-haze" />
             )}
@@ -136,9 +137,14 @@ export default function VerdictPanel(props: VerdictPanelProps) {
 
       <Module title="Vehicle">
         <div className="grid grid-cols-3 divide-x divide-rule">
-          <Figure label="Liftoff mass" value={tonnes(analysis.liftoffMassKg)} />
-          <Figure label="Thrust-to-weight" value={analysis.liftoffTwr.toFixed(2)} bad={analysis.liftoffTwr < 1} note={analysis.liftoffTwr < 1 ? "needs over 1" : undefined} />
-          <Figure label="Payload" value={tonnes(design.payloadMassKg)} />
+          <Figure label="Liftoff mass" value={<CountUp value={analysis.liftoffMassKg} format={tonnes} />} />
+          <Figure
+            label="Thrust/weight"
+            value={<CountUp value={analysis.liftoffTwr} format={(n) => n.toFixed(2)} />}
+            bad={analysis.liftoffTwr < 1}
+            note={analysis.liftoffTwr < 1 ? "needs over 1" : undefined}
+          />
+          <Figure label="Payload" value={<CountUp value={design.payloadMassKg} format={tonnes} />} />
         </div>
       </Module>
 
@@ -211,7 +217,7 @@ function Module({ title, meta, className = "", children }: { title: string; meta
   return (
     <section className={`module ${className}`}>
       <header className="module-head">
-        <h3 className="font-space text-[10px] uppercase tracking-[0.16em] text-haze">{title}</h3>
+        <h3 className="font-space text-[11px] font-semibold uppercase tracking-[0.22em] text-white/70">{title}</h3>
         {meta}
       </header>
       {children}
@@ -231,7 +237,7 @@ function ClosestRocket({ design, analysis }: { design: Design; analysis: Analysi
             href={best.vehicle.source}
             target="_blank"
             rel="noreferrer"
-            className="font-display text-[22px] font-semibold leading-tight text-starlight hover:underline"
+            className="font-space text-[20px] font-semibold uppercase tracking-[0.08em] leading-tight text-white hover:underline"
           >
             {best.name}
           </a>
@@ -262,17 +268,21 @@ function ClosestRocket({ design, analysis }: { design: Design; analysis: Analysi
 function BudgetBar({ analysis }: { analysis: Analysis }) {
   const scale = Math.max(analysis.totalDeltaVMps, analysis.requiredDeltaVMps) * 1.06;
   const pct = (mps: number) => `${(mps / scale) * 100}%`;
-  const shades = ["bg-starlight/85", "bg-starlight/55", "bg-starlight/35", "bg-starlight/20"];
+  const shades = ["bg-white/90", "bg-white/55", "bg-white/35", "bg-white/20"];
   const needed = analysis.requiredDeltaVMps / scale;
   return (
     <div className="mt-2">
       <div className="relative h-10">
-        <div className="absolute inset-x-0 top-3 flex h-4 overflow-hidden rounded-[2px] bg-rule/60">
+        <div className="bar-grow absolute inset-x-0 top-3 flex h-4 overflow-hidden bg-white/[0.06]">
           {analysis.stages.map((s, i) => (
-            <div key={`${s.label}-${i}`} className={`h-full ${shades[i % shades.length]} border-r border-umbra/60`} style={{ width: pct(s.deltaVMps) }} />
+            <div
+              key={`${s.label}-${i}`}
+              className={`h-full ${shades[i % shades.length]} border-r border-black transition-[width] duration-700 ease-out`}
+              style={{ width: pct(s.deltaVMps) }}
+            />
           ))}
         </div>
-        <div className="absolute top-0 h-10 border-l-2 border-dashed border-flame" style={{ left: `${needed * 100}%` }} aria-hidden />
+        <div className="absolute top-0 h-10 border-l-2 border-dashed border-flame transition-[left] duration-700 ease-out" style={{ left: `${needed * 100}%` }} aria-hidden />
         <p
           className="absolute -top-0.5 whitespace-nowrap text-[11px] text-flame"
           style={needed > 0.7 ? { right: `${(1 - needed) * 100}%`, marginRight: 6 } : { left: `${needed * 100}%`, marginLeft: 6 }}
@@ -286,17 +296,19 @@ function BudgetBar({ analysis }: { analysis: Analysis }) {
             {s.label} {km(s.deltaVMps)}
           </span>
         ))}
-        <span className="ml-auto whitespace-nowrap text-starlight">{km(analysis.totalDeltaVMps)} km/s total</span>
+        <span className="ml-auto whitespace-nowrap text-white">
+          <CountUp value={analysis.totalDeltaVMps} format={(n) => `${km(n)} km/s total`} />
+        </span>
       </div>
     </div>
   );
 }
 
-function Figure({ label, value, bad, note }: { label: string; value: string; bad?: boolean; note?: string }) {
+function Figure({ label, value, bad, note }: { label: string; value: ReactNode; bad?: boolean; note?: string }) {
   return (
     <div className="px-4 py-2.5">
-      <p className="text-[12px] text-haze">{label}</p>
-      <p className={`mt-0.5 font-space text-[17px] leading-tight ${bad ? "text-nogo" : "text-starlight"}`}>{value}</p>
+      <p className="text-[10px] uppercase tracking-[0.18em] text-haze">{label}</p>
+      <p className={`mt-0.5 font-space text-[22px] font-medium leading-tight ${bad ? "text-nogo" : "text-white"}`}>{value}</p>
       {note && <p className="text-[11px] text-nogo">{note}</p>}
     </div>
   );
