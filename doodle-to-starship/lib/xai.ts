@@ -308,8 +308,13 @@ export function generateImage(
 }
 
 /** Re-imagine an existing image (a png/jpg data URL) following `prompt`. */
-export function editImage(prompt: string, image: string, timeoutMs = timeouts().image): Promise<string | null> {
-  return imagine("/images/edits", { prompt, image: { url: image } }, timeoutMs);
+export function editImage(
+  prompt: string,
+  image: string,
+  options?: { aspect_ratio?: string },
+  timeoutMs = timeouts().image,
+): Promise<string | null> {
+  return imagine("/images/edits", { prompt, image: { url: image }, ...options }, timeoutMs);
 }
 
 /** Start an image-to-video job. Returns its request id. There is no cancel, so only call this on a user's ask. */

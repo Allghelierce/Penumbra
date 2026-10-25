@@ -67,10 +67,22 @@ export function buildSketchEditPrompt(
   kind: RenderRequest["kind"],
 ): string {
   const vehicle = describeVehicle(design);
+  const it = `It is ${vehicle[0].toLowerCase()}${vehicle.slice(1)}`;
+  if (kind === "concept") {
+    // The studio cross-fades the doodle into this photo on the napkin, so the rocket must sit exactly
+    // where the pencil lines are: same position, same scale, nothing else competing for the frame.
+    return [
+      "Turn this pencil napkin sketch into a photorealistic photograph of the real spacecraft it depicts.",
+      "Keep the vehicle exactly where it is drawn: same position, same scale, same silhouette and proportions, centered and filling the frame's height as the drawing does.",
+      "Keep every stage, fin, flap, leg and engine bell that is drawn.",
+      `${it}, standing on a simple launch pad against a plain, clear dusk sky.`,
+      "Portrait framing, cinematic lighting. No tower, no extra objects, no text, no logos, no pencil lines, no paper.",
+    ].join(" ");
+  }
   return [
     "Turn this pencil napkin sketch into a photorealistic photograph of the real spacecraft it depicts.",
     "Keep its exact silhouette, proportions, stage count, fins, flaps, legs and engine bells.",
-    `It is ${vehicle[0].toLowerCase()}${vehicle.slice(1)}, ${scene(design, analysis, kind)}.`,
+    `${it}, ${scene(design, analysis, kind)}.`,
     "Cinematic lighting. No text, no logos, no pencil lines, no paper.",
   ].join(" ");
 }
