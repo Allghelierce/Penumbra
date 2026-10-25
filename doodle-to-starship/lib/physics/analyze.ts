@@ -2,6 +2,7 @@
 
 import type { Analysis, Design, DestinationId, PropellantId, Stage, StageAnalysis, Verdict } from "../design";
 import { DESTINATIONS, ENGINES, PROPELLANT_DENSITY_KG_M3 } from "./data";
+import { km, kmShort, kmSpare } from "./format";
 
 const G0 = 9.80665;
 const USABLE_FRACTION = 0.95;
@@ -14,17 +15,6 @@ const STRUCTURAL_FACTOR: Record<PropellantId, number> = {
   solid: 0.12,
   hypergolic: 0.08,
 };
-
-/** Easiest to hardest. Furthest reach is the latest entry this delta-v still covers. */
-const DESTINATION_ORDER: DestinationId[] = [
-  "leo",
-  "gto",
-  "moon-orbit",
-  "moon-surface",
-  "mars-transfer",
-  "mars-surface",
-  "europa",
-];
 
 export function analyze(design: Design): Analysis {
   const built = design.stages.map((stage, index) => stageMasses(stage, index));
@@ -136,55 +126,69 @@ function finishStage(stage: StageMasses, payloadAbove: number): StageAnalysis {
   };
 }
 
+/** Hardest destination whose published requirement is still within the budget. */
 function furthestWithin(totalDeltaVMps: number): DestinationId | null {
-  let furthest: DestinationId | null = null;
-  for (const id of DESTINATION_ORDER) {
-    if (DESTINATIONS[id].deltaVFromSurfaceMps <= totalDeltaVMps) furthest = id;
+  let best: DestinationId | null = null;
+  let bestDv = -Infinity;
+  for (const id of Object.keys(DESTINATIONS) as DestinationId[]) {
+    const dv = DESTINATIONS[id].deltaVFromSurfaceMps;
+    if (dv <= totalDeltaVMps && dv > bestDv) {
+      best = id;
+      bestDv = dv;
+    }
   }
-  return furthest;
+  return best;
 }
 
 function findings(design: Design, analysis: Analysis): string[] {
   const destination = DESTINATIONS[design.destination];
   const twr = formatTwr(analysis.liftoffTwr);
-  const total = formatNumber(analysis.totalDeltaVMps);
-  const required = formatNumber(analysis.requiredDeltaVMps);
-  const margin = formatNumber(analysis.marginMps);
+  const total = km(analysis.totalDeltaVMps);
+  const required = km(analysis.requiredDeltaVMps);
+  const massT = tonnes(analysis.liftoffMassKg);
   const lines: string[] = [];
 
   if (analysis.verdict === "stuck-on-pad") {
     lines.push(`Liftoff thrust-to-weight is ${twr}, so it stays on the pad.`);
-    lines.push(`Total delta-v is ${total} m/s because it never lifts off.`);
-    lines.push(`${destination.name} needs ${required} m/s, so the margin is ${margin} m/s.`);
+    lines.push(`Total delta-v is ${total} km/s because it never lifts off.`);
+    lines.push(
+      `${destination.name} needs ${required} km/s, so it is ${kmShort(analysis.totalDeltaVMps, analysis.requiredDeltaVMps)} km/s short.`,
+    );
     return lines;
   }
 
-  lines.push(`Liftoff thrust-to-weight is ${twr} at ${formatNumber(analysis.liftoffMassKg)} kg.`);
-  lines.push(`Total delta-v is ${total} m/s against ${required} m/s for ${destination.name}.`);
+  lines.push(`Liftoff thrust-to-weight is ${twr} at ${massT} t.`);
+  lines.push(`Total delta-v is ${total} km/s against ${required} km/s for ${destination.name}.`);
 
   if (analysis.verdict === "destination") {
-    lines.push(`The margin is ${margin} m/s, enough to reach ${destination.name}.`);
+    lines.push(
+      `It reaches ${destination.name} with ${kmSpare(analysis.totalDeltaVMps, analysis.requiredDeltaVMps)} km/s to spare.`,
+    );
   } else if (analysis.verdict === "orbit") {
     const reach = analysis.furthestReachable ? DESTINATIONS[analysis.furthestReachable].name : "low Earth orbit";
-    lines.push(`It makes orbit, but the margin is ${margin} m/s, short of ${destination.name}.`);
+    lines.push(
+      `It makes orbit, but it is ${kmShort(analysis.totalDeltaVMps, analysis.requiredDeltaVMps)} km/s short of ${destination.name}.`,
+    );
     lines.push(`The furthest it can reach is ${reach}.`);
   } else {
-    const leo = formatNumber(DESTINATIONS.leo.deltaVFromSurfaceMps);
-    lines.push(`That is short of low Earth orbit at ${leo} m/s, so the flight is suborbital.`);
-    lines.push(`The margin versus ${destination.name} is ${margin} m/s.`);
+    const leo = DESTINATIONS.leo.deltaVFromSurfaceMps;
+    lines.push(
+      `That is ${kmShort(analysis.totalDeltaVMps, leo)} km/s short of low Earth orbit, so the flight is suborbital.`,
+    );
+    lines.push(
+      `The margin versus ${destination.name} is ${kmShort(analysis.totalDeltaVMps, analysis.requiredDeltaVMps)} km/s short.`,
+    );
   }
 
   return lines.slice(0, 5);
 }
 
+/** One decimal, but never round a thrust-to-weight just under 1 up to "1.0". */
 function formatTwr(twr: number): string {
-  if (twr !== 0 && Math.abs(twr) < 0.01) return twr.toFixed(4);
-  return twr.toFixed(2);
+  return twr < 1 && twr >= 0.95 ? (Math.floor(twr * 100) / 100).toFixed(2) : twr.toFixed(1);
 }
 
-function formatNumber(value: number): string {
-  const rounded = Math.round(value);
-  const sign = rounded < 0 ? "-" : "";
-  const digits = Math.abs(rounded).toString();
-  return sign + digits.replace(/\B(?=(\d{3})+(?!\d))/g, ",");
+function tonnes(kg: number): string {
+  const t = kg / 1000;
+  return t >= 10 ? String(Math.round(t)) : t.toFixed(1);
 }
