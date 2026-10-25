@@ -21,7 +21,9 @@ function summarize(strokes: Stroke[]) {
 }
 
 describe("readFromGeometry", () => {
-  // Engine counts come from the bells read at scale: hopper 1 huge bell, orbiter 3, mars ship 5.
+  // Engine counts come from the bells read at scale: hopper 1 huge bell, orbiter 3, moon rocket 5,
+  // mars ship 5. Stage and engine counts are what pick the closest real rocket, so each sample
+  // aims at a different one: orbiter Falcon 9 (2 × 9), moon rocket Saturn V (3 × 5), mars ship Starship (2 × 33).
   it("reads the napkin hopper as one finned stage whose single wide bell is a cluster", () => {
     const r = summarize(demo("napkin-hopper").strokes);
     expect(r).toMatchObject({ stages: 1, fins: true, finParts: 2 });
@@ -38,26 +40,32 @@ describe("readFromGeometry", () => {
     }
   });
 
-  it("reads the two-stage orbiter's boundary line, three bells and fins", () => {
+  it("reads the two-stage orbiter's boundary line, three bells and fins as a Falcon 9-sized cluster", () => {
     const r = summarize(demo("two-stage-orbiter").strokes);
     expect(r).toMatchObject({ stages: 2, fins: true });
-    expect(r.engines).toBeGreaterThanOrEqual(15);
-    expect(r.engines).toBeLessThanOrEqual(40);
+    expect(r.engines).toBeGreaterThanOrEqual(7);
+    expect(r.engines).toBeLessThanOrEqual(12);
     expect(r.design.stages[1].engines[0].engine).toBe("raptor-vacuum");
     expect(r.parts.find((p) => p.kind === "engine")!.box[2]).toBeGreaterThan(0.05);
+  });
+
+  it("reads the moon rocket's two stage lines, five one-engine bells and fins", () => {
+    const r = summarize(demo("moon-rocket").strokes);
+    expect(r).toMatchObject({ stages: 3, engines: 5, fins: true, finParts: 2 });
+    expect(r.parts.filter((p) => p.kind === "tank")).toHaveLength(3);
   });
 
   it("reads the mars ship as two stages with five bells, a heat shield and legs, and no fins", () => {
     const r = summarize(demo("mars-ship").strokes);
     expect(r).toMatchObject({ stages: 2, fins: false });
-    expect(r.engines).toBeGreaterThanOrEqual(15);
+    expect(r.engines).toBeGreaterThanOrEqual(25);
     expect(r.design.features).toEqual(["heat-shield", "landing-legs"]);
     expect(r.parts.filter((p) => p.kind === "landing-legs")).toHaveLength(2);
     expect(r.parts.find((p) => p.kind === "heat-shield")?.stageIndex).toBe(1);
   });
 
-  it("finds no heat shield or legs on the hopper and orbiter", () => {
-    for (const id of ["napkin-hopper", "two-stage-orbiter"]) {
+  it("finds no heat shield or legs on the hopper, orbiter and moon rocket", () => {
+    for (const id of ["napkin-hopper", "two-stage-orbiter", "moon-rocket"]) {
       expect(summarize(demo(id).strokes).design.features).toEqual(["fins"]);
     }
   });

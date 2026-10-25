@@ -237,30 +237,57 @@ const napkinHopper = sketch(7, -2, (rand) => {
   ];
 });
 
-/** Tall, slim, Falcon-like: stage-boundary line a third of the way down, small fins, three engines. */
+/**
+ * Falcon 9-like: a pencil-thin two-stager (about 7 m wide, 14:1) with the stage line a third
+ * of the way down, small fins and three bells that read as nine engines at scale.
+ */
 const twoStageOrbiter = sketch(42, 1.2, () => {
-  const half = 0.05;
+  const half = 0.031;
   const l = CX - half;
   const r = CX + half;
   const top = 0.17;
   const bottom = 0.82;
-  const fin: Point[] = [[l, 0.735], [l - 0.033, 0.8], [l - 0.035, 0.838], [l - 0.002, bottom]];
+  const fin: Point[] = [[l, 0.735], [l - 0.02, 0.8], [l - 0.021, 0.838], [l - 0.002, bottom]];
   return [
-    nose(half, top, 0.055, 0.3),
+    nose(half, top, 0.075, 0.3),
     poly([l, top], [l, bottom], [r, bottom], [r, top]),
-    poly([l - 0.008, 0.386], [r + 0.007, 0.383]),
+    poly([l - 0.006, 0.386], [r + 0.005, 0.384]),
     poly(...fin),
     poly(...fin.map(mirror)),
-    ...[-1, 0, 1].map((k) => bell(CX + k * 0.033, bottom, 0.006, 0.016, 0.055)),
+    ...[-1, 0, 1].map((k) => bell(CX + k * 0.018, bottom, 0.0035, 0.0098, 0.042)),
+  ];
+});
+
+/**
+ * Saturn V-like: escape tower and capsule on top, two stage lines (three stages), four
+ * small fins at the base (two in side view) and five bells in a row, one engine each.
+ */
+const moonRocket = sketch(1969, 0.6, () => {
+  const half = 0.027;
+  const l = CX - half;
+  const r = CX + half;
+  const top = 0.36;
+  const bottom = 0.72;
+  const fin: Point[] = [[l, 0.665], [l - 0.013, 0.705], [l - 0.014, 0.745], [l - 0.001, bottom]];
+  return [
+    poly([CX, 0.2], [CX, 0.252]),
+    nose(half, top, 0.25, 0.15),
+    poly([l, top], [l, bottom], [r, bottom], [r, top]),
+    poly([l - 0.005, 0.471], [r + 0.004, 0.469]),
+    poly([l - 0.004, 0.571], [r + 0.005, 0.572]),
+    poly(...fin),
+    poly(...fin.map(mirror)),
+    ...[-2, -1, 0, 1, 2].map((k) => bell(CX + k * 0.011, bottom, 0.0025, 0.0052, 0.038)),
   ];
 });
 
 /**
  * Starship-like stack: a ship with a crew window, forward and aft flaps, a hatched heat
- * shield down its left side and landing legs, on a booster with grid fins and five engines.
+ * shield down its left side and landing legs, on a booster with grid fins and five big bells
+ * that read as about 30 engines at scale.
  */
 const marsShip = sketch(2033, -0.8, (rand) => {
-  const half = 0.055;
+  const half = 0.05;
   const l = CX - half;
   const r = CX + half;
   const top = 0.16;
@@ -297,12 +324,13 @@ const marsShip = sketch(2033, -0.8, (rand) => {
     poly(...foot.map(mirror)),
     ...gridFin((p) => p),
     ...gridFin(mirror),
-    ...[-2, -1, 0, 1, 2].map((k) => bell(CX + k * 0.025, bottom, 0.005, 0.0135, 0.044)),
+    ...[-2, -1, 0, 1, 2].map((k) => bell(CX + k * 0.022, bottom, 0.005, 0.0135, 0.044)),
   ];
 });
 
 export const DEMO_SKETCHES: DemoSketch[] = [
   { id: "napkin-hopper", title: "Napkin Hopper", destination: "leo", strokes: napkinHopper },
   { id: "two-stage-orbiter", title: "Two-Stage Orbiter", destination: "leo", strokes: twoStageOrbiter },
+  { id: "moon-rocket", title: "Moon Rocket", destination: "moon-surface", strokes: moonRocket },
   { id: "mars-ship", title: "Mars Ship", destination: "mars-surface", strokes: marsShip },
 ];
