@@ -13,8 +13,10 @@ export function drawStrokes(
   ctx.lineJoin = "round";
   ctx.strokeStyle = color;
   ctx.lineWidth = Math.max(1.5, width * 0.0055);
-  for (const { points } of strokes) {
+  for (const { points, detail } of strokes) {
     if (points.length === 0) continue;
+    // Detail strokes (welds, bell outlines) sit a step behind the user's own lines.
+    ctx.globalAlpha = detail ? 0.55 : 1;
     ctx.beginPath();
     ctx.moveTo(points[0][0] * width, points[0][1] * height);
     if (points.length === 1) {
