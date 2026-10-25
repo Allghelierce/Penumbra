@@ -205,8 +205,12 @@ interface Layers {
   sources: AudioBufferSourceNode[];
 }
 
+/** The launch currently making sound; a new one silences it, so two can never overlap. */
+let active: LaunchAudio | null = null;
+
 /** Sound for one launch. Silent until the shared context is running; never throws. */
 export function createLaunchAudio(): LaunchAudio {
+  active?.stop();
   let bus: GainNode | null = null;
   let layers: Layers | null = null;
   let lastSet = 0;
@@ -263,7 +267,7 @@ export function createLaunchAudio(): LaunchAudio {
     for (const s of layers.sources) s.start(now, Math.random() * (s.buffer?.duration ?? 0));
   };
 
-  return {
+  const audio: LaunchAudio = {
     ignite() {
       const a = get();
       if (!a) return;
@@ -414,6 +418,7 @@ export function createLaunchAudio(): LaunchAudio {
     stop() {
       if (stopped) return;
       stopped = true;
+      if (active === audio) active = null;
       const a = running();
       if (!a || !bus) return;
       const now = a.c.currentTime;
@@ -432,4 +437,6 @@ export function createLaunchAudio(): LaunchAudio {
       }, 700);
     },
   };
+  active = audio;
+  return audio;
 }
