@@ -9,7 +9,7 @@ const ADDED_STAGE_SCALE = 2.5;
 const ADDED_STAGE_MIN_ENGINES = 3;
 /** The new booster gets enough engines for the whole stack to lift off at this thrust-to-weight... */
 const ADDED_STAGE_TWR = 1.3;
-/** ...but never more than this many (Super Heavy flies 33). */
+/** ...but no more than this many (Super Heavy flies 33), unless the old 2.5× rule already gave more. */
 const ADDED_STAGE_MAX_ENGINES = 40;
 
 export function applyAction(design: Design, action: DesignAction): Design {
@@ -82,12 +82,11 @@ function withNewBottomStage(design: Design): Design {
     return { ...design, stages: [booster, ...design.stages] };
   };
 
+  const cap = Math.max(ADDED_STAGE_MAX_ENGINES, Math.ceil(ADDED_STAGE_SCALE * bottom.engines[main].count));
   // More engines always raise liftoff TWR (each adds more thrust than weight), so bisect.
-  if (analyze(withCount(ADDED_STAGE_MAX_ENGINES)).liftoffTwr < ADDED_STAGE_TWR) {
-    return withCount(ADDED_STAGE_MAX_ENGINES);
-  }
+  if (analyze(withCount(cap)).liftoffTwr < ADDED_STAGE_TWR) return withCount(cap);
   let lo = ADDED_STAGE_MIN_ENGINES - 1;
-  let hi = ADDED_STAGE_MAX_ENGINES;
+  let hi = cap;
   while (hi - lo > 1) {
     const mid = Math.floor((lo + hi) / 2);
     if (analyze(withCount(mid)).liftoffTwr >= ADDED_STAGE_TWR) hi = mid;
