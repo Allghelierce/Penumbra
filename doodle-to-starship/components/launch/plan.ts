@@ -1,0 +1,404 @@
+import type {
+  Analysis,
+  Design,
+  DestinationId,
+  FlightEvent,
+  FlightEventKind,
+  FlightPoint,
+  FlightTrace,
+  Verdict,
+} from "@/lib/design";
+
+// Playback timeline, in seconds of animation. The napkin fades to night, the camera
+// settles on the pad, the engines light, and then the trace plays compressed.
+export const T_NIGHT = 1.2;
+export const T_CAM_FROM = 0.25;
+export const T_FRAMED = 1.7;
+export const T_IGNITE = 1.55;
+export const T_LIFTOFF = 3.3;
+
+/** Playback time runs faster than linear as the flight goes on: slow, heavy liftoff, quick coast. */
+const WARP = 1.6;
+
+export type Tone = "chalk" | "flame" | "red" | "go";
+
+export interface Cue {
+  at: number;
+  event: FlightEvent;
+  /** False for events the scene adds itself (they show a caption but are not sent to onEvent). */
+  real: boolean;
+}
+
+export interface CaptionCue {
+  at: number;
+  text: string;
+  sub?: string;
+  tone: Tone;
+}
+
+/** The engines of `piece` burn from `from` to `to` (playback seconds). */
+export interface Burn {
+  from: number;
+  to: number;
+  piece: number;
+}
+
+export interface Finale {
+  at: number;
+  text: string;
+  ok: boolean;
+}
+
+export interface Plan {
+  outcome: Verdict;
+  points: FlightPoint[];
+  /** Sim seconds the playback covers. */
+  T: number;
+  flightDur: number;
+  /** Null when the rocket never leaves the pad. */
+  liftoffAt: number | null;
+  cues: Cue[];
+  captions: CaptionCue[];
+  burns: Burn[];
+  /** seps[i] is when pieces[i] lets go. */
+  seps: number[];
+  /** Orbit: limb rises and engines cut. Failure: the explosion. */
+  finaleAt: number;
+  finale: Finale;
+  tipAt: number | null;
+  explodeAt: number | null;
+  endAt: number;
+  maxAltKm: number;
+  maxSpeedMps: number;
+  hasDownrange: boolean;
+  /** Sim seconds at playback time t. */
+  simAt: (t: number) => number;
+}
+
+export interface Sample {
+  alt: number;
+  down: number;
+  speed: number;
+  stage: number;
+}
+
+export const DEST_SHORT: Record<DestinationId, string> = {
+  leo: "ORBIT",
+  gto: "GTO",
+  "moon-orbit": "MOON",
+  "moon-surface": "MOON",
+  "mars-transfer": "MARS",
+  "mars-surface": "MARS",
+  europa: "EUROPA",
+};
+
+export const DEST_NAME: Record<DestinationId, string> = {
+  leo: "low Earth orbit",
+  gto: "geostationary transfer",
+  "moon-orbit": "lunar orbit",
+  "moon-surface": "the Moon's surface",
+  "mars-transfer": "the Mars transfer",
+  "mars-surface": "the surface of Mars",
+  europa: "Europa",
+};
+
+const OFF_KINDS = new Set<FlightEventKind>(["engine-cutoff", "fuel-exhausted", "orbit", "arrival", "impact"]);
+
+export const clamp01 = (x: number) => (x < 0 ? 0 : x > 1 ? 1 : x);
+const clamp = (x: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, x));
+
+export function fmtKm(km: number): string {
+  return km >= 100 ? Math.round(km).toLocaleString("en-US") : km.toFixed(1);
+}
+
+export function buildPlan(trace: FlightTrace, analysis: Analysis, design: Design, pieceCount: number): Plan {
+  const outcome: Verdict = trace.outcome ?? analysis.verdict;
+  let points = (trace.points ?? [])
+    .filter((p) => Number.isFinite(p.tS) && Number.isFinite(p.altitudeKm))
+    .map((p) => ({
+      tS: p.tS,
+      altitudeKm: Math.max(0, p.altitudeKm),
+      downrangeKm: Number.isFinite(p.downrangeKm) ? p.downrangeKm : 0,
+      speedMps: Number.isFinite(p.speedMps) ? p.speedMps : 0,
+      stageIndex: Number.isFinite(p.stageIndex) ? p.stageIndex : 0,
+    }))
+    .sort((a, b) => a.tS - b.tS);
+  if (points.length === 0) points = [{ tS: 0, altitudeKm: 0, downrangeKm: 0, speedMps: 0, stageIndex: 0 }];
+  const events = (trace.events ?? []).filter((e) => Number.isFinite(e.tS)).sort((a, b) => a.tS - b.tS);
+
+  if (outcome === "stuck-on-pad") return padPlan(points, events, analysis, design);
+  return flightPlan(outcome, points, events, trace, design, pieceCount);
+}
+
+function padPlan(points: FlightPoint[], events: FlightEvent[], analysis: Analysis, design: Design): Plan {
+  const tipAt = T_IGNITE + 3.9;
+  const explodeAt = tipAt + 1.15;
+  const cues: Cue[] = [];
+  let j = 0;
+  for (const e of events) {
+    cues.push({ at: e.kind === "impact" ? explodeAt : T_IGNITE + 1.5 + 0.9 * j++, event: e, real: true });
+  }
+  if (!cues.some((c) => c.event.kind === "pad-failure")) {
+    const twr = analysis.liftoffTwr;
+    cues.push({
+      at: T_IGNITE + 1.5,
+      event: { tS: 0, kind: "pad-failure", label: `Liftoff thrust-to-weight is ${twr.toFixed(2)}; it has to beat 1.` },
+      real: false,
+    });
+  }
+  cues.sort((a, b) => a.at - b.at);
+  return {
+    outcome: "stuck-on-pad",
+    points,
+    T: 1,
+    flightDur: 0,
+    liftoffAt: null,
+    cues,
+    captions: captionsFor(cues, 0, true),
+    burns: [{ from: T_IGNITE, to: explodeAt, piece: 0 }],
+    seps: [],
+    finaleAt: explodeAt,
+    finale: finaleFor("stuck-on-pad", design, explodeAt + 0.15),
+    tipAt,
+    explodeAt,
+    endAt: explodeAt + 3.2,
+    maxAltKm: 0,
+    maxSpeedMps: 0,
+    hasDownrange: false,
+    simAt: () => 0,
+  };
+}
+
+function flightPlan(
+  outcome: Verdict,
+  points: FlightPoint[],
+  events: FlightEvent[],
+  trace: FlightTrace,
+  design: Design,
+  pieceCount: number,
+): Plan {
+  const synthetic: FlightEvent[] = [];
+  let maxAltKm = Math.max(trace.maxAltitudeKm || 0, ...points.map((p) => p.altitudeKm));
+
+  let T: number;
+  if (outcome === "suborbital") {
+    points = withFallTail(points);
+    const impact = events.find((e) => e.kind === "impact");
+    T = impact && impact.tS > 0 ? impact.tS : points[points.length - 1].tS;
+    if (!impact) synthetic.push({ tS: T, kind: "impact", label: "Impact" });
+    if (!events.some((e) => e.kind === "apogee") && maxAltKm > 0.5) {
+      const top = points.reduce((a, b) => (b.altitudeKm > a.altitudeKm ? b : a));
+      synthetic.push({ tS: top.tS, kind: "apogee", label: `Apogee ${fmtKm(top.altitudeKm)} km` });
+    }
+    if (!events.some((e) => e.kind === "fuel-exhausted" || e.kind === "engine-cutoff")) {
+      const apo = events.find((e) => e.kind === "apogee")?.tS ?? synthetic.find((e) => e.kind === "apogee")?.tS ?? T;
+      const climbing = points.filter((p) => p.tS <= apo);
+      const fastest = climbing.reduce((a, b) => (b.speedMps > a.speedMps ? b : a), climbing[0] ?? points[0]);
+      synthetic.push({ tS: fastest.tS, kind: "fuel-exhausted", label: "Fuel exhausted" });
+    }
+  } else {
+    const done =
+      events.find((e) => e.kind === "orbit") ??
+      events.find((e) => e.kind === "arrival") ??
+      [...events].reverse().find((e) => e.kind === "engine-cutoff");
+    T = done && done.tS > 0 ? done.tS : points[points.length - 1].tS;
+  }
+  if (!(T > 0)) T = Math.max(1, points[points.length - 1].tS);
+  maxAltKm = Math.max(maxAltKm, ...points.filter((p) => p.tS <= T).map((p) => p.altitudeKm));
+
+  // Separations the trace implies through stageIndex but never announces.
+  if (!events.some((e) => e.kind === "stage-sep")) {
+    for (let i = 1; i < points.length; i++) {
+      if (points[i].stageIndex > points[i - 1].stageIndex && points[i].tS <= T) {
+        synthetic.push({ tS: points[i].tS, kind: "stage-sep", label: "Stage separation" });
+      }
+    }
+  }
+
+  const flightDur = clamp(8 + T / 30, 10, 23);
+  const liftoffAt = T_LIFTOFF;
+  const finaleAt = liftoffAt + flightDur;
+  const playOf = (sim: number) => liftoffAt + flightDur * Math.pow(clamp01(sim / T), 1 / WARP);
+  const simAt = (t: number) => (t <= liftoffAt ? 0 : T * Math.pow(clamp01((t - liftoffAt) / flightDur), WARP));
+
+  const cues: Cue[] = [];
+  let late = 0;
+  const schedule = (e: FlightEvent, real: boolean) => {
+    const at = e.tS > T + 1e-6 ? finaleAt + 1.4 + 0.8 * late++ : playOf(e.tS);
+    cues.push({ at, event: e, real });
+  };
+  events.forEach((e) => schedule(e, true));
+  synthetic.forEach((e) => schedule(e, false));
+  cues.sort((a, b) => a.at - b.at);
+
+  // Who is burning when: the bottom stage from ignition until a cutoff or separation,
+  // then the next stage lights shortly after it is free.
+  const burns: Burn[] = [];
+  const seps: number[] = [];
+  let piece = 0;
+  let on: number | null = T_IGNITE;
+  for (const c of cues) {
+    const k = c.event.kind;
+    if (k === "stage-sep") {
+      if (on !== null) burns.push({ from: on, to: c.at, piece });
+      if (piece < pieceCount - 1) {
+        seps.push(c.at);
+        piece++;
+      }
+      on = c.at + 0.6;
+    } else if (OFF_KINDS.has(k) && on !== null) {
+      const cut = k === "orbit" || k === "arrival" ? Math.max(c.at, finaleAt) + 0.7 : c.at;
+      burns.push({ from: on, to: cut, piece });
+      on = null;
+    }
+  }
+  if (on !== null) burns.push({ from: on, to: finaleAt + 0.7, piece });
+
+  const sepsSeen = { n: 0 };
+  const failed = outcome === "suborbital";
+  const finale = finaleFor(outcome, design, failed ? finaleAt + 0.15 : finaleAt + 1.1);
+  const maxDown = Math.max(...points.map((p) => Math.abs(p.downrangeKm)));
+
+  return {
+    outcome,
+    points,
+    T,
+    flightDur,
+    liftoffAt,
+    cues,
+    captions: captionsFor(cues, maxAltKm, false, sepsSeen),
+    burns,
+    seps,
+    finaleAt,
+    finale,
+    tipAt: null,
+    explodeAt: failed ? finaleAt : null,
+    endAt: failed ? finaleAt + 3.4 : finaleAt + 4.6,
+    maxAltKm,
+    maxSpeedMps: Math.max(0, ...points.filter((p) => p.tS <= T).map((p) => p.speedMps)),
+    hasDownrange: maxDown > Math.max(0.5, maxAltKm * 0.02),
+    simAt,
+  };
+}
+
+/** If a suborbital trace stops in mid-air, finish the fall ballistically so it can hit the ground. */
+function withFallTail(points: FlightPoint[]): FlightPoint[] {
+  const last = points[points.length - 1];
+  if (last.altitudeKm < 0.3) return points;
+  const prev = points.length > 1 ? points[points.length - 2] : last;
+  const dt = last.tS - prev.tS || 1;
+  const g = 9.81;
+  const vz = ((last.altitudeKm - prev.altitudeKm) * 1000) / dt;
+  const vx = ((last.downrangeKm - prev.downrangeKm) * 1000) / dt;
+  const h = last.altitudeKm * 1000;
+  const fall = (vz + Math.sqrt(vz * vz + 2 * g * h)) / g;
+  const tail: FlightPoint[] = [];
+  const n = 16;
+  for (let i = 1; i <= n; i++) {
+    const s = (fall * i) / n;
+    const alt = Math.max(0, h + vz * s - 0.5 * g * s * s);
+    const v = vz - g * s;
+    tail.push({
+      tS: last.tS + s,
+      altitudeKm: i === n ? 0 : alt / 1000,
+      downrangeKm: last.downrangeKm + (vx * s) / 1000,
+      speedMps: Math.hypot(vx, v),
+      stageIndex: last.stageIndex,
+    });
+  }
+  return [...points, ...tail];
+}
+
+function finaleFor(outcome: Verdict, design: Design, at: number): Finale {
+  switch (outcome) {
+    case "orbit":
+      return { at, text: "ORBIT", ok: true };
+    case "destination":
+      return { at, text: DEST_SHORT[design.destination] ?? "ORBIT", ok: true };
+    default:
+      return { at, text: "RUD", ok: false };
+  }
+}
+
+function captionsFor(cues: Cue[], maxAltKm: number, onPad: boolean, sepsSeen = { n: 0 }): CaptionCue[] {
+  const out: CaptionCue[] = [];
+  let lastAt = -Infinity;
+  for (const c of cues) {
+    const base = captionText(c.event.kind, maxAltKm, sepsSeen.n, onPad);
+    if (c.event.kind === "stage-sep") sepsSeen.n++;
+    if (!base) continue;
+    const label = c.event.label?.trim();
+    const sub = label && normalize(label) !== normalize(base.text) ? label : undefined;
+    const at = Math.max(c.at, lastAt + 1.6);
+    lastAt = at;
+    out.push({ at, text: base.text, sub, tone: base.tone });
+  }
+  return out;
+}
+
+function captionText(kind: FlightEventKind, maxAltKm: number, seps: number, onPad: boolean): { text: string; tone: Tone } | null {
+  switch (kind) {
+    case "liftoff":
+      return onPad ? null : { text: "Liftoff!", tone: "flame" };
+    case "max-q":
+      return { text: "Max-Q", tone: "chalk" };
+    case "stage-sep":
+      return { text: "Stage separation!", tone: "chalk" };
+    case "engine-cutoff":
+      return { text: seps > 0 ? "SECO" : "MECO", tone: "chalk" };
+    case "fuel-exhausted":
+      return { text: "fuel exhausted", tone: "red" };
+    case "apogee":
+      return { text: `apogee ${fmtKm(maxAltKm)} km`, tone: "chalk" };
+    case "pad-failure":
+      return { text: "not enough thrust", tone: "red" };
+    default:
+      // orbit, arrival and impact are the finale's job.
+      return null;
+  }
+}
+
+const normalize = (s: string) => s.toLowerCase().replace(/[^a-z0-9]/g, "");
+
+export function sampleAt(points: FlightPoint[], t: number): Sample {
+  const n = points.length;
+  const at = (p: FlightPoint): Sample => ({ alt: p.altitudeKm, down: p.downrangeKm, speed: p.speedMps, stage: p.stageIndex });
+  if (t <= points[0].tS) return at(points[0]);
+  if (t >= points[n - 1].tS) return at(points[n - 1]);
+  let lo = 0;
+  let hi = n - 1;
+  while (hi - lo > 1) {
+    const mid = (lo + hi) >> 1;
+    if (points[mid].tS <= t) lo = mid;
+    else hi = mid;
+  }
+  const a = points[lo];
+  const b = points[hi];
+  const k = (t - a.tS) / (b.tS - a.tS || 1);
+  return {
+    alt: a.altitudeKm + (b.altitudeKm - a.altitudeKm) * k,
+    down: a.downrangeKm + (b.downrangeKm - a.downrangeKm) * k,
+    speed: a.speedMps + (b.speedMps - a.speedMps) * k,
+    stage: a.stageIndex,
+  };
+}
+
+/** Direction of travel at sim time t: 0 is straight up, PI/2 is flying right, PI is straight down. */
+export function headingAt(plan: Plan, sim: number): number | null {
+  const d = Math.max(1, plan.T * 0.01);
+  const a = sampleAt(plan.points, sim - d);
+  const b = sampleAt(plan.points, sim + d);
+  const dA = b.alt - a.alt;
+  let dD = b.down - a.down;
+  if (!plan.hasDownrange) {
+    if (plan.outcome === "orbit" || plan.outcome === "destination") {
+      // The trace is straight up; fake a gravity turn so it still looks like a launch.
+      const k = clamp01((a.alt + b.alt) / 2 / Math.max(1, plan.maxAltKm));
+      return (Math.PI / 2) * 0.8 * k * k * (3 - 2 * k);
+    }
+    // Lean a hair downrange so a ballistic fall flips over one consistent way.
+    dD = Math.abs(dA) * 0.08;
+  }
+  if (Math.hypot(dA, dD) < 1e-9) return null;
+  return Math.atan2(dD, dA);
+}
