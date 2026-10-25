@@ -22,7 +22,7 @@ type Scene = {
   dot: Sprite;
 };
 type Pass = { start: number; dur: number; x: number; y: number; angle: number; len: number; peak: number; gap: number };
-type Meteor = { start: number; dur: number; x: number; y: number; angle: number; speed: number; peak: number; width: number };
+type Meteor = { start: number; dur: number; x: number; y: number; angle: number; speed: number; peak: number; width: number; trail: number };
 
 const SEED = 0x2c5eed;
 const TAU = Math.PI * 2;
@@ -134,7 +134,7 @@ function cellStars(cx: number, cy: number): Star[] {
     const layer = depth < 4 ? 2 : depth < 5.8 ? 1 : 0;
     const color = tint(rand());
     const roll = rand();
-    stars.push({ x, y, p, color, layer, twinkle: p > 0.32 && roll < 0.38, glint: false });
+    stars.push({ x, y, p, color, layer, twinkle: p > 0.25 && roll < 0.55, glint: false });
   }
   return stars;
 }
@@ -210,8 +210,9 @@ function sprite(p: number, color: RGB, d: number, spike = false, core = true): S
 
 type Wisp = { x: number; y: number; rx: number; ry: number; angle: number; color: RGB; peak: number; seed: number };
 const WISPS: Wisp[] = [
-  { x: 0.2, y: 0.22, rx: 0.2, ry: 0.09, angle: -0.5, color: [0.62, 0.48, 0.95], peak: 0.085, seed: 3 },
-  { x: 0.84, y: 0.8, rx: 0.18, ry: 0.08, angle: 0.4, color: [0.36, 0.76, 0.78], peak: 0.075, seed: 9 },
+  { x: 0.14, y: 0.2, rx: 0.3, ry: 0.15, angle: -0.5, color: [0.55, 0.3, 1], peak: 0.22, seed: 3 }, // deep violet
+  { x: 0.9, y: 0.3, rx: 0.24, ry: 0.13, angle: 0.9, color: [0.95, 0.28, 0.68], peak: 0.18, seed: 5 }, // magenta
+  { x: 0.8, y: 0.86, rx: 0.3, ry: 0.13, angle: 0.35, color: [0.18, 0.78, 0.8], peak: 0.19, seed: 9 }, // teal
 ];
 
 // Returns RGB light (0–255) on a coarse grid over the far layer, and how crowded with faint stars each point is.
@@ -267,7 +268,7 @@ function diffuse(w: number, h: number, margin: number) {
         const wx = nx * 7 + wp.seed + 1.5 * fbm(nx * 3 + wp.seed, ny * 3, 3);
         const wy = ny * 7 - wp.seed + 1.5 * fbm(nx * 3, ny * 3 + wp.seed, 3);
         const ridge = 1 - Math.abs(2 * fbm(wx, wy, 4) - 1);
-        const v = env * (0.2 + 0.8 * ridge ** 2.5) * aside * wp.peak * 255;
+        const v = env * (0.35 + 0.65 * ridge ** 2) * aside * wp.peak * 255;
         r += v * wp.color[0];
         g += v * wp.color[1];
         b += v * wp.color[2];
@@ -339,7 +340,7 @@ function build(w: number, h: number, d: number): Scene {
 
   // The brightest few on screen sparkle with cross-shaped glints.
   const onScreen = stars.filter((s) => s.x >= 0 && s.x <= w && s.y >= 0 && s.y <= h).sort((a, b) => b.p - a.p);
-  for (const s of onScreen.slice(0, 5)) if (s.p > 6) Object.assign(s, { glint: true, twinkle: false, layer: 2 });
+  for (const s of onScreen.slice(0, 7)) if (s.p > 4) Object.assign(s, { glint: true, twinkle: false, layer: 2 });
 
   // Clusters sit at fixed spots in the frame: a loose blue-white open cluster and a fuzzy globular.
   const rand = mulberry32(hash(11, 13, 17));
@@ -387,7 +388,7 @@ function build(w: number, h: number, d: number): Scene {
     const r = mulberry32(hash(s.x * 16, s.y * 16, 3));
     if (s.twinkle) {
       twinkles.push({
-        sprite: sprite(s.p, s.color, d),
+        sprite: sprite(s.p * 1.6, s.color, d),
         x: s.x,
         y: s.y,
         layer: s.layer,
@@ -423,17 +424,19 @@ function satellites() {
   };
 }
 
-function meteors() {
-  const rand = mulberry32(hash(7, 7, 7));
+// Fast and frequent normally; slow and occasional when the viewer prefers reduced motion.
+function meteors(slow: boolean) {
+  const rand = mulberry32(hash(7, 7, slow ? 8 : 7));
   const one = (start: number, x: number, y: number, angle: number, peak: number): Meteor => ({
     start,
-    dur: 0.6 + 0.6 * rand(),
+    dur: (0.8 + 0.6 * rand()) * (slow ? 2.2 : 1),
     x,
     y,
     angle,
-    speed: 0.45 + 0.35 * rand(), // diagonals per second
+    speed: (0.5 + 0.35 * rand()) * (slow ? 0.3 : 1), // diagonals per second
     peak,
-    width: 0.9 + 0.7 * rand(),
+    width: 1.4 + 1 * rand(),
+    trail: slow ? 1 : 0.45, // seconds of path the streak covers
   });
   const shower = (start: number) => {
     // Mostly falling diagonally, either way; now and then from anywhere.
@@ -441,7 +444,7 @@ function meteors() {
     const right = rand() < 0.5;
     const angle = rand() < 0.85 ? (right ? dip : Math.PI - dip) : TAU * rand();
     const x = right ? 0.05 + 0.55 * rand() : 0.4 + 0.55 * rand();
-    const first = one(start, x, 0.05 + 0.55 * rand(), angle, 0.75 + 0.25 * rand());
+    const first = one(start, x, 0.05 + 0.55 * rand(), angle, 0.9 + 0.1 * rand());
     const group = [first];
     if (rand() < 0.22) {
       const off = 0.03 + 0.04 * rand();
@@ -449,11 +452,11 @@ function meteors() {
     }
     return group;
   };
-  let at = 3.5;
+  let at = slow ? 2.5 : 1.2;
   let group = shower(at);
   return (t: number) => {
     while (t > Math.max(...group.map((m) => m.start + m.dur))) {
-      at += 6 + 9 * rand();
+      at += slow ? 7 + 5 * rand() : 2 + 3 * rand();
       group = shower(at);
     }
     return group.filter((m) => t >= m.start && t <= m.start + m.dur);
@@ -512,7 +515,7 @@ function draw(ctx: CanvasRenderingContext2D, s: Scene, t: number, moving: boolea
     const v = m.speed * diag;
     const hx = (m.x * w + cos * v * age) * d;
     const hy = (m.y * h + sin * v * age) * d;
-    const tail = Math.min(age, 0.3) * v * d;
+    const tail = Math.min(age, m.trail) * v * d;
     const tx = hx - cos * tail;
     const ty = hy - sin * tail;
     const grad = ctx.createLinearGradient(tx, ty, hx, hy);
@@ -521,7 +524,7 @@ function draw(ctx: CanvasRenderingContext2D, s: Scene, t: number, moving: boolea
     grad.addColorStop(1, `rgba(255,255,255,${0.9 * env})`);
     ctx.fillStyle = grad;
     // A wide faint glow under a thin bright streak, both tapering to the tail.
-    for (const [spread, alpha] of [[4, 0.18], [1, 1]]) {
+    for (const [spread, alpha] of [[5, 0.25], [1, 1]]) {
       const half = m.width * d * 0.5 * spread * (0.6 + 0.4 * env);
       ctx.globalAlpha = alpha;
       ctx.beginPath();
@@ -550,23 +553,32 @@ export default function SpaceBackdrop({ className }: { className?: string }) {
     if (!host || !canvas || !ctx) return;
     const still = window.matchMedia("(prefers-reduced-motion: reduce)");
     const passOf = satellites();
-    const meteorsAt = meteors();
+    const meteorsAt = meteors(false);
+    const slowMeteorsAt = meteors(true);
     const t0 = performance.now();
     let scene: Scene | null = null;
     let raf = 0;
     let last = -Infinity;
     let timer: number | undefined;
+    let streaking = false;
 
     const paint = (now: number) => {
       if (!scene) return;
       const t = (now - t0) / 1000;
-      if (still.matches) draw(ctx, scene, 0, false, null, []);
+      if (still.matches) draw(ctx, scene, t, false, null, slowMeteorsAt(t));
       else draw(ctx, scene, t, true, passOf(t), meteorsAt(t));
     };
     const tick = (now: number) => {
       raf = requestAnimationFrame(tick);
       // 30 fps is plenty for the drift and glimmer; meteors and satellites get every frame.
       const t = (now - t0) / 1000;
+      if (still.matches) {
+        // A still sky: only the occasional slow meteor moves, plus one frame to wipe it away.
+        const active = slowMeteorsAt(t).length > 0;
+        if (active || streaking) paint(now);
+        streaking = active;
+        return;
+      }
       const busy = passOf(t) !== null || meteorsAt(t).length > 0;
       if (!busy && now - last < 1000 / 30 - 2) return;
       last = now;
@@ -576,7 +588,7 @@ export default function SpaceBackdrop({ className }: { className?: string }) {
       cancelAnimationFrame(raf);
       raf = 0;
       paint(performance.now());
-      if (!still.matches && !document.hidden) raf = requestAnimationFrame(tick);
+      if (!document.hidden) raf = requestAnimationFrame(tick);
     };
     const resize = () => {
       const w = host.clientWidth;
