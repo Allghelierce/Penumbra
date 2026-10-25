@@ -34,7 +34,8 @@ const stageIndex = {
 export const VOICE_TOOLS: VoiceTool[] = [
   {
     name: "set_destination",
-    description: "Change where the spacecraft is headed. 'Send it to Mars' means mars-transfer; landing on Mars means mars-surface.",
+    description:
+      "Change where the spacecraft is headed. For 'send it to Mars' use mars-surface if the design has landing legs or a heat shield, otherwise mars-transfer. Landing on Mars always means mars-surface.",
     parameters: {
       type: "object",
       properties: { destination: { type: "string", enum: DESTINATION_IDS } },

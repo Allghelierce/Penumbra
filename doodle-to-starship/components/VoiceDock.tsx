@@ -5,7 +5,7 @@ import type { Analysis, Design, DesignAction, Phase, Review } from "@/lib/design
 import { canRecognize, listen, openMicMeter, speak, stopSpeaking, type Listener, type MicMeter } from "@/lib/voice/browser";
 import { parseCommand } from "@/lib/voice/intent";
 import { ackLine, buildInstructions, deltaLine, nudge, speakable, toolResult, verdictLine } from "@/lib/voice/persona";
-import { connectRealtime, type RealtimeSession } from "@/lib/voice/realtime";
+import { createRealtimeSession, type RealtimeSession } from "@/lib/voice/realtime";
 import { toolCallToAction, VOICE_TOOLS } from "@/lib/voice/tools";
 
 export interface VoiceDockProps {
@@ -30,6 +30,15 @@ const HINTS: Record<Phase, string> = {
 
 /** How long to wait for the parent to re-analyze after an edit before replying anyway. */
 const ANALYSIS_WAIT_MS = 1500;
+/** Grok Voice bills for every connected minute, so the session closes after this long with nothing said. */
+const IDLE_CLOSE_MS = 60_000;
+
+async function mintToken(): Promise<string> {
+  const res = await fetch("/api/voice-token", { method: "POST" });
+  const body = (await res.json()) as { mode: Mode; token?: string; error?: string };
+  if (body.mode !== "grok" || !body.token) throw new Error(body.error ?? "No Grok Voice token.");
+  return body.token;
+}
 
 export default function VoiceDock({ phase, design, analysis, review, narration, onAction }: VoiceDockProps) {
   const [mode, setMode] = useState<Mode>("checking");
@@ -59,6 +68,7 @@ export default function VoiceDock({ phase, design, analysis, review, narration, 
   const sessionRef = useRef<RealtimeSession | null>(null);
   const holdingRef = useRef(false);
   const analysisWaiters = useRef<(() => void)[]>([]);
+  const idleTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Resolve anyone waiting for a fresh analysis.
   useEffect(() => {
@@ -80,13 +90,100 @@ export default function VoiceDock({ phase, design, analysis, review, narration, 
     [],
   );
 
+  // ---- Mode: Grok Voice when the server has a key. The session itself opens on the first press.
+  useEffect(() => {
+    let cancelled = false;
+    fetch("/api/voice-token")
+      .then((res) => res.json() as Promise<{ mode: Mode }>)
+      .then((status) => !cancelled && setMode(status.mode === "grok" ? "grok" : "browser"))
+      .catch(() => !cancelled && setMode("browser"));
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const closeSession = useCallback(() => {
+    if (idleTimer.current) clearTimeout(idleTimer.current);
+    idleTimer.current = null;
+    sessionRef.current?.close();
+    sessionRef.current = null;
+    setOutputAnalyser(null);
+    setMicAnalyser(micRef.current?.analyser ?? null);
+  }, []);
+
+  /** Push the idle close back; called on every bit of voice activity. */
+  const touch = useCallback(() => {
+    if (idleTimer.current) clearTimeout(idleTimer.current);
+    idleTimer.current = setTimeout(function check() {
+      const session = sessionRef.current;
+      if (!session) return;
+      if (holdingRef.current || session.busy()) idleTimer.current = setTimeout(check, 5000);
+      else closeSession();
+    }, IDLE_CLOSE_MS);
+  }, [closeSession]);
+
+  /** Open a Grok Voice session if there isn't one. Call from a user gesture so audio can play. */
+  const ensureSession = useCallback((): RealtimeSession => {
+    if (sessionRef.current) return sessionRef.current;
+    const session = createRealtimeSession({
+      getToken: mintToken,
+      instructions: buildInstructions(designRef.current, analysisRef.current, reviewRef.current),
+      tools: VOICE_TOOLS,
+      handlers: {
+        onUserTranscript: (text) => {
+          setUserCaption(text);
+          touch();
+        },
+        onReplyTranscript: (text) => {
+          setReplyCaption(text);
+          touch();
+        },
+        onSpeaking: (speaking) => {
+          setTalker((t) => (speaking ? (t === "user" ? t : "reviewer") : t === "reviewer" ? null : t));
+          touch();
+        },
+        onToolCall: async (name, args) => {
+          touch();
+          const result = toolCallToAction(name, args, designRef.current);
+          if ("error" in result) return { ok: false, error: result.error };
+          onActionRef.current(result.action);
+          if (result.action.type === "launch") return { ok: true, note: "Launching now. Say a few words at most." };
+          await waitForAnalysis();
+          return toolResult(designRef.current, analysisRef.current);
+        },
+        onError: (message) => setError(message),
+        onClose: () => {
+          if (sessionRef.current === session) closeSession();
+        },
+      },
+    });
+    sessionRef.current = session;
+    setMicAnalyser(session.micAnalyser);
+    setOutputAnalyser(session.outputAnalyser);
+    session.ready.catch((err: unknown) => {
+      if (sessionRef.current !== session) return;
+      closeSession();
+      if (err instanceof Error && err.message === "closed") return;
+      console.warn("[voice] Grok Voice failed, using browser voice:", err);
+      setError("Grok Voice didn't connect, so this is browser voice. Hold to talk again.");
+      setMode("browser");
+    });
+    touch();
+    return session;
+  }, [closeSession, touch, waitForAnalysis]);
+
+  // Keep Grok's instructions in sync with the design on the napkin.
+  useEffect(() => {
+    sessionRef.current?.updateInstructions(buildInstructions(design, analysis, review));
+  }, [design, analysis, review]);
+
+  const sayReply = useRef<(text: string) => void>(() => {});
   // Only the latest utterance may clear the "reviewer is talking" state.
   const utteranceId = useRef(0);
-  const sayReply = useCallback((text: string) => {
+  sayReply.current = (text: string) => {
     setReplyCaption(text);
-    const session = sessionRef.current;
-    if (session) {
-      session.say(text);
+    if (mode === "grok") {
+      ensureSession().say(text);
       return;
     }
     const id = ++utteranceId.current;
@@ -96,82 +193,24 @@ export default function VoiceDock({ phase, design, analysis, review, narration, 
         if (id === utteranceId.current) setTalker((t) => (t === "reviewer" ? null : t));
       },
     });
-  }, []);
-
-  // ---- Mode: ask the server whether Grok Voice is available, then try to connect.
-  useEffect(() => {
-    let cancelled = false;
-    (async () => {
-      try {
-        const status = (await (await fetch("/api/voice-token")).json()) as { mode: Mode };
-        if (status.mode !== "grok") throw new Error("browser");
-        const minted = (await (await fetch("/api/voice-token", { method: "POST" })).json()) as { mode: Mode; token?: string; error?: string };
-        if (minted.mode !== "grok" || !minted.token) throw new Error(minted.error ?? "no token");
-        const session = await connectRealtime({
-          token: minted.token,
-          instructions: buildInstructions(designRef.current, analysisRef.current, reviewRef.current),
-          tools: VOICE_TOOLS,
-          handlers: {
-            onUserTranscript: (text) => setUserCaption(text),
-            onReplyTranscript: (text) => setReplyCaption(text),
-            onSpeaking: (speaking) => setTalker((t) => (speaking ? "reviewer" : t === "reviewer" ? null : t)),
-            onToolCall: async (name, args) => {
-              const result = toolCallToAction(name, args, designRef.current);
-              if ("error" in result) return { ok: false, error: result.error };
-              onActionRef.current(result.action);
-              if (result.action.type === "launch") return { ok: true, note: "Launching now. Keep it to a few words." };
-              await waitForAnalysis();
-              return toolResult(designRef.current, analysisRef.current);
-            },
-            onError: (message) => setError(message),
-            onClose: () => {
-              sessionRef.current = null;
-              setMicAnalyser(null);
-              setOutputAnalyser(null);
-              setMode("browser");
-            },
-          },
-        });
-        if (cancelled) {
-          session.close();
-          return;
-        }
-        sessionRef.current = session;
-        setMicAnalyser(session.micAnalyser);
-        setOutputAnalyser(session.outputAnalyser);
-        setMode("grok");
-      } catch (err) {
-        if (cancelled) return;
-        if (err instanceof Error && err.message !== "browser") console.warn("[voice] Falling back to browser voice:", err.message);
-        setMode("browser");
-      }
-    })();
-    return () => {
-      cancelled = true;
-      sessionRef.current?.close();
-      sessionRef.current = null;
-    };
-  }, [waitForAnalysis]);
-
-  // Keep Grok's instructions in sync with the design on the napkin.
-  useEffect(() => {
-    if (mode === "grok") sessionRef.current?.updateInstructions(buildInstructions(design, analysis, review));
-  }, [mode, design, analysis, review]);
+  };
 
   // Narration: speak whenever it changes.
   const lastNarration = useRef<string | null>(null);
   useEffect(() => {
-    if (!narration || narration === lastNarration.current) return;
+    if (!narration || narration === lastNarration.current || mode === "checking") return;
     lastNarration.current = narration;
     if (holdingRef.current) return; // don't talk over the user
-    sayReply(narration);
-  }, [narration, sayReply]);
+    sayReply.current(narration);
+  }, [narration, mode]);
 
-  // Close the mic when the dock goes away.
+  // Close the mic and any session when the dock goes away.
   useEffect(
     () => () => {
       listenerRef.current?.cancel();
       micRef.current?.close();
+      sessionRef.current?.close();
+      if (idleTimer.current) clearTimeout(idleTimer.current);
       stopSpeaking();
     },
     [],
@@ -182,48 +221,48 @@ export default function VoiceDock({ phase, design, analysis, review, narration, 
     async (text: string) => {
       setUserCaption(text);
       if (!text.trim()) {
-        sayReply("Didn't catch that. Hold the button the whole time you talk.");
+        sayReply.current("Didn't catch that. Hold the button the whole time you talk.");
         return;
       }
-      const session = sessionRef.current;
-      if (session) {
-        session.sendText(text);
+      if (mode === "grok") {
+        ensureSession().sendText(text);
+        touch();
         return;
       }
       const before = analysisRef.current;
       const actions = parseCommand(text, designRef.current);
       if (actions.length === 0) {
-        sayReply("I only speak rocket. Try “send it to Mars”, “stretch the tanks 30 percent”, or “add a booster”.");
+        sayReply.current("I only speak rocket. Try “send it to Mars”, “stretch the tanks 30 percent”, or “add a booster”.");
         return;
       }
       if (!designRef.current) {
-        sayReply("Draw me something first. I can't review a blank napkin.");
+        sayReply.current("Draw me something first. I can't review a blank napkin.");
         return;
       }
       for (const action of actions) onActionRef.current(action);
 
       const last = actions[actions.length - 1];
       if (last.type === "launch") {
-        sayReply(ackLine(last, designRef.current));
+        sayReply.current(ackLine(last, designRef.current));
         return;
       }
       const edits = actions.filter((a) => a.type !== "review");
       if (edits.length === 0) {
         const now = analysisRef.current;
-        sayReply(now ? verdictLine(designRef.current, now) : "Nothing to review yet.");
+        sayReply.current(now ? verdictLine(designRef.current, now) : "Nothing to review yet.");
         return;
       }
       await waitForAnalysis();
       const after = analysisRef.current;
       const ack = ackLine(edits[edits.length - 1], designRef.current);
       if (!after) {
-        sayReply(ack);
+        sayReply.current(ack);
         return;
       }
       const delta = deltaLine(before, after);
-      sayReply(delta ? `${ack} ${delta} ${nudge(designRef.current, after)}` : `${ack} ${verdictLine(designRef.current, after)}`);
+      sayReply.current(delta ? `${ack} ${delta} ${nudge(designRef.current, after)}` : `${ack} ${verdictLine(designRef.current, after)}`);
     },
-    [sayReply, waitForAnalysis],
+    [mode, ensureSession, touch, waitForAnalysis],
   );
 
   // ---- Push to talk.
@@ -236,10 +275,9 @@ export default function VoiceDock({ phase, design, analysis, review, narration, 
     setUserCaption("");
     stopSpeaking();
 
-    const session = sessionRef.current;
-    if (session) {
-      session.interrupt();
-      session.startTalking();
+    if (mode === "grok") {
+      ensureSession().startTalking();
+      touch();
       return;
     }
     if (!micRef.current) {
@@ -260,7 +298,7 @@ export default function VoiceDock({ phase, design, analysis, review, narration, 
     if (!listenerRef.current) {
       setError(canRecognize() ? "Couldn't start the mic. Try again." : "This browser can't do speech recognition. Type the command below.");
     }
-  }, [mode, handleCommand]);
+  }, [mode, ensureSession, touch, handleCommand]);
 
   const endTalk = useCallback(() => {
     if (!holdingRef.current) return;
@@ -269,10 +307,11 @@ export default function VoiceDock({ phase, design, analysis, review, narration, 
     setTalker((t) => (t === "user" ? null : t));
     if (sessionRef.current) {
       sessionRef.current.stopTalking();
+      touch();
       return;
     }
     listenerRef.current?.stop();
-  }, []);
+  }, [touch]);
 
   // Hold Space to talk (unless typing somewhere).
   useEffect(() => {

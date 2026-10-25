@@ -59,10 +59,12 @@ function clean(text: string): string {
 
 const NUM = String.raw`(\d+(?:\.\d+)?)`;
 
-function destinationIn(text: string): DestinationId | null {
+function destinationIn(text: string, design: Design | null): DestinationId | null {
   const landing = /\b(land|landing|lands|surface|touch ?down|set (it|her) down)\b/.test(text);
+  // A design drawn with legs or a heat shield is built to land, so plain "Mars" means the surface.
+  const lander = Boolean(design?.features.some((f) => f === "landing-legs" || f === "heat-shield"));
   if (/\b(europa|jupiter)\b/.test(text)) return "europa";
-  if (/\b(mars|martian|red planet)\b/.test(text)) return landing ? "mars-surface" : "mars-transfer";
+  if (/\b(mars|martian|red planet)\b/.test(text)) return landing || lander ? "mars-surface" : "mars-transfer";
   if (/\b(moon|lunar|luna)\b/.test(text)) return landing ? "moon-surface" : "moon-orbit";
   if (/\b(gto|geo|geostationary|geosynchronous)\b/.test(text)) return "gto";
   if (/\b(leo|low earth orbit|earth orbit|low orbit|orbit|space station|iss)\b/.test(text)) return "leo";
@@ -188,7 +190,7 @@ function parseClause(text: string, design: Design | null): DesignAction | null {
     parseTanks(text, design) ?? parseEngines(text, design) ?? parsePayload(text) ?? parseStage(text, design);
   if (specific) return specific;
 
-  const destination = destinationIn(text);
+  const destination = destinationIn(text, design);
   if (destination) return { type: "set-destination", destination };
 
   if (/\b(launch|lift ?off|light (it|the candle|this candle)|send it|fly it|let's fly|go for launch|ignition|ignite|blast off|light it up|full send)\b/.test(text)) {

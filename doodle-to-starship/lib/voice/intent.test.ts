@@ -29,6 +29,12 @@ describe("parseCommand", () => {
   it("sets destinations", () => {
     expect(parse("Send it to Mars")).toEqual([{ type: "set-destination", destination: "mars-transfer" }]);
     expect(parse("land it on Mars")).toEqual([{ type: "set-destination", destination: "mars-surface" }]);
+    expect(parseCommand("send it to Mars", { ...design, features: ["landing-legs"] })).toEqual([
+      { type: "set-destination", destination: "mars-surface" },
+    ]);
+    expect(parseCommand("go to Mars", { ...design, features: ["heat-shield"] })).toEqual([
+      { type: "set-destination", destination: "mars-surface" },
+    ]);
     expect(parse("go to the moon")).toEqual([{ type: "set-destination", destination: "moon-orbit" }]);
     expect(parse("let's go to Europa")).toEqual([{ type: "set-destination", destination: "europa" }]);
     expect(parse("just get it to orbit")).toEqual([{ type: "set-destination", destination: "leo" }]);

@@ -255,6 +255,20 @@ export function createRealtimeSession({ getToken, instructions, tools, handlers 
     }
   };
 
+  const close = () => {
+    if (closed) return;
+    closed = true;
+    ready = false;
+    clearInterval(speakingTimer);
+    outbox.length = 0;
+    if (socket) {
+      socket.onmessage = null;
+      socket.close();
+    }
+    mic?.getTracks().forEach((t) => t.stop());
+    void audio.close();
+  };
+
   // ---- Connect: token -> socket -> session.created -> session.update -> session.updated with our instructions.
   const connectOnce = async (): Promise<WebSocket | null> => {
     const token = await getToken();
@@ -280,6 +294,7 @@ export function createRealtimeSession({ getToken, instructions, tools, handlers 
 
   const readyPromise = (async () => {
     const micStarted = startMic();
+    micStarted.catch(() => {}); // awaited below; this just keeps an early mic error from going unhandled
     for (let attempt = 0; attempt < CONNECT_ATTEMPTS && !closed && !socket; attempt++) socket = await connectOnce();
     if (closed) throw new Error("closed");
     if (!socket) throw new Error("Grok Voice didn't start a session.");
@@ -314,20 +329,6 @@ export function createRealtimeSession({ getToken, instructions, tools, handlers 
     for (const message of outbox.splice(0)) ws.send(JSON.stringify(message));
   })();
   readyPromise.catch(() => close());
-
-  const close = () => {
-    if (closed) return;
-    closed = true;
-    ready = false;
-    clearInterval(speakingTimer);
-    outbox.length = 0;
-    if (socket) {
-      socket.onmessage = null;
-      socket.close();
-    }
-    mic?.getTracks().forEach((t) => t.stop());
-    void audio.close();
-  };
 
   const interrupt = () => {
     stopPlayback();
