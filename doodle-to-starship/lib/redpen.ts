@@ -16,7 +16,7 @@ import {
   type Review,
   type SketchReading,
 } from "./design";
-import { analyze, km, kmShort, kmSpare } from "./physics";
+import { analyze } from "./physics";
 
 type Box = [x: number, y: number, w: number, h: number];
 
@@ -402,4 +402,22 @@ function formatTwr(twr: number) {
 
 function clamp(value: number, lo: number, hi: number) {
   return Math.min(Math.max(value, lo), hi);
+}
+
+// km/s formatting, worked out from the rounded figures shown beside each number so they agree.
+function tenths(mps: number) {
+  return Math.round(mps / 100);
+}
+
+function km(mps: number) {
+  return (tenths(mps) / 10).toFixed(1);
+}
+
+/** How far short `total` is, never "0.0". */
+function kmShort(totalMps: number, requiredMps: number) {
+  return (Math.max(1, tenths(requiredMps) - tenths(totalMps)) / 10).toFixed(1);
+}
+
+function kmSpare(totalMps: number, requiredMps: number) {
+  return (Math.max(0, tenths(totalMps) - tenths(requiredMps)) / 10).toFixed(1);
 }
