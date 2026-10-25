@@ -1,8 +1,8 @@
 "use client";
 
 import { useState } from "react";
-import type { Analysis, Design, Verdict } from "@/lib/design";
-import { DEST_NAME, DEST_SHORT, fmtKm } from "./plan";
+import type { Analysis, Design, DestinationId, Verdict } from "@/lib/design";
+import { fmtKm } from "./plan";
 import type { ReplayState } from "./useReplay";
 
 interface EndCardProps {
@@ -18,34 +18,54 @@ interface EndCardProps {
   onReplay: () => void;
 }
 
+/** Same names the studio's "Where it can go" list uses. */
+const TARGET: Record<DestinationId, string> = {
+  leo: "Low Earth orbit",
+  gto: "Geo transfer orbit",
+  "moon-orbit": "Lunar orbit",
+  "moon-surface": "Moon surface",
+  "mars-transfer": "Mars transfer",
+  "mars-surface": "Mars surface",
+  europa: "Europa",
+};
+
+const SHORT: Record<DestinationId, string> = {
+  leo: "orbit",
+  gto: "GTO",
+  "moon-orbit": "the Moon",
+  "moon-surface": "the Moon",
+  "mars-transfer": "Mars",
+  "mars-surface": "Mars",
+  europa: "Europa",
+};
+
 const kms = (mps: number) => (Math.abs(mps) / 1000).toFixed(1);
 
-function verdictCopy({ outcome, design, analysis, maxAltKm }: EndCardProps): { headline: string; ok: boolean; line: string } {
-  const dest = DEST_NAME[design.destination] ?? design.destination;
+function verdictCopy({ outcome, design, analysis, maxAltKm }: EndCardProps): { go: boolean; headline: string; line: string } {
+  const dest = design.destination;
+  const budget = `${kms(analysis.totalDeltaVMps)} of ${kms(analysis.requiredDeltaVMps)} km/s`;
   const margin = analysis.marginMps;
-  const spare = margin >= 0 ? `${kms(margin)} km/s to spare` : `${kms(margin)} km/s short`;
   switch (outcome) {
     case "destination":
-      return { headline: DEST_SHORT[design.destination] ?? "ORBIT", ok: true, line: `Made it to ${dest} with ${spare}.` };
-    case "orbit":
       return {
-        headline: "ORBIT",
-        ok: true,
-        line:
-          design.destination === "leo"
-            ? `In orbit with ${spare}.`
-            : `Orbit, yes. ${dest[0].toUpperCase()}${dest.slice(1)} needs ${kms(margin)} km/s more.`,
+        go: true,
+        headline: dest === "leo" ? "In orbit" : `Made it to ${SHORT[dest]}`,
+        line: `${budget}, ${kms(margin)} km/s to spare.`,
       };
+    case "orbit":
+      return dest === "leo"
+        ? { go: true, headline: "In orbit", line: `${budget}, ${kms(margin)} km/s to spare.` }
+        : { go: false, headline: `Reaches orbit, not ${SHORT[dest]}`, line: `${budget}: ${kms(margin)} km/s short.` };
     case "suborbital":
       return {
-        headline: "RUD",
-        ok: false,
-        line: `Up to ${fmtKm(maxAltKm)} km, then all the way back down. ${kms(margin)} km/s short.`,
+        go: false,
+        headline: "Falls back to Earth",
+        line: `Apogee ${fmtKm(maxAltKm)} km, then a rapid unscheduled disassembly. ${budget}.`,
       };
     default:
       return {
+        go: false,
         headline: "Never left the pad",
-        ok: false,
         line: `Liftoff thrust-to-weight is ${analysis.liftoffTwr.toFixed(2)}; it has to beat 1.`,
       };
   }
@@ -53,103 +73,118 @@ function verdictCopy({ outcome, design, analysis, maxAltKm }: EndCardProps): { h
 
 export default function EndCard(props: EndCardProps) {
   const { design, analysis, maxAltKm, maxSpeedMps, renderUrl, video, onVideo, onDone, onReplay } = props;
-  const { headline, ok, line } = verdictCopy(props);
-  const findings = (analysis.findings ?? []).slice(0, 2);
+  const { go, headline, line } = verdictCopy(props);
+  const findings = (analysis.findings ?? []).slice(0, 3);
 
   return (
-    <div className="ls-fade absolute inset-0 flex items-start justify-center overflow-y-auto bg-night/60 px-4 py-8 sm:items-center">
-      <div className="ls-rise relative w-full max-w-3xl rounded-[3px] border border-napkin-edge bg-napkin p-5 text-graphite shadow-[0_30px_80px_rgba(0,0,0,0.6)] sm:p-8">
-        <div className="grid gap-6 sm:grid-cols-[minmax(0,15rem)_1fr] sm:gap-8">
-          <Polaroid url={renderUrl} name={design.name} video={video} />
-          <div className="flex min-w-0 flex-col">
-            <h2 className={`font-hand text-6xl leading-[0.9] sm:text-7xl ${ok ? "text-graphite" : "text-redpen"}`}>
-              {headline}
-              {ok && <span className="ml-3 text-go">✓</span>}
-            </h2>
-            <p className="mt-2 font-hand text-2xl leading-snug text-graphite/90">{line}</p>
-            <dl className="mt-5 grid grid-cols-2 gap-x-6 gap-y-3 font-mono text-[11px] uppercase tracking-wider text-ink-muted">
-              <Stat label="Max altitude" value={`${fmtKm(maxAltKm)} km`} />
-              <Stat label="Max speed" value={`${Math.round(maxSpeedMps).toLocaleString("en-US")} m/s`} />
-              <Stat label="Delta-v" value={`${kms(analysis.totalDeltaVMps)} / ${kms(analysis.requiredDeltaVMps)} km/s`} />
-              <Stat label="Liftoff TWR" value={analysis.liftoffTwr.toFixed(2)} />
-            </dl>
-            {findings.length > 0 && (
-              <ul className="mt-5 space-y-1 font-hand text-xl leading-snug text-graphite/85">
-                {findings.map((f) => (
-                  <li key={f}>→ {f}</li>
-                ))}
-              </ul>
-            )}
-            <div className="mt-auto flex flex-wrap items-center gap-x-5 gap-y-3 pt-6">
-              <button
-                type="button"
-                autoFocus
-                onClick={onDone}
-                className="rounded-full border-2 border-redpen px-5 py-1 font-hand text-3xl text-redpen transition-colors hover:bg-redpen hover:text-napkin focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-redpen"
+    <div className="ls-fade absolute inset-0 flex items-start justify-center overflow-y-auto bg-umbra/70 px-4 py-8 backdrop-blur-[3px] sm:items-center">
+      <div className="ls-rise w-full max-w-3xl overflow-hidden rounded-[3px] border border-rule bg-panel text-starlight shadow-[0_30px_80px_rgba(0,0,0,0.55)]">
+        <div className="grid sm:grid-cols-[minmax(0,16rem)_1fr]">
+          <RenderFrame url={renderUrl} name={design.name} video={video} />
+          <div className="flex min-w-0 flex-col justify-center p-5 sm:p-7">
+            <div className="flex flex-wrap items-center gap-3">
+              <span
+                className={`rounded-[3px] px-2 py-0.5 font-display text-sm font-semibold uppercase tracking-[0.14em] ${go ? "bg-go-signal/15 text-go-signal" : "bg-nogo/15 text-nogo"}`}
               >
-                Back to the napkin
-              </button>
-              {renderUrl && <VideoButton video={video} onVideo={onVideo} />}
-              <button
-                type="button"
-                onClick={onReplay}
-                className="font-mono text-xs uppercase tracking-widest text-ink-muted underline-offset-4 hover:text-graphite hover:underline"
-              >
-                fly again ↻
-              </button>
+                {go ? "Go" : "No go"}
+              </span>
+              <span className="text-sm text-haze">Target: {TARGET[design.destination] ?? design.destination}</span>
             </div>
+            <h2 className="mt-3 font-display text-[32px] font-semibold leading-tight">{headline}</h2>
+            <p className="mt-1 text-sm text-haze">{line}</p>
           </div>
+        </div>
+
+        <dl className="grid grid-cols-2 gap-px border-t border-rule bg-rule sm:grid-cols-4">
+          <Stat label="Max altitude" value={fmtKm(maxAltKm)} unit="km" />
+          <Stat label="Max speed" value={Math.round(maxSpeedMps).toLocaleString("en-US")} unit="m/s" />
+          <Stat label="Delta-v" value={`${kms(analysis.totalDeltaVMps)} / ${kms(analysis.requiredDeltaVMps)}`} unit="km/s" />
+          <Stat label="Thrust-to-weight" value={analysis.liftoffTwr.toFixed(2)} />
+        </dl>
+
+        {findings.length > 0 && (
+          <ul className="space-y-1 border-t border-rule px-5 py-4 text-sm leading-snug text-haze sm:px-7">
+            {findings.map((f) => (
+              <li key={f} className="flex gap-2">
+                <span className="text-rule">—</span>
+                <span>{f}</span>
+              </li>
+            ))}
+          </ul>
+        )}
+
+        <div className="flex flex-wrap items-center gap-3 border-t border-rule px-5 py-4 sm:px-7">
+          <button
+            type="button"
+            autoFocus
+            onClick={onDone}
+            className="rounded-[3px] bg-starlight px-4 py-2 text-sm font-semibold text-umbra transition-opacity hover:opacity-90"
+          >
+            Back to the napkin
+          </button>
+          <button
+            type="button"
+            onClick={onReplay}
+            className="rounded-[3px] border border-rule px-4 py-2 text-sm font-semibold text-starlight transition-colors hover:border-haze"
+          >
+            Fly again
+          </button>
+          {renderUrl && <VideoButton video={video} onVideo={onVideo} />}
         </div>
       </div>
     </div>
   );
 }
 
-function Stat({ label, value }: { label: string; value: string }) {
+function Stat({ label, value, unit }: { label: string; value: string; unit?: string }) {
   return (
-    <div>
-      <dt>{label}</dt>
-      <dd className="mt-0.5 text-base normal-case tracking-normal text-graphite">{value}</dd>
+    <div className="bg-panel px-5 py-3 sm:px-7">
+      <dt className="text-xs text-haze">{label}</dt>
+      <dd className="mt-0.5 font-display text-2xl font-semibold">
+        {value}
+        {unit && <span className="ml-1 text-sm font-medium text-haze">{unit}</span>}
+      </dd>
     </div>
   );
 }
 
 /** Starts the Grok Imagine mission replay (a paid job, so only on click) and shows its progress. */
 function VideoButton({ video, onVideo }: { video: ReplayState; onVideo: () => void }) {
-  const label = "font-mono text-xs uppercase tracking-widest";
+  const base = "rounded-[3px] border border-rule px-4 py-2 text-sm font-semibold";
   switch (video.phase) {
     case "idle":
       return (
-        <button type="button" onClick={onVideo} className={`${label} text-graphite underline-offset-4 hover:underline`}>
-          ▶ mission replay
+        <button type="button" onClick={onVideo} className={`${base} text-starlight transition-colors hover:border-haze`}>
+          ▶ Mission replay
         </button>
       );
     case "pending":
       return (
-        <span className={`${label} ls-pending text-ink-muted`} aria-live="polite">
-          developing{video.progress !== null ? ` ${Math.round(video.progress)}%` : "…"}
+        <span className={`${base} ls-pending text-haze`} aria-live="polite">
+          Developing replay{video.progress !== null ? ` ${Math.round(video.progress)}%` : "…"}
         </span>
       );
     case "failed":
       return (
-        <button type="button" onClick={onVideo} className={`${label} text-redpen underline-offset-4 hover:underline`}>
-          replay failed · try again
+        <button type="button" onClick={onVideo} className={`${base} text-nogo transition-colors hover:border-nogo`}>
+          Replay failed · retry
         </button>
       );
     case "unavailable":
-      return <span className={`${label} text-ink-muted`}>replay unavailable</span>;
+      return <span className="text-xs text-haze">Replay unavailable</span>;
     default:
       return null;
   }
 }
 
-function Polaroid({ url, name, video }: { url: string | null; name: string; video: ReplayState }) {
+function RenderFrame({ url, name, video }: { url: string | null; name: string; video: ReplayState }) {
   const [failed, setFailed] = useState<string | null>(null);
   const show = url !== null && failed !== url;
+  const playing = video.phase === "done";
   return (
-    <figure className="mx-auto w-full max-w-[15rem] -rotate-3 self-start bg-white p-3 pb-2 shadow-[0_10px_30px_rgba(0,0,0,0.25)]">
-      <div className="relative aspect-square w-full overflow-hidden bg-night">
-        {video.phase === "done" ? (
+    <figure className="relative border-b border-rule sm:border-b-0 sm:border-r">
+      <div className="relative aspect-[4/3] h-full w-full overflow-hidden bg-night sm:aspect-auto sm:min-h-[16rem]">
+        {playing ? (
           <video
             key={video.url}
             src={video.url}
@@ -158,7 +193,7 @@ function Polaroid({ url, name, video }: { url: string | null; name: string; vide
             loop
             playsInline
             aria-label={`Grok Imagine mission replay of ${name}`}
-            className="ls-fade h-full w-full object-cover"
+            className="ls-fade absolute inset-0 h-full w-full object-cover"
           />
         ) : show ? (
           // Grok Imagine URLs are remote and short-lived; next/image would need them allow-listed.
@@ -167,16 +202,18 @@ function Polaroid({ url, name, video }: { url: string | null; name: string; vide
             key={url}
             src={url}
             alt={`Grok Imagine render of ${name}`}
-            className="ls-fade h-full w-full object-cover"
+            className="ls-fade absolute inset-0 h-full w-full object-cover"
             onError={() => setFailed(url)}
           />
         ) : (
-          <div className="flex h-full w-full items-center justify-center bg-[repeating-linear-gradient(135deg,rgba(255,255,255,0.04)_0_10px,transparent_10px_20px)]">
-            <span className="ls-pending font-hand text-2xl text-white/80">render pending…</span>
+          <div className="absolute inset-0 flex items-center justify-center bg-[repeating-linear-gradient(135deg,rgba(255,255,255,0.03)_0_10px,transparent_10px_20px)]">
+            <span className="ls-pending text-xs font-semibold uppercase tracking-[0.18em] text-haze">Render pending</span>
           </div>
         )}
       </div>
-      <figcaption className="mt-2 truncate text-center font-hand text-xl text-graphite">{name}</figcaption>
+      <figcaption className="absolute left-3 top-3 rounded-[3px] bg-umbra/75 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-[0.16em] text-haze">
+        {playing ? "Grok Imagine replay" : "Grok Imagine render"}
+      </figcaption>
     </figure>
   );
 }

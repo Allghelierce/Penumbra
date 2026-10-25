@@ -1,4 +1,5 @@
 import { NAPKIN_ASPECT, type Analysis, type FlightEvent, type FlightTrace, type SketchReading, type Stroke } from "@/lib/design";
+import type { LaunchAudio } from "./audio";
 import { buildDoodle, unionBox, type Nozzle, type Vec } from "./geometry";
 import {
   buildPlan,
@@ -11,6 +12,7 @@ import {
   T_NIGHT,
   type CaptionCue,
   type Finale,
+  type Plan,
 } from "./plan";
 import {
   clamp01,
@@ -52,6 +54,28 @@ export interface LaunchHooks {
   onFinale: (f: Finale) => void;
   onEnd: () => void;
   onEvent: (e: FlightEvent) => void;
+  /** Procedural sound; the scene drives it from the same throttle and cues as the picture. */
+  sound?: LaunchAudio;
+}
+
+/** DOM nodes the engine writes telemetry into every frame (no React re-renders). */
+export interface HudRefs {
+  root: HTMLElement | null;
+  clock: HTMLElement | null;
+  speed: HTMLElement | null;
+  alt: HTMLElement | null;
+  stage: HTMLElement | null;
+  /** Timeline fill, scaled 0..1 along x. */
+  fill: HTMLElement | null;
+  /** Timeline milestones with data-at (0..1); the engine sets data-passed as they go by. */
+  marks: HTMLElement[];
+}
+
+/** Doodle and plan for a launch, shared by the engine and the overlay's timeline. */
+export function planFor(input: LaunchInput): Plan {
+  const design = input.reading.design;
+  const doodle = buildDoodle(input.strokes, input.reading.parts ?? [], design.stages?.length ?? 1);
+  return buildPlan(input.trace, input.analysis, design, doodle.pieces.length);
 }
 
 export interface LaunchHandle {
@@ -153,7 +177,7 @@ function polyPath(lines: Vec[][]): Path2D {
 
 export function startLaunch(
   canvas: HTMLCanvasElement,
-  hud: HTMLElement | null,
+  hud: HudRefs | null,
   input: LaunchInput,
   hooks: LaunchHooks,
 ): LaunchHandle {
@@ -213,7 +237,15 @@ export function startLaunch(
   let capId = 0;
   let finaleShown = false;
   let ended = false;
-  let hudShown = "";
+  const hudShown: Record<string, string> = {};
+  const hudSet = (el: HTMLElement | null, key: string, text: string) => {
+    if (!el || hudShown[key] === text) return;
+    hudShown[key] = text;
+    el.textContent = text;
+  };
+  let ignited = false;
+  let cutArmed = false;
+  const sound = hooks.sound;
 
   const attached = (i: number) => plan.seps[i] === undefined || t < plan.seps[i];
 
@@ -257,6 +289,7 @@ export function startLaunch(
 
   function explode(pose: Pose, focus: Vec, top: number) {
     exploded = true;
+    sound?.boom();
     explodedAt = t;
     blast = plan.outcome === "suborbital" ? toWorld(pose, [focus[0], top]) : toWorld(pose, focus);
 
@@ -476,6 +509,7 @@ export function startLaunch(
     // Falling back fast through the air: the nose glows.
     const falling = flying && plan.outcome === "suborbital" && sampleAt(plan.points, sim - 2).alt > s.alt;
     const reentry = falling ? clamp01((100 - altKm) / 50) * clamp01((s.speed - 600) / 1200) : 0;
+    sound?.reentry(exploded ? 0 : reentry);
 
     // --- Camera ---
     const fit = Math.min(H * 0.86, (W * 0.86) / NAPKIN_ASPECT);
@@ -508,6 +542,22 @@ export function startLaunch(
 
     // --- Particles ---
     const plume = clamp01(altKm / 60);
+
+    // --- Sound: rumble follows the flames; a falling edge is an engine cutoff ---
+    if (sound) {
+      if (!ignited && t >= T_IGNITE) {
+        ignited = true;
+        sound.ignite();
+      }
+      const thrAll = pieces.reduce((m, _, i) => Math.max(m, throttle(i)), 0);
+      sound.engine(thrAll, altKm);
+      if (thrAll > 0.5) cutArmed = true;
+      if (cutArmed && thrAll < 0.15 && !exploded) {
+        cutArmed = false;
+        sound.cutoff();
+      }
+    }
+
     let thrMax = 0;
     pieces.forEach((p, i) => {
       const thr = throttle(i);
@@ -722,29 +772,39 @@ export function startLaunch(
     }
 
     // --- HUD ---
-    if (hud) {
-      let text = "";
-      if (t >= T_NIGHT) {
-        const lo = plan.liftoffAt ?? T_LIFTOFF;
-        const clock = plan.liftoffAt === null ? Math.min(t, plan.explodeAt ?? t) - lo : t < lo ? t - lo : sim;
-        const neg = clock < 0;
-        const secs = neg ? Math.ceil(-clock) : Math.floor(clock);
-        const mm = String(Math.floor(secs / 60)).padStart(2, "0");
-        const ss = String(secs % 60).padStart(2, "0");
-        const speed = flying ? s.speed : 0;
-        text = `T${neg ? "-" : "+"}${mm}:${ss} · ALT ${altKm.toFixed(1)} km · ${Math.round(speed).toLocaleString("en-US")} m/s · STAGE ${(flying ? s.stage : 0) + 1}`;
+    if (hud && t >= T_NIGHT) {
+      const lo = plan.liftoffAt ?? T_LIFTOFF;
+      const clock = plan.liftoffAt === null ? Math.min(t, plan.explodeAt ?? t) - lo : t < lo ? t - lo : sim;
+      const neg = clock < 0;
+      const secs = neg ? Math.ceil(-clock) : Math.floor(clock);
+      const two = (n: number) => String(n).padStart(2, "0");
+      hudSet(hud.clock, "clock", `T${neg ? "−" : "+"} ${two(Math.floor(secs / 3600))}:${two(Math.floor(secs / 60) % 60)}:${two(secs % 60)}`);
+      hudSet(hud.speed, "speed", Math.round(flying ? s.speed : 0).toLocaleString("en-US"));
+      hudSet(hud.alt, "alt", altKm < 100 ? altKm.toFixed(1) : Math.round(altKm).toLocaleString("en-US"));
+      hudSet(hud.stage, "stage", `Stage ${(flying ? s.stage : 0) + 1}`);
+      if (hud.root && hudShown.root !== "1") {
+        hudShown.root = "1";
+        hud.root.style.opacity = "1";
       }
-      if (text !== hudShown) {
-        hudShown = text;
-        hud.textContent = text;
-        hud.style.opacity = text ? "1" : "0";
+      if (plan.liftoffAt !== null) {
+        const p = clamp01((t - plan.liftoffAt) / (plan.finaleAt - plan.liftoffAt));
+        if (hud.fill) hud.fill.style.transform = `scaleX(${p})`;
+        for (const m of hud.marks) {
+          const passed = p >= Number(m.dataset.at) - 1e-3 ? "1" : "0";
+          if (m.dataset.passed !== passed) m.dataset.passed = passed;
+        }
       }
     }
 
     // --- Cues ---
     while (cueIdx < plan.cues.length && plan.cues[cueIdx].at <= t) {
       const cue = plan.cues[cueIdx++];
+      const kind = cue.event.kind;
+      if (kind === "max-q") sound?.maxQ();
+      if (kind === "stage-sep") sound?.separation();
       if (!cue.real) continue;
+      // Mission-control tones before each callout the narrator will speak.
+      if (kind !== "impact") sound?.quindar();
       try {
         hooks.onEvent(cue.event);
       } catch (err) {
@@ -757,6 +817,7 @@ export function startLaunch(
     if (!finaleShown && t >= plan.finale.at) {
       finaleShown = true;
       hooks.onFinale(plan.finale);
+      if (plan.finale.ok) sound?.chime();
     }
     if (!ended && t >= plan.endAt) {
       ended = true;

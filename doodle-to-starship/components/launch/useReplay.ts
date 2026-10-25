@@ -22,6 +22,8 @@ export function useReplay(imageUrl: string | null, verdict: Verdict) {
   const [state, setState] = useState<ReplayState>({ phase: "idle" });
   const alive = useRef(true);
   const timer = useRef<number | undefined>(undefined);
+  // Set synchronously, so a double-click can't start two paid jobs before React re-renders.
+  const busy = useRef(false);
 
   useEffect(() => {
     alive.current = true;
@@ -32,7 +34,12 @@ export function useReplay(imageUrl: string | null, verdict: Verdict) {
   }, []);
 
   const start = useCallback(async () => {
-    if (!imageUrl) return;
+    if (!imageUrl || busy.current) return;
+    busy.current = true;
+    const finish = (next: ReplayState) => {
+      busy.current = false;
+      setState(next);
+    };
     setState({ phase: "pending", progress: null });
     try {
       const body: ReplayRequest = { imageUrl, verdict };
@@ -44,7 +51,7 @@ export function useReplay(imageUrl: string | null, verdict: Verdict) {
       const started = (await res.json()) as ReplayStartResponse;
       if (!alive.current) return;
       if (started.status !== "pending" || !started.id) {
-        setState({ phase: started.status === "unavailable" ? "unavailable" : "failed" });
+        finish({ phase: started.status === "unavailable" ? "unavailable" : "failed" });
         return;
       }
       const id = started.id;
@@ -52,7 +59,7 @@ export function useReplay(imageUrl: string | null, verdict: Verdict) {
       const poll = async () => {
         if (!alive.current) return;
         if (Date.now() > deadline) {
-          setState({ phase: "failed" });
+          finish({ phase: "failed" });
           return;
         }
         try {
@@ -60,15 +67,15 @@ export function useReplay(imageUrl: string | null, verdict: Verdict) {
           const p = (await r.json()) as ReplayPollResponse;
           if (!alive.current) return;
           if (p.status === "done" && p.url) {
-            setState({ phase: "done", url: p.url });
+            finish({ phase: "done", url: p.url });
             return;
           }
           if (p.status === "unavailable") {
-            setState({ phase: "unavailable" });
+            finish({ phase: "unavailable" });
             return;
           }
           if (p.status === "failed" || p.status === "expired") {
-            setState({ phase: "failed" });
+            finish({ phase: "failed" });
             return;
           }
           setState({ phase: "pending", progress: p.progress });
@@ -79,6 +86,7 @@ export function useReplay(imageUrl: string | null, verdict: Verdict) {
       };
       timer.current = window.setTimeout(poll, POLL_MS);
     } catch {
+      busy.current = false;
       if (alive.current) setState({ phase: "failed" });
     }
   }, [imageUrl, verdict]);
