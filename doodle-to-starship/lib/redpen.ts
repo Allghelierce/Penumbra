@@ -50,7 +50,7 @@ const VACUUM_DESTINATIONS = new Set<DestinationId>([
 ]);
 const LANDING_DESTINATIONS = new Set<DestinationId>(["moon-surface", "mars-surface"]);
 
-const DESTINATION_NAMES: Record<DestinationId, string> = {
+export const DESTINATION_NAMES: Record<DestinationId, string> = {
   leo: "low Earth orbit",
   gto: "GTO",
   "moon-orbit": "lunar orbit",
