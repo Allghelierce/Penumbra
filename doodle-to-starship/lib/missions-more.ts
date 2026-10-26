@@ -54,7 +54,7 @@ export const MORE_MISSIONS: HistoricMission[] = [
     timeline: [
       { tS: 0, altitudeKm: 0, speedMps: 0, kind: "liftoff", event: "Liftoff: 27 engines" },
       { tS: 150, altitudeKm: 60, speedMps: 2200, kind: "stage-sep", event: "Side boosters separate and fly home" },
-      { tS: 480, altitudeKm: 0, speedMps: 0, event: "Both side boosters land side by side" },
+      { tS: 480, altitudeKm: 280, speedMps: 7300, event: "Both side boosters land side by side" },
       { tS: 520, altitudeKm: 300, speedMps: 7700, kind: "orbit", event: "Roadster and Starman in orbit, bound beyond Mars" },
     ],
     rootCause: "Both side boosters landed together; the center core could only relight one engine and hit the sea near the drone ship.",
@@ -82,7 +82,7 @@ export const MORE_MISSIONS: HistoricMission[] = [
       { tS: 0, altitudeKm: 0, speedMps: 0, kind: "liftoff", event: "Liftoff with astronauts Behnken and Hurley" },
       { tS: 75, altitudeKm: 13, speedMps: 500, kind: "max-q", event: "Max-Q" },
       { tS: 155, altitudeKm: 75, speedMps: 2200, kind: "stage-sep", event: "Stage separation" },
-      { tS: 540, altitudeKm: 0, speedMps: 0, event: "Booster lands on the drone ship" },
+      { tS: 540, altitudeKm: 205, speedMps: 7500, event: "Booster lands on the drone ship" },
       { tS: 560, altitudeKm: 210, speedMps: 7600, kind: "orbit", event: "Crew Dragon in orbit" },
     ],
     rootCause: "Years of uncrewed flights, the fixes after earlier failures and an in-flight abort test came together.",
@@ -173,7 +173,7 @@ export const MORE_MISSIONS: HistoricMission[] = [
     timeline: [
       { tS: 0, altitudeKm: 0, speedMps: 0, kind: "liftoff", event: "Liftoff" },
       { tS: 160, altitudeKm: 70, speedMps: 1500, kind: "stage-sep", event: "Hot staging" },
-      { tS: 470, altitudeKm: 0, speedMps: 0, event: "Booster soft splashdown in the Gulf of Mexico" },
+      { tS: 470, altitudeKm: 190, speedMps: 6600, event: "Booster soft splashdown in the Gulf of Mexico" },
       { tS: 520, altitudeKm: 210, speedMps: 7000, kind: "orbit", event: "Ship in space, heading for reentry and splashdown" },
     ],
     rootCause: "Reentry and landing-burn fixes from IFT-3 held: both stages came down under control.",
