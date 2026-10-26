@@ -70,6 +70,22 @@ function browserVoice(speaker: string): { pitch: number; rate: number } {
   return { pitch: 0.85 + ((h % 7) / 6) * 0.3, rate: 0.95 + (((h >>> 3) % 5) / 4) * 0.1 };
 }
 
+/**
+ * What has already been heard, kept on window so a remount (HMR, a Studio re-render, StrictMode)
+ * never repeats a line or restarts a poll that was already read out.
+ */
+const heard: { narration: string | null; offer: string | null; poll: Poll | null } =
+  typeof window === "undefined"
+    ? { narration: null, offer: null, poll: null }
+    : ((window as { __voiceHeard?: { narration: string | null; offer: string | null; poll: Poll | null } }).__voiceHeard ??= {
+        narration: null,
+        offer: null,
+        poll: null,
+      });
+
+/** True while the pen is on the napkin; nothing talks over someone drawing. */
+const penDown = () => typeof document !== "undefined" && document.querySelector('[data-drawing="true"]') !== null;
+
 /** Module-level clock, so it's plainly not called during render. */
 const clock = () => Date.now();
 /** The same line in the same phase within this window is a duplicate and isn't spoken again. */
@@ -346,11 +362,14 @@ export default function VoiceDock({
   }, [phase]);
 
   // Narration: speak whenever it changes. Launch callouts get the Quindar tones first, like the loops.
-  const lastNarration = useRef<string | null>(null);
+  // Speech happens at three moments only: the poll, flight callouts, and the post-flight offer (plus
+  // direct replies to push-to-talk or typing). Narration outside a flight (review summaries,
+  // re-checks, voice edits) is noted as heard but never spoken.
   useEffect(() => {
-    if (!narration || narration === lastNarration.current || mode === "checking") return;
-    lastNarration.current = narration;
-    if (holdingRef.current) return; // don't talk over the user
+    if (!narration || narration === heard.narration || mode === "checking") return;
+    heard.narration = narration;
+    if (phase !== "launch") return;
+    if (holdingRef.current || penDown()) return; // don't talk over the user
     // Replay dialog (`CAPCOM: "Roger, go at throttle up."`): speak only the quote, in that speaker's voice.
     const dialog = splitDialog(narration);
     const say = () => {
@@ -371,6 +390,7 @@ export default function VoiceDock({
    * opened a session, else xAI text-to-speech (cached), else the browser's voice.
    */
   const speakLine = useCallback(async (text: string, speaker: string, index?: number): Promise<void> => {
+    if (penDown()) return;
     hush();
     const generation = hushes;
     setReplyCaption(text);
@@ -418,6 +438,13 @@ export default function VoiceDock({
     const run = ++pollRun.current;
     pollAnswered.current = false;
     pollDone.current = false;
+    // A remount mid-poll (HMR, re-render) doesn't read the board again: just light it.
+    if (heard.poll === poll) {
+      pollDone.current = true;
+      onPollRevealRef.current?.(poll.calls.length);
+      setReplyCaption(pollPrompt(poll));
+      return;
+    }
     // Fetch every line's audio at once so the readout has no gaps.
     for (const call of poll.calls) void fetchSpeech(call.line, call.role);
     void (async () => {
@@ -425,6 +452,8 @@ export default function VoiceDock({
         if (run !== pollRun.current) return;
         onPollRevealRef.current?.(i + 1);
         await speakLine(poll.calls[i].line, poll.calls[i].role, i);
+        // Marked heard once a line has actually played (StrictMode's instant re-run still reads it).
+        if (run === pollRun.current) heard.poll = poll;
       }
       if (run !== pollRun.current) return;
       pollDone.current = true;
@@ -455,12 +484,11 @@ export default function VoiceDock({
 
   // ---- After the flight: offer the best improvement once, and wait for a yes.
   const offerRef = useRef(offer);
-  const lastOffer = useRef<string | null>(null);
   useEffect(() => {
     offerRef.current = offer;
-    if (!offer || offer.line === lastOffer.current || mode === "checking") return;
-    lastOffer.current = offer.line;
-    if (!holdingRef.current) sayReply.current(offer.line, "Flight");
+    if (!offer || offer.line === heard.offer || mode === "checking") return;
+    heard.offer = offer.line; // spoken once, even across remounts
+    if (!holdingRef.current && !penDown()) sayReply.current(offer.line, "Flight");
   }, [offer, mode]);
 
   handleReplyRef.current = (text: string): boolean => {
