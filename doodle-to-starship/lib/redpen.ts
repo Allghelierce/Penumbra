@@ -540,15 +540,15 @@ function engineerMarkup(
 export type HistoricFailure = { part: PartKind; stageIndex?: number; label: string; detail: string };
 
 /**
- * The markup for a replayed historic flight: the engineer's outlines, dimensions and callouts,
- * then the failure. The failure's heavy outline is the one outline that comes after the
- * callouts, followed by a callout naming it and ① (an arrow) saying what happened. No other
- * issue marks: this is history, not a design to fix.
+ * The markup for a replayed historic flight, kept to the minimum so history reads apart from
+ * the design review: height and diameter, then the failure: an outline on the part that
+ * failed, a callout naming it, and ① (an arrow) saying what happened, each a few words.
  */
 export function historicMarks(reading: SketchReading, analysis: Analysis, failure: HistoricFailure | null): RedPenMark[] {
   const { design, parts } = reading;
   const sketch = new Sketch(parts);
-  if (!failure) return engineerMarkup(design, analysis, parts, sketch, []);
+  const dims = parts.length > 0 ? dimensions(design, sketch) : [];
+  if (!failure) return dims;
 
   const ofKind = parts.filter((p) => p.kind === failure.part);
   const exact = ofKind.filter((p) => failure.stageIndex === undefined || p.stageIndex === failure.stageIndex);
@@ -559,9 +559,11 @@ export function historicMarks(reading: SketchReading, analysis: Analysis, failur
   const mid = clamp(box[1] + box[3] / 2, EDGE, 1 - EDGE);
   const edge: Point = [clamp(side > 0 ? box[0] + box[2] : box[0], EDGE, 1 - EDGE), mid];
 
-  const arrow = arrowTo(edge, side, -0.07, failure.detail, shorten(failure.detail, 24));
+  const detail = fewWords(failure.detail, 5);
+  const arrow = arrowTo(edge, side, -0.07, detail, fewWords(failure.detail, 3));
   const labelX = clamp(side > 0 ? whole[0] + whole[2] + 0.05 : whole[0] - 0.05, EDGE, 1 - EDGE);
-  const note = shorten(failure.label, Math.max(8, Math.floor((side > 0 ? 1 - EDGE - labelX : labelX - EDGE) / CALLOUT_CHAR_WIDTH)));
+  const room = Math.floor((side > 0 ? 1 - EDGE - labelX : labelX - EDGE) / CALLOUT_CHAR_WIDTH);
+  const note = shorten(fewWords(failure.label, 4), Math.max(8, room));
   let labelY = clamp(mid + 0.035, EDGE, 1 - EDGE);
   // Keep the failure's name a line clear of ①'s note.
   if (arrow.kind === "arrow" && Math.abs(labelY - arrow.from[1]) < CALLOUT_LINE) {
@@ -569,12 +571,16 @@ export function historicMarks(reading: SketchReading, analysis: Analysis, failur
   }
   const label: RedPenMark = { kind: "callout", anchor: edge, label: [labelX, labelY], note };
 
-  return [
-    ...engineerMarkup(design, analysis, parts, sketch, [arrow, label]),
-    { kind: "outline", box: clampBox(box), note: "" },
-    label,
-    arrow,
-  ];
+  return [...dims, { kind: "outline", box: clampBox(box), note: "" }, label, arrow];
+}
+
+/** The first `n` words, without a dangling "a", "the" or "of", and "…" when cut. */
+function fewWords(text: string, n: number) {
+  const words = text.trim().split(/\s+/);
+  if (words.length <= n) return text.trim();
+  const kept = words.slice(0, n);
+  while (kept.length > 1 && /^(a|an|the|of|in|on|to|and|at|for|with|by)$/i.test(kept[kept.length - 1])) kept.pop();
+  return `${kept.join(" ").replace(/[\s,;:.]+$/, "")}…`;
 }
 
 /** Where a failed part sits when the reading didn't find it. */

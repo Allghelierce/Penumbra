@@ -87,13 +87,13 @@ describe("historicReview", () => {
   const reading = historicReading(crs7);
   const review = historicReview(crs7, reading);
 
-  it("ends with the failure: heavy outline, its name, then ① saying what happened", () => {
-    const [outline, label, arrow] = review.marks.slice(-3);
-    expect(outline.kind).toBe("outline");
-    expect(label).toMatchObject({ kind: "callout" });
-    expect(label.note).toMatch(/^Stage 2 helium strut/);
-    expect(arrow.kind).toBe("arrow");
-    expect(arrow.note.length).toBeGreaterThan(0);
+  it("draws only the minimum: dimensions, then the failed part's outline, its name and ①", () => {
+    expect(review.marks.map((m) => m.kind)).toEqual(["dimension", "dimension", "outline", "callout", "arrow"]);
+    const [, , outline, label, arrow] = review.marks;
+    expect(label.note).toBe("Stage 2 helium strut");
+    // A few words on the napkin; the full story is in the summary.
+    expect(arrow.note).toBe("A strut holding…");
+    expect(arrow.note.split(" ").length).toBeLessThanOrEqual(5);
     // The outline wraps the stage-2 tank the reader found.
     const tank = reading.parts.find((p) => p.kind === "tank" && p.stageIndex === 1);
     if (tank && outline.kind === "outline") {
@@ -111,9 +111,9 @@ describe("historicReview", () => {
     );
   });
 
-  it("draws only the engineer's markup for a flight that worked", () => {
+  it("draws only the dimensions for a flight that worked", () => {
     const ok = historicReview(success, historicReading(success));
-    expect(ok.marks.some((m) => m.kind === "arrow")).toBe(false);
+    expect(ok.marks.every((m) => m.kind === "dimension")).toBe(true);
     expect(ok.summary).toBe("Falcon 9, CRS-7: flew as planned.");
   });
 });
