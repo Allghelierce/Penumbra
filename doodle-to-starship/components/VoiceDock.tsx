@@ -83,6 +83,17 @@ const heard: { narration: string | null; offer: string | null; poll: Poll | null
         poll: null,
       });
 
+/**
+ * Never speak from an automated or headless browser (agents' test runs speak through the Mac's
+ * own voice, out loud) or from a tab that isn't the visible one.
+ */
+const silentHere = () =>
+  typeof navigator !== "undefined" &&
+  (navigator.webdriver || /HeadlessChrome/.test(navigator.userAgent) || document.visibilityState !== "visible");
+
+/** Only one VoiceDock per page may speak: the latest to mount claims it. */
+let owner: symbol | null = null;
+
 /** True while the pen is on the napkin; nothing talks over someone drawing. */
 const penDown = () => typeof document !== "undefined" && document.querySelector('[data-drawing="true"]') !== null;
 
@@ -178,6 +189,21 @@ export default function VoiceDock({
 }: VoiceDockProps) {
   const [mode, setMode] = useState<Mode>("checking");
   const [muted, setMuted] = useState(false);
+  const instance = useRef(Symbol("voice"));
+  // On every mount (page load, Fast Refresh, StrictMode): claim the voice, and treat whatever
+  // narration and offer are already showing as heard, so a remount never speaks.
+  useEffect(() => {
+    const me = instance.current;
+    owner = me;
+    if (narration) heard.narration = narration;
+    if (offer) heard.offer = offer.line;
+    return () => {
+      if (owner === me) owner = null;
+      hush();
+    };
+    // Mount-only on purpose.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
   const mutedRef = useRef(false);
   useEffect(() => {
     mutedRef.current = muted;
@@ -398,7 +424,7 @@ export default function VoiceDock({
    */
   const speakLine = useCallback(async (text: string, speaker: string, index?: number): Promise<void> => {
     if (penDown()) return;
-    if (mutedRef.current) {
+    if (mutedRef.current || silentHere() || owner !== instance.current) {
       // Muted: keep the pacing (poll tiles still light one by one), just say nothing.
       setReplyCaption(text);
       await new Promise((resolve) => setTimeout(resolve, SILENT_LINE_MS));
