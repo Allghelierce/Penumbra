@@ -8,6 +8,23 @@ import type { MissionReport as ReportData } from "@/lib/mission-reports";
 
 const ORBITAL_SPEED_MPS = 7800;
 
+/** One entry of MISSION_PHOTOS[mission.id] in lib/mission-photos.ts. */
+export interface MissionPhoto {
+  url: string;
+  caption: string;
+  credit: string;
+  license: string;
+  pageUrl: string;
+}
+
+const hostOf = (url: string) => {
+  try {
+    return new URL(url).hostname.replace(/^www\./, "");
+  } catch {
+    return url;
+  }
+};
+
 function formatDate(iso: string): string {
   const d = new Date(`${iso}T12:00:00Z`);
   return Number.isNaN(d.getTime()) ? iso : d.toLocaleDateString("en-US", { year: "numeric", month: "long", day: "numeric", timeZone: "UTC" });
@@ -61,6 +78,11 @@ function toMarkdown(mission: HistoricMission, report: ReportData | undefined, tr
     lines.push("", "## Timeline", "", "| T+ | Event | Altitude (km) | Speed (m/s) |", "|---|---|---|---|");
     for (const p of mission.timeline) lines.push(`| ${tPlus(p.tS)} | ${p.event ?? ""} | ${num(p.altitudeKm, 1)} | ${num(p.speedMps)} |`);
   }
+  const quotes = mission.timeline.filter((p) => p.quote);
+  if (quotes.length > 0) {
+    lines.push("", "## On the record", "");
+    for (const p of quotes) lines.push(`> "${p.quote!.text}"`, `> — ${p.quote!.speaker}, ${tPlus(p.tS)} ([source](${p.quote!.source}))`, "");
+  }
   if (mission.failure) lines.push("", "## What failed", "", `**${mission.failure.label}.** ${mission.failure.detail}`);
   if (report?.causeChain.length) {
     lines.push("", "## Failure chain", "");
@@ -103,16 +125,21 @@ export default function MissionReport({
   mission,
   report,
   trace,
+  photos,
   onClose,
 }: {
   mission: HistoricMission;
   report: ReportData | undefined;
   trace: FlightTrace;
+  /** MISSION_PHOTOS[mission.id]; nothing renders when it's missing or empty. */
+  photos?: MissionPhoto[];
   onClose: () => void;
 }) {
   const [copied, setCopied] = useState(false);
   const lost = mission.outcome === "lost";
   const data = flightData(mission, trace);
+  const photo = photos?.[0];
+  const quotes = mission.timeline.filter((p) => p.quote);
 
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
@@ -150,6 +177,19 @@ export default function MissionReport({
       </div>
 
       <main className="mx-auto flex max-w-[980px] flex-col gap-4 px-6 py-8">
+        {photo && (
+          <figure className="module overflow-hidden">
+            {/* eslint-disable-next-line @next/next/no-img-element -- remote archive photo, shown as-is */}
+            <img src={photo.url} alt={photo.caption} className="block max-h-[380px] w-full object-cover" />
+            <figcaption className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1 border-t border-rule px-5 py-2.5">
+              <span className="text-[13px] text-white/85">{photo.caption}</span>
+              <a href={photo.pageUrl} target="_blank" rel="noreferrer" className="text-[11px] text-haze underline decoration-white/20 underline-offset-4 hover:text-white">
+                {photo.credit} · {photo.license}
+              </a>
+            </figcaption>
+          </figure>
+        )}
+
         <header className="module px-5 py-5">
           <div className="flex flex-wrap items-start justify-between gap-4">
             <div>
@@ -232,6 +272,25 @@ export default function MissionReport({
                 </tbody>
               </table>
             </div>
+          </Section>
+        )}
+
+        {quotes.length > 0 && (
+          <Section n={++n} title="On the record">
+            <ul className="flex flex-col gap-4">
+              {quotes.map((p, i) => (
+                <li key={i} className="border-l border-white/40 pl-4">
+                  <blockquote className="text-[16px] leading-snug text-white">“{p.quote!.text}”</blockquote>
+                  <p className="mt-1.5 flex flex-wrap items-baseline gap-x-3 text-[12px] text-haze">
+                    <span className="font-space font-semibold uppercase tracking-[0.14em] text-white/80">{p.quote!.speaker}</span>
+                    <span className="font-mono">{tPlus(p.tS)}</span>
+                    <a href={p.quote!.source} target="_blank" rel="noreferrer" className="underline decoration-white/20 underline-offset-4 hover:text-white">
+                      {hostOf(p.quote!.source)}
+                    </a>
+                  </p>
+                </li>
+              ))}
+            </ul>
           </Section>
         )}
 
