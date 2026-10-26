@@ -12,6 +12,7 @@ import {
   type Stroke,
   type Verdict,
 } from "@/lib/design";
+import { launchRecord } from "@/lib/presets";
 import { fmtKm } from "./plan";
 import type { ReplayState } from "./useReplay";
 
@@ -62,28 +63,29 @@ function verdictCopy({ outcome, design, analysis, maxAltKm }: EndCardProps): { g
   const dest = design.destination;
   const budget = `${kms(analysis.totalDeltaVMps)} of ${kms(analysis.requiredDeltaVMps)} km/s`;
   const margin = analysis.marginMps;
+  const history = launchRecord(design.name);
   switch (outcome) {
     case "destination":
       return {
         go: true,
         headline: dest === "leo" ? "In orbit" : `Made it to ${SHORT[dest]}`,
-        line: `${budget}, ${kms(margin)} km/s to spare.`,
+        line: history ?? `${budget}, ${kms(margin)} km/s to spare.`,
       };
     case "orbit":
       return dest === "leo"
-        ? { go: true, headline: "In orbit", line: `${budget}, ${kms(margin)} km/s to spare.` }
-        : { go: false, headline: `Reaches orbit, not ${SHORT[dest]}`, line: `${budget}: ${kms(margin)} km/s short.` };
+        ? { go: true, headline: "In orbit", line: history ?? `${budget}, ${kms(margin)} km/s to spare.` }
+        : { go: false, headline: `Reaches orbit, not ${SHORT[dest]}`, line: history ?? `${budget}: ${kms(margin)} km/s short.` };
     case "suborbital":
       return {
         go: false,
         headline: "Falls back to Earth",
-        line: `Apogee ${fmtKm(maxAltKm)} km, then a rapid unscheduled disassembly. ${budget}.`,
+        line: history ?? `Apogee ${fmtKm(maxAltKm)} km, then a rapid unscheduled disassembly. ${budget}.`,
       };
     default:
       return {
         go: false,
         headline: "Never left the pad",
-        line: `Liftoff thrust-to-weight is ${analysis.liftoffTwr.toFixed(2)}; it has to beat 1.`,
+        line: history ?? `Liftoff thrust-to-weight is ${analysis.liftoffTwr.toFixed(2)}; it has to beat 1.`,
       };
   }
 }

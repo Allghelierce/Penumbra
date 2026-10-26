@@ -2,6 +2,7 @@ import type { ReadRequest, ReadResponse } from "@/lib/design";
 import { readFromGeometry } from "@/lib/sketch/geometry";
 import { isDestinationId } from "@/lib/sketch/ids";
 import { buildReadPrompt, READ_SYSTEM, READING_SCHEMA, sanitizeReading, type GrokReading } from "@/lib/sketch/vision";
+import { flyAsRealRocket } from "@/lib/presets";
 import { metered, paidCallsAllowed, visionJson } from "@/lib/xai";
 
 export function POST(request: Request) {
@@ -32,13 +33,15 @@ async function handle(request: Request) {
         const geo = geometry.confidence ?? 1;
         const confidence = Math.min(grok, geo);
         const problem = confidence >= 0.5 ? null : grok <= geo ? (reading.problem ?? geometry.problem) : geometry.problem;
-        return Response.json({ reading: { ...reading, confidence, problem: problem ?? null }, source: "grok" } satisfies ReadResponse);
+        const snapped = { ...reading, design: flyAsRealRocket(reading.design), confidence, problem: problem ?? null };
+        return Response.json({ reading: snapped, source: "grok" } satisfies ReadResponse);
       }
     }
 
-    return Response.json({ reading: geometry, source: "geometry" } satisfies ReadResponse);
+    return Response.json({ reading: { ...geometry, design: flyAsRealRocket(geometry.design) }, source: "geometry" } satisfies ReadResponse);
   } catch (err) {
     console.warn("[api/read] falling back to a blank reading:", err);
-    return Response.json({ reading: readFromGeometry([], destination), source: "geometry" } satisfies ReadResponse);
+    const blank = readFromGeometry([], destination);
+    return Response.json({ reading: { ...blank, design: flyAsRealRocket(blank.design) }, source: "geometry" } satisfies ReadResponse);
   }
 }

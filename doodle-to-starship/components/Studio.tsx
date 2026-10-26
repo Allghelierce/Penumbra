@@ -44,6 +44,7 @@ import { cutoutBlack } from "@/lib/cutout";
 import { recap } from "@/lib/recap";
 import { calloutFor, offerFor, pollRoom } from "@/lib/mission-control";
 import { analyze, DESTINATIONS, simulateFlight } from "@/lib/physics";
+import { flyAsRealRocket } from "@/lib/presets";
 import { diagnose, sensitivities } from "@/lib/diagnosis";
 import type { ReviewIssue, Trade } from "@/components/DesignReview";
 
@@ -180,8 +181,6 @@ export default function Studio() {
   const [poll, setPoll] = useState<Poll | null>(null);
   const [revealed, setRevealed] = useState(0);
   const [offer, setOffer] = useState<{ line: string; fix?: DesignAction } | null>(null);
-  // The sample on the napkin, if one is loaded untouched, so its design keeps the sample's name.
-  const sampleTitle = useRef<string | null>(null);
   // One counter per async stream: a response only lands if no newer request (or Clear) superseded it.
   const runs = useRef({ check: 0, review: 0, concept: 0, patch: 0, priorArt: 0, launch: 0 });
   const checking = useRef(false);
@@ -273,7 +272,7 @@ export default function Studio() {
       if (id !== runs.current.check) return;
       // The target may have changed while reading; the latest pick wins.
       const target = latest.current.destination;
-      const nextDesign: Design = { ...read.design, destination: target, name: sampleTitle.current ?? read.design.name };
+      const nextDesign: Design = flyAsRealRocket({ ...read.design, destination: target });
       const nextReading: SketchReading = { ...read, design: nextDesign };
       const nextAnalysis = safeAnalyze(nextDesign);
       latest.current = { ...latest.current, reading: nextReading, design: nextDesign };
@@ -412,7 +411,6 @@ export default function Studio() {
   }
 
   function changeStrokes(next: Stroke[]) {
-    sampleTitle.current = null;
     setStrokes(next);
     if (latest.current.reading) setStale(true);
   }
@@ -428,7 +426,6 @@ export default function Studio() {
     for (const key of Object.keys(runs.current) as (keyof typeof runs.current)[]) runs.current[key]++;
     checking.current = false;
     rendered.current = null;
-    sampleTitle.current = null;
     setAttempts([]);
     setPoll(null);
     setOffer(null);
@@ -457,7 +454,6 @@ export default function Studio() {
     const sketch = DEMO_SKETCHES.find((s) => s.id === id);
     if (!sketch) return;
     clearAll();
-    sampleTitle.current = sketch.title;
     setDestination(sketch.destination);
     const controller = new AbortController();
     replay.current = controller;
@@ -482,7 +478,6 @@ export default function Studio() {
     const sketch = DEMO_SKETCHES.find((s) => s.id === params.get("demo"));
     if (!sketch) return;
     setStrokes(sketch.strokes);
-    sampleTitle.current = sketch.title;
     setDestination(sketch.destination);
     if (params.get("check") === "1") setCheckRequest((n) => n + 1);
     /* eslint-enable react-hooks/set-state-in-effect */

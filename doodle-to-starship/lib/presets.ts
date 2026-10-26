@@ -8,6 +8,65 @@ function tankVolume(usablePropellantKg: number, propellant: PropellantId): numbe
   return usablePropellantKg / (PROPELLANT_DENSITY_KG_M3[propellant] * USABLE_FILL);
 }
 
+/** What actually happened when this rocket flew. Shown at the end of a launch. */
+const LAUNCH_RECORD: Record<string, string> = {
+  "Falcon 9 Block 5":
+    "Falcon 9 has flown hundreds of times since 2010. The booster lands and flies again. Two early flights failed: CRS-7 broke up in 2015, and AMOS-6 exploded on the pad in 2016.",
+  "Saturn V":
+    "Saturn V flew 13 times from 1967 to 1973 and never lost a crew. Apollo 11 left on one in July 1969 and landed on the Moon.",
+  Starship:
+    "Starship first flew in April 2023 and broke up before orbit. Later flights reached space, and the tower has caught Super Heavy on the way back.",
+  Electron:
+    "Electron's first launch, in May 2017, missed orbit. The second flight, in January 2018, made orbit. It has flown more than 50 times since.",
+};
+
+/** The sentence for the end card, or null if this design is not one of the flown rockets. */
+export function launchRecord(name: string): string | null {
+  return LAUNCH_RECORD[name] ?? null;
+}
+
+/**
+ * The sketch only picks a rocket. Stages, tanks, engines and payload are copied
+ * from the closest preset, which uses published flight hardware. The chosen destination stays.
+ */
+export function flyAsRealRocket(sketch: Design): Design {
+  const preset = closestPreset(sketch);
+  return {
+    ...preset,
+    destination: sketch.destination,
+    features: [...preset.features],
+    stages: preset.stages.map((stage) => ({
+      ...stage,
+      engines: stage.engines.map((cluster) => ({ ...cluster })),
+    })),
+  };
+}
+
+function closestPreset(sketch: Design): Design {
+  const stages = Math.max(1, sketch.stages.length);
+  const engines = sketch.stages[0]?.engines.reduce((sum, cluster) => sum + cluster.count, 0) || 1;
+  const height = sketch.heightM > 0 ? sketch.heightM : 1;
+  let best = PRESETS[0];
+  let bestScore = -Infinity;
+  for (const preset of PRESETS) {
+    const presetEngines = preset.stages[0].engines.reduce((sum, cluster) => sum + cluster.count, 0);
+    const stageGap = Math.abs(stages - preset.stages.length);
+    const stageScore = stageGap === 0 ? 8 : Math.max(0, 4 - stageGap * 3);
+    const score = stageScore + closeness(engines, presetEngines) * 3 + closeness(height, preset.heightM) * 2;
+    if (score > bestScore) {
+      best = preset;
+      bestScore = score;
+    }
+  }
+  return best;
+}
+
+/** 1 when the two sizes match, falling off as their ratio grows. */
+function closeness(a: number, b: number): number {
+  if (!(a > 0) || !(b > 0)) return 0;
+  return Math.exp(-Math.abs(Math.log(a / b)));
+}
+
 export const PRESETS: Design[] = [
   {
     // Falcon 9 Block 5, expendable LEO payload 22,800 kg.
