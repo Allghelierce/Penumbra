@@ -22,9 +22,30 @@ export const HISTORIC_MISSIONS: HistoricMission[] = [
     timeline: [
       { tS: 0, altitudeKm: 0, speedMps: 0, kind: "liftoff", event: "Liftoff" },
       { tS: 25, altitudeKm: 1.5, speedMps: 160, event: "Fire above the engine" },
-      { tS: 34, altitudeKm: 2.3, speedMps: 170, kind: "engine-cutoff", event: "Engine loses pressure and shuts down" },
-      { tS: 45, altitudeKm: 2.6, speedMps: 40, kind: "apogee", event: "Falling back" },
-      { tS: 60, altitudeKm: 0, speedMps: 120, kind: "impact", event: "Impact near the launch site" },
+      {
+        tS: 26,
+        altitudeKm: 1.6,
+        speedMps: 150,
+        kind: "engine-cutoff",
+        event: "The rocket pitches over as the engine plume distorts",
+        quote: {
+          speaker: "Range Safety Officer",
+          text: "This is the RCO, we have an active track with the radar.",
+          source: "https://spacenews.com/?p=8075",
+        },
+      },
+      {
+        tS: 45,
+        altitudeKm: 0,
+        speedMps: 120,
+        kind: "impact",
+        event: "Impact in the ocean near the launch site",
+        quote: {
+          speaker: "SpaceX statement",
+          text: "We had a successful liftoff and Falcon made it well clear of the launch pad.",
+          source: "https://spacenews.com/?p=8075",
+        },
+      },
     ],
     rootCause:
       "An aluminum fitting on the engine's fuel line corroded in the salty island air, leaked kerosene, and the fire cut off the engine's pneumatic pressure.",
@@ -61,7 +82,18 @@ export const HISTORIC_MISSIONS: HistoricMission[] = [
     timeline: [
       { tS: 0, altitudeKm: 0, speedMps: 0, kind: "liftoff", event: "Liftoff" },
       { tS: 70, altitudeKm: 11, speedMps: 450, kind: "max-q", event: "Max-Q" },
-      { tS: 139, altitudeKm: 45, speedMps: 1100, kind: "breakup", event: "Second stage overpressure: vehicle breaks up" },
+      {
+        tS: 139,
+        altitudeKm: 45,
+        speedMps: 1100,
+        kind: "breakup",
+        event: "Second stage overpressure: vehicle breaks up",
+        quote: {
+          speaker: "Elon Musk",
+          text: "Experienced a problem shortly before first stage shutdown.",
+          source: "https://iol.co.za/news/2015-06-29-spacex-rocket-explodes-after-liftoff/",
+        },
+      },
     ],
     rootCause:
       "A steel strut holding a helium bottle inside the second-stage oxygen tank failed far below its rated load. The bottle broke free and helium overpressurized the tank.",
@@ -99,7 +131,18 @@ export const HISTORIC_MISSIONS: HistoricMission[] = [
       { tS: 0, altitudeKm: 0, speedMps: 0, kind: "liftoff", event: "Liftoff with several engines already out" },
       { tS: 62, altitudeKm: 11, speedMps: 400, kind: "max-q", event: "Max-Q" },
       { tS: 170, altitudeKm: 39, speedMps: 600, kind: "apogee", event: "Stage separation fails; the stack tumbles" },
-      { tS: 239, altitudeKm: 30, speedMps: 500, kind: "breakup", event: "Flight termination system destroys the vehicle" },
+      {
+        tS: 239,
+        altitudeKm: 30,
+        speedMps: 500,
+        kind: "breakup",
+        event: "Flight termination system destroys the vehicle",
+        quote: {
+          speaker: "SpaceX",
+          text: "Starship experienced a rapid unscheduled disassembly before stage separation.",
+          source: "https://www.fox13news.com/news/spacex-starship-explodes-rapid-unscheduled-disassembly",
+        },
+      },
     ],
     rootCause:
       "Propellant leaks started fires in the booster's engine section, several Raptors failed, steering control was lost and the ship never separated.",
