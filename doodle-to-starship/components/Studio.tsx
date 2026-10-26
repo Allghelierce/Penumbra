@@ -805,7 +805,8 @@ export default function Studio() {
             </p>
           </section>
 
-          <section className="min-h-0 overflow-y-auto border-l border-rule bg-black">
+          {/* Bottom padding keeps the last row clear of the narrator's mute toggle (fixed bottom-right). */}
+          <section className="min-h-0 overflow-y-auto border-l border-rule bg-black pb-14">
             {mission ? (
               step >= 4 ? (
                 <MissionFile mission={mission} onLaunch={startLaunch} canLaunch={Boolean(reviewed && analysis)} />
