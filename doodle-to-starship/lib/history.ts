@@ -3,7 +3,8 @@
 // timeline. Pure functions over a HistoricMission; no API calls.
 
 import { DEMO_SKETCHES } from "./demo-sketches";
-import type { Analysis, FlightEvent, FlightPoint, FlightTrace, HistoricMission, Review, SketchReading } from "./design";
+import type { Analysis, FlightEvent, FlightPoint, FlightTrace, HistoricMission, Part, Point, Review, SketchReading, Stroke } from "./design";
+import { ALL_MISSIONS } from "./mission-catalog";
 import { analyze } from "./physics";
 import { historicMarks } from "./redpen";
 import { readFromGeometry } from "./sketch/geometry";
@@ -78,5 +79,120 @@ function sampleAt(timeline: HistoricMission["timeline"], tS: number) {
   return {
     altitudeKm: Math.max(0, a.altitudeKm + (b.altitudeKm - a.altitudeKm) * f),
     speedMps: Math.max(0, a.speedMps + (b.speedMps - a.speedMps) * f),
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Fix and try again: what was changed after each loss, drawn onto the sketch, and the flight
+// that came back.
+
+/** The successful flight that followed each loss. */
+export const COMEBACK: Record<string, string> = { "falcon1-f1": "falcon1-f4", crs7: "og2", ift1: "ift5" };
+
+/** The comeback flight for a loss, looked up in the full mission catalog. */
+export function comebackFor(m: HistoricMission): HistoricMission | null {
+  const id = COMEBACK[m.id];
+  return (id && ALL_MISSIONS.find((x) => x.id === id)) || null;
+}
+
+/** The red pen's label for the fix. */
+export function fixNote(m: HistoricMission): string {
+  const notes: Record<string, string> = {
+    "falcon1-f1": "FIX: steel fittings",
+    crs7: "FIX: stronger struts",
+    ift1: "FIX: deflector + hot staging",
+  };
+  return notes[m.id] ?? "FIX: redesign";
+}
+
+type Box = [number, number, number, number];
+
+/** A few hand-drawn strokes, all marked detail, that draw the fix into the failed part's box. */
+export function fixStrokes(m: HistoricMission, reading: SketchReading): Stroke[] {
+  const failure = m.failure;
+  if (!failure) return [];
+  const box = partBox(reading.parts, (p) => p.kind === failure.part && (failure.stageIndex === undefined || p.stageIndex === failure.stageIndex)) ??
+    partBox(reading.parts, (p) => p.kind === failure.part) ??
+    partBox(reading.parts, () => true);
+  if (!box) return [];
+  const [x, y, w, h] = box;
+  const wobble = jitter(m.id.length * 7 + 3);
+  const line = (a: Point, b: Point, n = 8): Stroke => ({
+    detail: true,
+    points: Array.from({ length: n + 1 }, (_, i): Point => {
+      const t = i / n;
+      return clampPoint([a[0] + (b[0] - a[0]) * t + wobble() * 0.002, a[1] + (b[1] - a[1]) * t + wobble() * 0.002]);
+    }),
+  });
+  const ring = (cx: number, cy: number, rx: number, ry: number): Stroke => ({
+    detail: true,
+    points: Array.from({ length: 29 }, (_, i): Point => {
+      const a = (i / 28) * Math.PI * 2.08;
+      return clampPoint([cx + Math.cos(a) * rx + wobble() * 0.002, cy + Math.sin(a) * ry + wobble() * 0.002]);
+    }),
+  });
+
+  if (m.id === "falcon1-f1") {
+    // A reinforced fitting ring near the top of the engine, with two hatch marks beside it.
+    const cy = y + h * 0.3;
+    return [
+      ring(x + w / 2, cy, w * 0.32, h * 0.14),
+      ring(x + w / 2, cy, w * 0.36, h * 0.17),
+      line([x + w * 0.06, cy - h * 0.12], [x + w * 0.16, cy + h * 0.06], 4),
+      line([x + w * 0.84, cy - h * 0.12], [x + w * 0.94, cy + h * 0.06], 4),
+    ];
+  }
+  if (m.id === "crs7") {
+    // An X-brace inside the stage-2 tank, plus a doubled strut across it.
+    const [l, r, t, b] = [x + w * 0.15, x + w * 0.85, y + h * 0.15, y + h * 0.85];
+    return [
+      line([l, t], [r, b]),
+      line([r, t], [l, b]),
+      line([l, y + h * 0.48], [r, y + h * 0.48], 6),
+      line([l, y + h * 0.53], [r, y + h * 0.53], 6),
+    ];
+  }
+  if (m.id === "ift1") {
+    // A thick flame-deflector plate under the booster, and a hot-staging ring at the interstage.
+    const plateY = Math.min(0.985, y + h + 0.012);
+    const [pl, pr] = [x - w * 0.2, x + w * 1.2];
+    const booster = partBox(reading.parts, (p) => p.kind === "tank" && p.stageIndex === 0);
+    const ringY = booster ? booster[1] : y - h * 4;
+    const [rl, rr] = booster ? [booster[0], booster[0] + booster[2]] : [x, x + w];
+    const strokes = [0, 0.006, 0.012].map((dy) => line([pl, Math.min(0.995, plateY + dy)], [pr, Math.min(0.995, plateY + dy)], 6));
+    strokes.push(line([rl, ringY], [rr, ringY], 6));
+    // Vent ticks along the hot-staging ring.
+    for (let i = 1; i <= 4; i++) {
+      const vx = rl + ((rr - rl) * i) / 5;
+      strokes.push(line([vx, ringY - 0.008], [vx, ringY + 0.008], 2));
+    }
+    return strokes;
+  }
+  // Anything else: a reinforcing cross-hatch in the failed part.
+  return [line([x + w * 0.2, y + h * 0.2], [x + w * 0.8, y + h * 0.8]), line([x + w * 0.8, y + h * 0.2], [x + w * 0.2, y + h * 0.8])];
+}
+
+function partBox(parts: Part[], test: (p: Part) => boolean): Box | null {
+  const hits = parts.filter(test);
+  if (hits.length === 0) return null;
+  const x0 = Math.min(...hits.map((p) => p.box[0]));
+  const y0 = Math.min(...hits.map((p) => p.box[1]));
+  const x1 = Math.max(...hits.map((p) => p.box[0] + p.box[2]));
+  const y1 = Math.max(...hits.map((p) => p.box[1] + p.box[3]));
+  return [x0, y0, x1 - x0, y1 - y0];
+}
+
+function clampPoint([x, y]: Point): Point {
+  return [Math.min(1, Math.max(0, x)), Math.min(1, Math.max(0, y))];
+}
+
+/** Deterministic pen wobble in -1..1, the same on every render. */
+function jitter(seed: number) {
+  let a = seed >>> 0;
+  return () => {
+    a = (a + 0x6d2b79f5) >>> 0;
+    let t = Math.imul(a ^ (a >>> 15), a | 1);
+    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+    return (((t ^ (t >>> 14)) >>> 0) / 4294967296) * 2 - 1;
   };
 }

@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import type { HistoricMission, RedPenMark } from "./design";
-import { historicReading, historicReview, historicTrace } from "./history";
+import { comebackFor, COMEBACK, fixNote, fixStrokes, historicReading, historicReview, historicTrace } from "./history";
 import { HISTORIC_MISSIONS } from "./missions";
 
 /** A local stand-in until lib/missions.ts lands; the shape is HistoricMission's. */
@@ -181,4 +181,32 @@ describe("the real missions", () => {
     expect(trace.outcome).toBe(m.outcome === "lost" ? "suborbital" : "orbit");
     expect(trace.points.length).toBeGreaterThan(1);
   });
+});
+
+describe("fix and try again", () => {
+  it.each(HISTORIC_MISSIONS.filter((m) => COMEBACK[m.id]).map((m) => [m.id, m] as const))(
+    "%s: has a comeback flight, a short fix note and detail strokes in the failed part",
+    (_, m) => {
+      const comeback = comebackFor(m);
+      expect(comeback?.id).toBe(COMEBACK[m.id]);
+      expect(comeback?.outcome).toBe("success");
+      expect(fixNote(m)).toMatch(/^FIX: /);
+      expect(fixNote(m).split(" ").length).toBeLessThanOrEqual(5);
+
+      const reading = historicReading(m);
+      const strokes = fixStrokes(m, reading);
+      expect(strokes.length).toBeGreaterThanOrEqual(2);
+      for (const stroke of strokes) {
+        expect(stroke.detail).toBe(true);
+        expect(stroke.points.length).toBeGreaterThan(1);
+        for (const [x, y] of stroke.points) {
+          expect(x).toBeGreaterThanOrEqual(0);
+          expect(x).toBeLessThanOrEqual(1);
+          expect(y).toBeGreaterThanOrEqual(0);
+          expect(y).toBeLessThanOrEqual(1);
+        }
+      }
+      expect(fixStrokes(m, reading)).toEqual(strokes);
+    },
+  );
 });
