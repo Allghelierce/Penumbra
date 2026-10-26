@@ -536,6 +536,64 @@ function engineerMarkup(
   ];
 }
 
+/** What failed on a replayed historic flight (HistoricMission["failure"]). */
+export type HistoricFailure = { part: PartKind; stageIndex?: number; label: string; detail: string };
+
+/**
+ * The markup for a replayed historic flight: the engineer's outlines, dimensions and callouts,
+ * then the failure. The failure's heavy outline is the one outline that comes after the
+ * callouts, followed by a callout naming it and ① (an arrow) saying what happened. No other
+ * issue marks: this is history, not a design to fix.
+ */
+export function historicMarks(reading: SketchReading, analysis: Analysis, failure: HistoricFailure | null): RedPenMark[] {
+  const { design, parts } = reading;
+  const sketch = new Sketch(parts);
+  if (!failure) return engineerMarkup(design, analysis, parts, sketch, []);
+
+  const ofKind = parts.filter((p) => p.kind === failure.part);
+  const exact = ofKind.filter((p) => failure.stageIndex === undefined || p.stageIndex === failure.stageIndex);
+  const box =
+    union(exact.map((p) => p.box)) ?? union(ofKind.map((p) => p.box)) ?? failureFallback(failure.part, sketch);
+  const side = sketch.openSide();
+  const whole = sketch.whole();
+  const mid = clamp(box[1] + box[3] / 2, EDGE, 1 - EDGE);
+  const edge: Point = [clamp(side > 0 ? box[0] + box[2] : box[0], EDGE, 1 - EDGE), mid];
+
+  const arrow = arrowTo(edge, side, -0.07, failure.detail, shorten(failure.detail, 24));
+  const labelX = clamp(side > 0 ? whole[0] + whole[2] + 0.05 : whole[0] - 0.05, EDGE, 1 - EDGE);
+  const note = shorten(failure.label, Math.max(8, Math.floor((side > 0 ? 1 - EDGE - labelX : labelX - EDGE) / CALLOUT_CHAR_WIDTH)));
+  let labelY = clamp(mid + 0.035, EDGE, 1 - EDGE);
+  // Keep the failure's name a line clear of ①'s note.
+  if (arrow.kind === "arrow" && Math.abs(labelY - arrow.from[1]) < CALLOUT_LINE) {
+    labelY = clamp(arrow.from[1] + CALLOUT_LINE, EDGE, 1 - EDGE);
+  }
+  const label: RedPenMark = { kind: "callout", anchor: edge, label: [labelX, labelY], note };
+
+  return [
+    ...engineerMarkup(design, analysis, parts, sketch, [arrow, label]),
+    { kind: "outline", box: clampBox(box), note: "" },
+    label,
+    arrow,
+  ];
+}
+
+/** Where a failed part sits when the reading didn't find it. */
+function failureFallback(kind: PartKind, sketch: Sketch): Box {
+  const whole = sketch.whole();
+  if (kind === "engine") return sketch.engines();
+  if (kind === "fin" || kind === "landing-legs") return sketch.fins();
+  if (kind === "nose" || kind === "payload" || kind === "heat-shield") return slice(whole, 0, 0.2);
+  if (kind === "tank") return sketch.biggestTankPart()?.box ?? slice(whole, 0.25, 0.75);
+  return whole;
+}
+
+function shorten(text: string, max: number) {
+  if (text.length <= max) return text;
+  const cut = text.slice(0, max - 1);
+  const space = cut.lastIndexOf(" ");
+  return `${(space > max * 0.5 ? cut.slice(0, space) : cut).replace(/[\s,;:.]+$/, "")}…`;
+}
+
 /** The mission-patch sticker sits in the napkin's top-right corner; no label goes there. */
 const PATCH = { x: 0.68, y: 0.24 };
 
