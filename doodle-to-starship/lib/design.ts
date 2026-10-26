@@ -121,7 +121,9 @@ export type FlightEventKind =
   | "apogee"
   | "impact"
   | "arrival"
-  | "pad-failure";
+  | "pad-failure"
+  /** The vehicle broke up in flight (historic replays). */
+  | "breakup";
 
 export interface FlightPoint {
   tS: number;
@@ -319,4 +321,40 @@ export interface PriorArtResult {
   year: number | null;
   abstract: string;
   url: string;
+}
+
+/** A real flight from history, replayed through the studio. */
+export interface HistoricMission {
+  /** e.g. "falcon1-f1". */
+  id: string;
+  /** DEMO_SKETCHES id whose drawing and pinned photo stand in for the vehicle. */
+  sketchId: string;
+  /** e.g. "Falcon 1". */
+  vehicle: string;
+  /** e.g. "Flight 1 · FalconSAT-2". */
+  mission: string;
+  /** ISO date, e.g. "2006-03-24". */
+  date: string;
+  site: string;
+  destination: DestinationId;
+  outcome: "lost" | "success";
+  /** The part that failed (looked up in the reading's parts) and what the red pen writes there. */
+  failure: { part: PartKind; stageIndex?: number; label: string; detail: string } | null;
+  /** The real timeline in mission elapsed seconds; the launch replays it. */
+  timeline: {
+    tS: number;
+    altitudeKm: number;
+    speedMps: number;
+    kind?: FlightEventKind;
+    event?: string;
+    /** Real recorded dialog only, with its source. */
+    quote?: { speaker: string; text: string; source: string };
+  }[];
+  rootCause: string;
+  whatChanged: string;
+  /** e.g. "Flight 4, 28 Sep 2008: first privately developed liquid-fuel rocket to reach orbit". */
+  returnToFlight: string;
+  /** Numbers that matter, each with what it means in plain words. */
+  stats: { label: string; value: string; meaning: string }[];
+  sources: { title: string; url: string }[];
 }
