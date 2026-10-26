@@ -2,6 +2,7 @@
 
 import { useCallback, useState } from "react";
 import MissionReport from "@/components/MissionReport";
+import { MISSION_PHOTOS } from "@/lib/mission-photos";
 import { MISSION_REPORTS } from "@/lib/mission-reports";
 import {
   NAPKIN_ASPECT,
@@ -367,11 +368,30 @@ function Debrief({ mission, renderUrl, renderPending, strokes, design, video, on
   const [showReport, setShowReport] = useState(false);
   const closeReport = useCallback(() => setShowReport(false), [setShowReport]);
   const report = MISSION_REPORTS[mission.id];
+  // Photos from the real flight (Wikimedia Commons), when there are any.
+  const photos = (MISSION_PHOTOS[mission.id] ?? []).slice(0, 2);
   const section = "border-t border-rule px-5 py-3 sm:px-7";
   const label = "text-[11px] font-semibold uppercase tracking-[0.2em] text-haze";
   return (
     <div className="ls-fade absolute inset-0 flex items-start justify-center overflow-y-auto bg-umbra/75 px-4 py-8 backdrop-blur-[3px] sm:items-center">
       <div className="ls-rise w-full max-w-3xl overflow-hidden rounded-[3px] border border-rule bg-panel text-starlight shadow-[0_30px_80px_rgba(0,0,0,0.55)]">
+        {photos.length > 0 && (
+          <div className={`grid gap-px border-b border-rule bg-rule ${photos.length > 1 ? "grid-cols-2" : "grid-cols-1"}`}>
+            {photos.map((ph) => (
+              <a key={ph.url} href={ph.pageUrl} target="_blank" rel="noopener noreferrer" className="relative block bg-panel">
+                {/* Wikimedia images are remote; next/image would need them allow-listed. */}
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img src={ph.url} alt={ph.caption} loading="lazy" className="h-40 w-full object-cover sm:h-48" />
+                <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/85 to-transparent px-3 pb-2 pt-6">
+                  <div className="text-xs text-starlight">{ph.caption}</div>
+                  <div className="text-[10px] text-haze">
+                    {ph.credit} · {ph.license}
+                  </div>
+                </div>
+              </a>
+            ))}
+          </div>
+        )}
         <div className="grid sm:grid-cols-[minmax(0,14rem)_1fr]">
           <RenderFrame url={renderUrl} pending={renderPending} strokes={strokes} name={design.name} video={video} />
           <div className="flex min-w-0 flex-col justify-center p-5 sm:p-7">
@@ -487,7 +507,7 @@ function Debrief({ mission, renderUrl, renderPending, strokes, design, video, on
               </button>
             )}
           </div>
-          {showReport && <MissionReport mission={mission} report={report} trace={trace} onClose={closeReport} />}
+          {showReport && <MissionReport mission={mission} report={report} trace={trace} photos={MISSION_PHOTOS[mission.id]} onClose={closeReport} />}
         </div>
       </div>
     </div>
