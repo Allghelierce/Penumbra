@@ -45,7 +45,7 @@ import { cutoutBlack } from "@/lib/cutout";
 import { DEMO_CONCEPTS } from "@/lib/demo-assets";
 import { historicReading, historicReview, historicTrace } from "@/lib/history";
 import { prefetchNarration } from "@/lib/voice/tts";
-import { HISTORIC_MISSIONS } from "@/lib/missions";
+import { ALL_MISSIONS } from "@/lib/mission-catalog";
 import MissionFile from "@/components/MissionFile";
 import MissionPicker from "@/components/MissionPicker";
 import StepBar from "@/components/StepBar";
@@ -100,6 +100,17 @@ function untouchedDemo(strokes: Stroke[]) {
     }) ?? null
   );
 }
+
+/** The three flights the demo walks through, shown as big cards; every other flight is listed below them. */
+const FEATURED = ["falcon1-f1", "crs7", "ift1"];
+const FEATURED_MISSIONS = FEATURED.map((id) => ALL_MISSIONS.find((m) => m.id === id)).filter((m): m is HistoricMission => Boolean(m));
+const MORE_FLIGHTS = ALL_MISSIONS.filter((m) => !FEATURED.includes(m.id));
+/** Each family flies the same napkin sketch, so the sketch names the family. */
+const FAMILIES = [
+  { sketchId: "napkin-hopper", label: "Falcon 1" },
+  { sketchId: "two-stage-orbiter", label: "Falcon 9 & Falcon Heavy" },
+  { sketchId: "mars-ship", label: "Starship" },
+];
 
 /** The flow, one step at a time, one primary button per step. */
 const STEPS = ["Pick", "Sketch", "Diagnose", "Build", "Fly", "Debrief"];
@@ -691,7 +702,50 @@ export default function Studio() {
           <div className="w-full max-w-[1200px]">
             <h2 className="font-space text-[26px] font-semibold uppercase tracking-[0.1em] text-white">Pick a real flight to diagnose</h2>
             <p className="mb-6 mt-1 text-[15px] text-haze">Each rocket is drawn on a napkin. Find what broke, watch it get built, then fly what actually happened.</p>
-            <MissionPicker missions={HISTORIC_MISSIONS} onPick={pickMission} onDrawOwn={drawOwn} />
+            <MissionPicker missions={FEATURED_MISSIONS} onPick={pickMission} onDrawOwn={drawOwn} />
+            {MORE_FLIGHTS.length > 0 && (
+              <div className="mt-10 pb-6">
+                <h3 className="font-space text-[13px] font-semibold uppercase tracking-[0.22em] text-white/75">More real flights</h3>
+                <div className="mt-4 grid grid-cols-3 gap-6">
+                  {FAMILIES.map((family) => {
+                    const flights = MORE_FLIGHTS.filter((m) => m.sketchId === family.sketchId);
+                    if (flights.length === 0) return null;
+                    return (
+                      <div key={family.sketchId}>
+                        <p className="mb-2 text-[11px] uppercase tracking-[0.2em] text-haze">{family.label}</p>
+                        <ul className="space-y-2">
+                          {flights.map((m) => (
+                            <li key={m.id}>
+                              <button
+                                type="button"
+                                onClick={() => pickMission(m)}
+                                className="flex w-full items-center gap-3 border border-rule bg-black/70 px-3 py-2.5 text-left transition-colors hover:border-white/60"
+                              >
+                                <span
+                                  className={`shrink-0 border px-1.5 py-px text-[9px] font-semibold uppercase tracking-[0.16em] ${
+                                    m.outcome === "lost" ? "border-nogo text-nogo" : "border-go-signal text-go-signal"
+                                  }`}
+                                >
+                                  {m.outcome === "lost" ? "Lost" : "Success"}
+                                </span>
+                                <span className="min-w-0 flex-1">
+                                  <span className="block truncate text-[13px] font-semibold text-white">
+                                    {m.vehicle} · {m.mission}
+                                  </span>
+                                  <span className="block truncate text-[12px] text-haze">
+                                    {m.date.slice(0, 4)} · {m.failure?.label ?? m.stats[0]?.meaning ?? ""}
+                                  </span>
+                                </span>
+                              </button>
+                            </li>
+                          ))}
+                        </ul>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
           </div>
         </main>
       ) : (
@@ -908,7 +962,9 @@ function MissionBrief({ mission, step, identified }: { mission: HistoricMission;
     <aside className="flex flex-col gap-3 p-3">
       <section className="module">
         <header className="module-head">
-          <h3 className="font-space text-[11px] font-semibold uppercase tracking-[0.22em] text-white/70">{step === 1 ? "The flight" : "What failed"}</h3>
+          <h3 className="font-space text-[11px] font-semibold uppercase tracking-[0.22em] text-white/70">
+            {step === 1 ? "The flight" : mission.outcome === "lost" ? "What failed" : "What went right"}
+          </h3>
           {mission.outcome === "lost" ? (
             <span className="font-space text-[12px] font-semibold tracking-[0.2em] text-nogo">LOST</span>
           ) : (
@@ -921,14 +977,27 @@ function MissionBrief({ mission, step, identified }: { mission: HistoricMission;
           <p className="mt-0.5 text-[13px] text-haze">
             {new Date(`${mission.date}T12:00:00Z`).toLocaleDateString("en-US", { year: "numeric", month: "long", day: "numeric", timeZone: "UTC" })} · {mission.site}
           </p>
-          {step === 1 && <p className="mt-3 text-[14px] leading-snug text-haze">Here is the vehicle, drawn on a napkin. Press Diagnose to find what broke.</p>}
-          {step >= 2 && mission.failure && (
+          {step === 1 && (
+            <p className="mt-3 text-[14px] leading-snug text-haze">
+              Here is the vehicle, drawn on a napkin. Press Diagnose to find {mission.outcome === "lost" ? "what broke" : "what made it work"}.
+            </p>
+          )}
+          {step >= 2 && mission.outcome === "lost" && mission.failure && (
             <div className="mt-4 border-t border-rule pt-3">
               <p className="text-[18px] font-semibold leading-snug text-nogo">{mission.failure.label}</p>
               <p className="mt-1.5 text-[14px] leading-snug text-white/85">{mission.failure.detail}</p>
             </div>
           )}
-          {step >= 2 && !mission.failure && <p className="mt-4 text-[16px] font-semibold text-go-signal">Nothing failed: it flew as planned.</p>}
+          {step >= 2 && mission.outcome === "success" && (
+            <div className="mt-4 border-t border-rule pt-3">
+              <p className="text-[16px] font-semibold leading-snug text-go-signal">{mission.rootCause}</p>
+              {mission.failure && (
+                <p className="mt-2 text-[14px] leading-snug text-white/85">
+                  <span className="text-flame">Anomaly: {mission.failure.label}.</span> {mission.failure.detail}
+                </p>
+              )}
+            </div>
+          )}
           {step >= 2 && identified && <p className="mt-3 text-[12px] leading-snug text-haze">{identified}</p>}
         </div>
       </section>
