@@ -39,6 +39,12 @@ export interface VoiceDockProps {
   /** After a flight: spoken once; "yes" calls onImprove with its fix. */
   offer?: { line: string; fix?: DesignAction } | null;
   onImprove?: (fix?: DesignAction) => void;
+  /**
+   * "dock" (default): the engineer bar with push-to-talk, captions and typed commands.
+   * "narrator": no bar at all; it only speaks the gated lines (poll, flight callouts and replay
+   * dialog, the offer), with a small mute toggle in the corner.
+   */
+  variant?: "dock" | "narrator";
 }
 
 /** When xAI speech isn't available, each speaker still sounds a little different in browser voice. */
@@ -168,8 +174,15 @@ export default function VoiceDock({
   onPollReply,
   offer = null,
   onImprove,
+  variant = "dock",
 }: VoiceDockProps) {
   const [mode, setMode] = useState<Mode>("checking");
+  const [muted, setMuted] = useState(false);
+  const mutedRef = useRef(false);
+  useEffect(() => {
+    mutedRef.current = muted;
+    if (muted) hush();
+  }, [muted]);
   const [holding, setHolding] = useState(false);
   const [talker, setTalker] = useState<Talker>(null);
   const [userCaption, setUserCaption] = useState("");
@@ -385,6 +398,12 @@ export default function VoiceDock({
    */
   const speakLine = useCallback(async (text: string, speaker: string, index?: number): Promise<void> => {
     if (penDown()) return;
+    if (mutedRef.current) {
+      // Muted: keep the pacing (poll tiles still light one by one), just say nothing.
+      setReplyCaption(text);
+      await new Promise((resolve) => setTimeout(resolve, SILENT_LINE_MS));
+      return;
+    }
     hush();
     const generation = hushes;
     setReplyCaption(text);
@@ -640,8 +659,9 @@ export default function VoiceDock({
     listenerRef.current?.stop();
   }, [touch]);
 
-  // Hold Space to talk (unless typing somewhere).
+  // Hold Space to talk (unless typing somewhere). The narrator has no push-to-talk.
   useEffect(() => {
+    if (variant === "narrator") return;
     const isTyping = (target: EventTarget | null) =>
       target instanceof HTMLElement && (target.isContentEditable || ["INPUT", "TEXTAREA", "SELECT"].includes(target.tagName));
     const down = (e: KeyboardEvent) => {
@@ -662,7 +682,7 @@ export default function VoiceDock({
       window.removeEventListener("keyup", up, true);
       window.removeEventListener("blur", endTalk);
     };
-  }, [startTalk, endTalk]);
+  }, [startTalk, endTalk, variant]);
 
   const submitTyped = (e: FormEvent) => {
     e.preventDefault();
@@ -673,6 +693,20 @@ export default function VoiceDock({
   };
 
   const analyser = talker === "user" ? micAnalyser : talker === "reviewer" ? outputAnalyser : null;
+
+  if (variant === "narrator") {
+    return (
+      <button
+        type="button"
+        aria-label={muted ? "Unmute the narrator" : "Mute the narrator"}
+        aria-pressed={muted}
+        onClick={() => setMuted((m) => !m)}
+        className="fixed bottom-4 right-4 z-50 flex h-8 w-8 items-center justify-center rounded-full border border-white/70 bg-black/60 text-[14px] leading-none text-white transition-colors hover:bg-white hover:text-black"
+      >
+        {muted ? "🔇" : "🔊"}
+      </button>
+    );
+  }
 
   return (
     <div className="flex h-[76px] w-full shrink-0 items-center gap-5 border-t border-rule bg-black px-6">
