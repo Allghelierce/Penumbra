@@ -8,18 +8,18 @@ The demo opens with the 60-second CRS-7 run. A two-minute run, a 30-second cut a
 
 ## The 60-second run: CRS-7
 
-Open on a real mission, close on your own design. The app runs one straight line: **Diagnose → Build → Fly → Debrief**. Numbers in brackets come from the mission card, so read them off the screen and don't round them.
+Open on a real mission, close on your own design. The app runs one straight line: **Diagnose → Build → Fly → Debrief**. Every fact below comes from the mission record in `lib/missions.ts`.
 
 | Time | Do | Say |
 |---|---|---|
-| 0:00–0:06 | Studio on screen. Pick **CRS-7**. | "This is Penumbra. We start with a rocket that really flew and really failed: SpaceX CRS-7, a Falcon 9 cargo flight in 2015." |
-| 0:06–0:18 | The sketch draws itself. **Diagnose**: the red pen circles the strut in the second-stage LOX tank. | "Watch where the red pen goes. Not the engines: a steel strut holding a helium bottle inside the second-stage oxygen tank. It failed at a fraction of its rated load: [read the numbers on the card]." |
-| 0:18–0:28 | **Build**: the clean profile, then the photo. | "Build turns the napkin into a clean profile with the real Falcon 9's numbers, and Grok Imagine renders it." |
-| 0:28–0:44 | **Fly**. Let the real commentary play over the flight. | Stay quiet until the breakup, then: "T+139 seconds. That's where the real one was lost, and that was the real commentary." |
-| 0:44–0:54 | **Debrief**: what SpaceX changed. | "What changed: the struts were redesigned [read the fix on the card]. The return to flight, Orbcomm OG2, also brought the first landing of an orbital booster." |
-| 0:54–1:00 | Point at **Draw your own**. | "One real failure, learned in a minute. For a new design, draw your own: same physics, same red pen, your rocket." |
+| 0:00–0:06 | Studio on screen. Pick **CRS-7**. | "We start with a rocket that really flew and really failed: SpaceX CRS-7, Dragon to the ISS, June 2015." |
+| 0:06–0:16 | The sketch draws itself with the flaw drawn in. **Diagnose** circles it. | "Not the engines: a steel strut holding a helium bottle inside the second-stage oxygen tank. It broke at about a fifth of the load it was certified for." |
+| 0:16–0:24 | **Build**: the clean profile and the photo, with the strut glowing red. | "Build turns the napkin into a clean profile on the real Falcon 9's numbers, and Grok Imagine renders it, flaw and all." |
+| 0:24–0:40 | **Fly**. The replay speaks the real statements, and the screen shakes at the breakup. Use the speed control if you're behind. | Stay quiet until T+139 s, then: "That's where the real one was lost, and those were the real words." |
+| 0:40–0:54 | **Debrief**, then **Fix it & fly again**: the comeback flight. | "SpaceX replaced the struts with a stronger design and tested every one. The comeback, Orbcomm OG2 in December 2015, made orbit and landed the first Falcon 9 booster." |
+| 0:54–1:00 | Point at **Full report**, then **Draw your own**. | "The full report has the cause chain, the timeline and the lessons. For a new design, draw your own." |
 
-If there's time after the minute, click **Draw your own** and continue with the two-minute run below.
+Other comebacks to show if you have time: Falcon 1 Flight 1 → Flight 4, and Starship IFT-1 → IFT-5. **Full report** has a **Copy as Markdown** button for anyone who wants the write-up.
 
 ## How it works, in one breath
 

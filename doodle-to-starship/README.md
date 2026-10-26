@@ -6,6 +6,18 @@ Penumbra is the first ten minutes of a concept review. You draw the vehicle and 
 
 Then you iterate the way a control room does. Mission Control polls GO/NO-GO with real numbers ("Trajectory, NO-GO. We're 0.8 kilometers per second short of orbit."), you fix the design by voice, and the drawing flies a simulated flight. After every flight a recap says what changed and what to try next, and one click applies the fix and flies again.
 
+## Real missions
+
+Penumbra replays 12 real flights: Falcon 1 Flights 1 and 4, Falcon 9 CRS-1, CRS-7 and Orbcomm OG2, the Falcon Heavy demo, Crew Dragon Demo-2, and Starship Integrated Flight Tests 1 to 5. Each one runs in a straight line:
+
+1. **Diagnose.** The vehicle draws itself with its real flaw drawn into the sketch, and the red pen circles it.
+2. **Build.** The clean profile and the Grok Imagine photo show the flawed part glowing red.
+3. **Fly.** The replay speaks the real statements (the Range Safety officer, Elon Musk, SpaceX) over a mission-specific crash, with speed controls and screen shake.
+4. **Debrief.** What broke, why, and what changed. **Fix it & fly again** flies the comeback: Orbcomm OG2 after CRS-7, Falcon 1 Flight 4 after Flight 1, IFT-5 after IFT-1.
+5. **Full report.** The cause chain, a timeline table and the lessons, with **Copy as Markdown**.
+
+Every fact comes from `lib/missions.ts`, and each mission links its sources. **Draw your own** takes the same physics and red pen to a new design.
+
 ## The loop
 
 ```
