@@ -41,6 +41,7 @@ import { strokesToPng } from "@/lib/napkin";
 import { buildReview } from "@/lib/redpen";
 import { readFromGeometry } from "@/lib/sketch/geometry";
 import { cutoutBlack } from "@/lib/cutout";
+import { DEMO_CONCEPTS } from "@/lib/demo-assets";
 import { recap } from "@/lib/recap";
 import { calloutFor, offerFor, pollRoom } from "@/lib/mission-control";
 import { analyze, DESTINATIONS, simulateFlight } from "@/lib/physics";
@@ -76,6 +77,21 @@ function safeAnalyze(design: Design | null): Analysis | null {
   } catch {
     return null;
   }
+}
+
+/**
+ * The demo sketch these strokes are, untouched: the very same stroke objects, all of them. A sample
+ * button, ?demo= and attract mode all hand over the demo's own strokes; drawing or undo breaks the match.
+ */
+function untouchedDemo(strokes: Stroke[]) {
+  const drawn = strokes.filter((s) => s.points.length > 0);
+  if (drawn.length === 0) return null;
+  return (
+    DEMO_SKETCHES.find((d) => {
+      const own = d.strokes.filter((s) => s.points.length > 0);
+      return own.length === drawn.length && own.every((s, i) => s === drawn[i]);
+    }) ?? null
+  );
 }
 
 /** Search terms for NASA's Technical Reports Server, from what the sketch contains. */
@@ -284,10 +300,18 @@ export default function Studio() {
         setError("The physics engine couldn't size this design. Redraw the tanks and engines more clearly, then check again.");
         return;
       }
+      // An untouched demo sketch has its concept pinned: free, instant and offline, no /api/render call.
+      const demo = untouchedDemo(strokes);
+      const pinned = demo ? DEMO_CONCEPTS[demo.id] : undefined;
+      if (pinned) {
+        runs.current.concept++; // anything still in flight is for another sketch
+        setConcept({ url: pinned, loading: false });
+        void cutoutBlack(pinned);
+      }
       const same = rendered.current?.strokes === strokes && rendered.current.destination === target;
       if (!same) {
         rendered.current = { strokes, destination: target };
-        void fetchConcept(nextDesign, nextAnalysis, image);
+        if (!pinned) void fetchConcept(nextDesign, nextAnalysis, image);
         void fetchPatch(nextDesign, nextAnalysis);
       }
       void fetchPriorArt(nextDesign);
