@@ -172,6 +172,87 @@ export function fixStrokes(m: HistoricMission, reading: SketchReading): Stroke[]
   return [line([x + w * 0.2, y + h * 0.2], [x + w * 0.8, y + h * 0.8]), line([x + w * 0.8, y + h * 0.2], [x + w * 0.2, y + h * 0.8])];
 }
 
+/**
+ * The flaw drawn into the sketch before any review, in the same graphite hand as the user's
+ * lines (not detail strokes), small enough that the reader still sees the same parts:
+ * falcon1-f1 a cracked, dripping fitting on the engine's fuel line; crs7 a helium bottle on one
+ * cracked strut inside the stage-2 tank; ift1 crossed-out engine bells with smoke in the bay.
+ */
+export function defectStrokes(m: HistoricMission, reading: SketchReading): Stroke[] {
+  const failure = m.failure;
+  if (m.outcome !== "lost" || !failure) return [];
+  const box =
+    partBox(reading.parts, (p) => p.kind === failure.part && (failure.stageIndex === undefined || p.stageIndex === failure.stageIndex)) ??
+    partBox(reading.parts, (p) => p.kind === failure.part);
+  if (!box) return [];
+  const [x, y, w, h] = box;
+  const wobble = jitter(m.id.length * 13 + 5);
+  const pen = (points: Point[]): Stroke => ({
+    points: points.map(([px, py]) => clampPoint([px + wobble() * 0.0015, py + wobble() * 0.0015])),
+  });
+  const polyline = (pts: Point[], steps = 3): Stroke => {
+    const out: Point[] = [];
+    pts.forEach((pt, i) => {
+      if (i === 0) return void out.push(pt);
+      const prev = pts[i - 1];
+      for (let k = 1; k <= steps; k++) out.push([prev[0] + ((pt[0] - prev[0]) * k) / steps, prev[1] + ((pt[1] - prev[1]) * k) / steps]);
+    });
+    return pen(out);
+  };
+  const oval = (cx: number, cy: number, rx: number, ry: number, n = 20): Stroke =>
+    pen(Array.from({ length: n + 1 }, (_, i): Point => [cx + Math.cos((i / n) * Math.PI * 2) * rx, cy + Math.sin((i / n) * Math.PI * 2) * ry]));
+
+  if (m.id === "falcon1-f1") {
+    // A fitting (hex nut) on the fuel line into the engine, cracked, dripping down the engine.
+    const r = Math.min(w, h) * 0.1;
+    const [nx, ny] = [x + w * 0.74, y + h * 0.28];
+    const hex = pen(Array.from({ length: 7 }, (_, i): Point => [nx + Math.cos((i / 6) * Math.PI * 2) * r, ny + Math.sin((i / 6) * Math.PI * 2) * r]));
+    return [
+      polyline([[nx - r * 0.2, y + h * 0.02], [nx, ny - r]]),
+      hex,
+      polyline([[nx - r * 0.7, ny - r * 0.5], [nx - r * 0.1, ny], [nx + r * 0.3, ny - r * 0.2], [nx + r * 0.8, ny + r * 0.4]], 1),
+      polyline([[nx - r * 0.3, ny + r * 1.3], [nx - r * 0.3, ny + r * 2.2]], 2),
+      polyline([[nx + r * 0.2, ny + r * 1.5], [nx + r * 0.2, ny + r * 2.6]], 2),
+      polyline([[nx + r * 0.7, ny + r * 1.2], [nx + r * 0.7, ny + r * 1.9]], 2),
+    ];
+  }
+  if (m.id === "crs7") {
+    // A helium bottle inside the stage-2 tank, held by one thin strut with a zigzag crack.
+    const [bx, by] = [x + w * 0.5, y + h * 0.36];
+    const [rx, ry] = [w * 0.16, h * 0.13];
+    const strutTop: Point = [bx, by + ry];
+    const strutBottom: Point = [bx + w * 0.12, y + h * 0.86];
+    const mid: Point = [(strutTop[0] + strutBottom[0]) / 2, (strutTop[1] + strutBottom[1]) / 2];
+    const z = w * 0.06;
+    return [
+      oval(bx, by, rx, ry),
+      polyline([strutTop, strutBottom], 4),
+      polyline([[mid[0] - z, mid[1] - z * 0.6], [mid[0] - z * 0.3, mid[1] + z * 0.4], [mid[0] + z * 0.2, mid[1] - z * 0.4], [mid[0] + z, mid[1] + z * 0.6]], 1),
+    ];
+  }
+  if (m.id === "ift1") {
+    // Engine bells crossed out across the row, and smoke curling up in the engine bay.
+    const xs = [0.22, 0.5, 0.78];
+    const r = Math.min(w * 0.09, h * 0.3);
+    const cy = y + h * 0.6;
+    const strokes = xs.flatMap((fx): Stroke[] => {
+      const cx = x + w * fx;
+      return [
+        polyline([[cx - r, cy - r], [cx + r, cy + r]], 2),
+        polyline([[cx + r, cy - r], [cx - r, cy + r]], 2),
+      ];
+    });
+    for (const fx of [0.36, 0.64]) {
+      const sx = x + w * fx;
+      strokes.push(
+        pen(Array.from({ length: 9 }, (_, i): Point => [sx + Math.sin(i * 1.4) * w * 0.025, y + h * 0.2 - (i / 8) * h * 0.55])),
+      );
+    }
+    return strokes;
+  }
+  return [];
+}
+
 function partBox(parts: Part[], test: (p: Part) => boolean): Box | null {
   const hits = parts.filter(test);
   if (hits.length === 0) return null;

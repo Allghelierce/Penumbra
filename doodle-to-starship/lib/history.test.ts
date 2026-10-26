@@ -1,7 +1,9 @@
 import { describe, expect, it } from "vitest";
 
 import type { HistoricMission, RedPenMark } from "./design";
-import { comebackFor, COMEBACK, fixNote, fixStrokes, historicReading, historicReview, historicTrace } from "./history";
+import { DEMO_SKETCHES } from "./demo-sketches";
+import { comebackFor, COMEBACK, defectStrokes, fixNote, fixStrokes, historicReading, historicReview, historicTrace } from "./history";
+import { readFromGeometry } from "./sketch/geometry";
 import { HISTORIC_MISSIONS } from "./missions";
 
 /** A local stand-in until lib/missions.ts lands; the shape is HistoricMission's. */
@@ -209,4 +211,39 @@ describe("fix and try again", () => {
       expect(fixStrokes(m, reading)).toEqual(strokes);
     },
   );
+});
+
+describe("the flaw drawn into the sketch", () => {
+  it.each(HISTORIC_MISSIONS.map((m) => [m.id, m] as const))(
+    "%s: graphite strokes inside the failed part that don't change what the reader sees",
+    (_, m) => {
+      const reading = historicReading(m);
+      const flaw = defectStrokes(m, reading);
+      if (m.outcome !== "lost" || !m.failure) {
+        expect(flaw).toEqual([]);
+        return;
+      }
+      expect(flaw.length).toBeGreaterThanOrEqual(2);
+      for (const stroke of flaw) {
+        expect(stroke.detail).toBeUndefined();
+        for (const [x, y] of stroke.points) {
+          expect(x).toBeGreaterThanOrEqual(0);
+          expect(x).toBeLessThanOrEqual(1);
+          expect(y).toBeGreaterThanOrEqual(0);
+          expect(y).toBeLessThanOrEqual(1);
+        }
+      }
+      const sketch = DEMO_SKETCHES.find((d) => d.id === m.sketchId)!;
+      const withFlaw = readFromGeometry([...sketch.strokes, ...flaw], m.destination);
+      const shape = (r: typeof reading) => r.parts.map((p) => `${p.kind}@${p.stageIndex ?? "-"}`).sort();
+      expect(shape(withFlaw)).toEqual(shape(reading));
+      expect(withFlaw.design.stages.length).toBe(reading.design.stages.length);
+      expect(defectStrokes(m, reading)).toEqual(flaw);
+    },
+  );
+
+  it("draws nothing for a flight that worked", () => {
+    const ok = HISTORIC_MISSIONS.find((m) => m.outcome === "success");
+    if (ok) expect(defectStrokes(ok, historicReading(ok))).toEqual([]);
+  });
 });
