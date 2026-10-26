@@ -24,9 +24,9 @@ export default function MissionPicker({ missions, onPick, onDrawOwn }: MissionPi
               key={m.id}
               type="button"
               onClick={() => onPick(m)}
-              className="group flex flex-col border border-white/15 bg-black text-left transition-colors hover:border-white focus-visible:border-white"
+              className="group flex flex-col border border-white/15 bg-black/35 text-left backdrop-blur-[1px] transition-colors hover:border-white focus-visible:border-white"
             >
-              <div className="relative aspect-[3/4] w-full overflow-hidden bg-black">
+              <div className="cutout-well relative aspect-[3/4] w-full overflow-hidden">
                 {photo && (
                   // eslint-disable-next-line @next/next/no-img-element
                   <img

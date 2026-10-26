@@ -153,7 +153,7 @@ export default function VerdictPanel(props: VerdictPanelProps) {
           </div>
           {(props.conceptUrl || props.conceptLoading) && (
             <figure className="w-[112px] shrink-0">
-              <div className="aspect-[4/3] w-full overflow-hidden bg-umbra ring-1 ring-rule">
+              <div className="cutout-well aspect-[4/3] w-full overflow-hidden">
                 {props.conceptUrl ? (
                   // eslint-disable-next-line @next/next/no-img-element
                   <img src={props.conceptUrl} alt={`Grok Imagine render of ${design.name}`} className="h-full w-full object-cover" />

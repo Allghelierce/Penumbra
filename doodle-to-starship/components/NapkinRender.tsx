@@ -129,7 +129,9 @@ export default function NapkinRender({ url, loading, resetKey, reading = null, s
       )}
       {(hasClean || hasPhoto) && (
         <div
-          className={`napkin-overlay render-wipe absolute inset-0 isolate select-none overflow-hidden rounded-[2px] bg-black/85 transition-opacity ${fade} ${
+          className={`napkin-overlay render-wipe absolute inset-0 isolate select-none overflow-hidden rounded-[2px] ${
+            shown === "photo" && isPng(track.photo) ? "bg-transparent" : "bg-black/85"
+          } transition-opacity ${fade} ${
             shown === "sketch" ? "opacity-0" : "opacity-100"
           }`}
         >
@@ -168,7 +170,7 @@ export default function NapkinRender({ url, loading, resetKey, reading = null, s
               src={track.photo ?? undefined}
               alt="Grok Imagine render of the sketch"
               draggable={false}
-              className={`napkin-render-img transition-opacity ${fade} ${isPng(track.photo) ? "" : "mix-blend-screen"} ${shown === "photo" ? "opacity-100" : "opacity-0"}`}
+              className={`napkin-render-img transition-opacity ${fade} ${isPng(track.photo) ? "is-cutout" : "mix-blend-screen"} ${shown === "photo" ? "opacity-100" : "opacity-0"}`}
             />
           )}
           {!track.swept && (

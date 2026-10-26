@@ -528,3 +528,24 @@ details > summary::-webkit-details-marker {
     animation: none;
   }
 }
+
+/* Transparent render cutouts float on the space backdrop: no paper, frame or chalk behind the ship,
+   just a soft rim glow and a shadow so it pops. */
+.napkin-render-img.is-cutout {
+  filter: drop-shadow(0 0 10px rgba(150, 190, 255, 0.35)) drop-shadow(0 16px 26px rgba(0, 0, 0, 0.7));
+}
+.render-wipe:has(.napkin-render-img.is-cutout.opacity-100) > svg {
+  opacity: 0;
+}
+.napkin:has(.napkin-render-img.is-cutout.opacity-100) {
+  outline-color: transparent;
+}
+.napkin:has(.napkin-render-img.is-cutout.opacity-100)::before {
+  opacity: 0;
+}
+.napkin:has(.napkin-render-img.is-cutout.opacity-100) > canvas {
+  opacity: 0;
+}
+.cutout-well img {
+  filter: drop-shadow(0 0 10px rgba(150, 190, 255, 0.3)) drop-shadow(0 12px 20px rgba(0, 0, 0, 0.65));
+}
