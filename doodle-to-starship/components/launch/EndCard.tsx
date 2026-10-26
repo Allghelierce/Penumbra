@@ -358,8 +358,14 @@ function RenderFrame({
 function Debrief({ mission, renderUrl, renderPending, strokes, design, video, onDone, onFixRetry, trace }: EndCardProps & { mission: HistoricMission }) {
   const lost = mission.outcome === "lost";
   const retry = lost && onFixRetry ? onFixRetry : null;
+  // Real recorded dialog from the flight, in order.
+  const quotes = mission.timeline.flatMap((e) => (e.quote ? [{ tS: e.tS, quote: e.quote }] : []));
+  const missionClock = (tS: number) => {
+    const sec = Math.max(0, Math.round(tS));
+    return `T+${String(Math.floor(sec / 60)).padStart(2, "0")}:${String(sec % 60).padStart(2, "0")}`;
+  };
   const [showReport, setShowReport] = useState(false);
-  const closeReport = useCallback(() => setShowReport(false), []);
+  const closeReport = useCallback(() => setShowReport(false), [setShowReport]);
   const report = MISSION_REPORTS[mission.id];
   const section = "border-t border-rule px-5 py-3 sm:px-7";
   const label = "text-[11px] font-semibold uppercase tracking-[0.2em] text-haze";
@@ -402,6 +408,33 @@ function Debrief({ mission, renderUrl, renderPending, strokes, design, video, on
             <span>{mission.returnToFlight}</span>
           </p>
         </section>
+        {quotes.length > 0 && (
+          <section className={section}>
+            <div className={label}>On the record</div>
+            <ul className="mt-2 space-y-3">
+              {quotes.map(({ tS, quote }) => (
+                <li key={`${tS}-${quote.speaker}`}>
+                  <div className="text-[11px] font-semibold uppercase tracking-[0.18em] text-haze">
+                    {quote.speaker} · {missionClock(tS)}
+                  </div>
+                  <blockquote className="mt-0.5 text-lg leading-snug text-starlight">“{quote.text}”</blockquote>
+                  {/^https?:\/\//.test(quote.source) ? (
+                    <a
+                      href={quote.source}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="text-[11px] text-haze underline-offset-2 hover:text-starlight hover:underline"
+                    >
+                      Source
+                    </a>
+                  ) : (
+                    <div className="text-[11px] text-haze">{quote.source}</div>
+                  )}
+                </li>
+              ))}
+            </ul>
+          </section>
+        )}
         {mission.stats.length > 0 && (
           <dl className="grid gap-px border-t border-rule bg-rule sm:grid-cols-3">
             {mission.stats.slice(0, 3).map((st) => (
