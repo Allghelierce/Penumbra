@@ -312,9 +312,9 @@ function LaunchRun(props: RunProps) {
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") handle.current?.skip();
-      // 1 / 2 / 3: half, normal and double speed.
-      const x = e.key === "1" ? 0.5 : e.key === "2" ? 1 : e.key === "3" ? 2 : null;
-      if (x !== null) latest.current.onSpeed(x);
+      // 1–5: 0.5×, 1×, 2×, 4×, 8×.
+      const x = { "1": 0.5, "2": 1, "3": 2, "4": 4, "5": 8 }[e.key];
+      if (x !== undefined) latest.current.onSpeed(x);
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
@@ -367,7 +367,7 @@ function LaunchRun(props: RunProps) {
       {!ended && (
         <div className="ls-fade absolute right-4 top-4 flex items-center gap-5 text-[11px] font-semibold uppercase tracking-[0.18em] text-haze [animation-delay:1.3s] sm:right-6 sm:top-5">
           <div className="flex items-center gap-1" role="group" aria-label="Playback speed">
-            {[0.5, 1, 2].map((x) => (
+            {[0.5, 1, 2, 4, 8].map((x) => (
               <button
                 key={x}
                 type="button"

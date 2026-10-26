@@ -117,7 +117,7 @@ export function planFor(input: LaunchInput): Plan {
 
 export interface LaunchHandle {
   stop: () => void;
-  /** Playback speed multiplier (0.5–2). */
+  /** Playback speed multiplier (0.5–8). */
   setSpeed: (x: number) => void;
   /** Fly a picture of the vehicle (same 3:4 frame as the strokes) instead of the chalk strokes. */
   setVehicle: (img: HTMLImageElement | null) => void;
@@ -763,7 +763,8 @@ export function startLaunch(
       if (maxQAt !== null && flying) shakeAmp += 4 * Math.exp(-(((t - maxQAt) / 0.9) ** 2));
       for (const at of plan.seps) if (t >= at) shakeAmp += 4 * Math.exp(-(t - at) * 6);
       if (exploded) shakeAmp += 6 * Math.exp(-3 * (t - explodedAt));
-      shakeAmp = Math.min(6, shakeAmp) * Math.min(1.5, Math.max(0.5, speed));
+      // Stronger at 2×, then backing off at 4× and 8× so it doesn't turn into noise.
+      shakeAmp = Math.min(6, shakeAmp) * (speed <= 2 ? Math.min(1.5, Math.max(0.5, speed)) : 3 / speed);
     }
     const qx = shakeAmp * (0.6 * Math.sin(t * 47.3) + 0.4 * Math.sin(t * 91.7 + 1.3));
     const qy = shakeAmp * (0.6 * Math.sin(t * 53.1 + 0.7) + 0.4 * Math.sin(t * 83.9 + 2.1));
@@ -1312,7 +1313,7 @@ export function startLaunch(
   return {
     stop: () => cancelAnimationFrame(raf),
     setSpeed: (x) => {
-      speed = Math.min(2, Math.max(0.5, x));
+      speed = Math.min(8, Math.max(0.5, x));
     },
     setVehicle: (img) => {
       vehicle = img;
