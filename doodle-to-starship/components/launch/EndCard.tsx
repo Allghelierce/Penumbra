@@ -9,6 +9,7 @@ import {
   type DestinationId,
   type Improvement,
   type Recap,
+  type HistoricMission,
   type Stroke,
   type Verdict,
 } from "@/lib/design";
@@ -34,6 +35,10 @@ interface EndCardProps {
   recap?: Recap | null;
   /** Applies an improvement's fix, re-checks and relaunches. */
   onImprove?: (fix: DesignAction) => void;
+  /** Set when the vehicle broke up in flight. */
+  lostAt?: { tS: number; altKm: number } | null;
+  /** A real flight from history: the card becomes its debrief. */
+  mission?: HistoricMission | null;
 }
 
 /** Same names the studio's "Where it can go" list uses. */
@@ -59,7 +64,15 @@ const SHORT: Record<DestinationId, string> = {
 
 const kms = (mps: number) => (Math.abs(mps) / 1000).toFixed(1);
 
-function verdictCopy({ outcome, design, analysis, maxAltKm }: EndCardProps): { go: boolean; headline: string; line: string } {
+function verdictCopy({ outcome, design, analysis, maxAltKm, lostAt }: EndCardProps): { go: boolean; headline: string; line: string } {
+  if (lostAt) {
+    const s = Math.max(0, Math.round(lostAt.tS));
+    return {
+      go: false,
+      headline: "Vehicle lost in flight",
+      line: `Broke up at T+${String(Math.floor(s / 60)).padStart(2, "0")}:${String(s % 60).padStart(2, "0")}, ${fmtKm(lostAt.altKm)} km up.`,
+    };
+  }
   const dest = design.destination;
   const budget = `${kms(analysis.totalDeltaVMps)} of ${kms(analysis.requiredDeltaVMps)} km/s`;
   const margin = analysis.marginMps;
@@ -91,6 +104,7 @@ function verdictCopy({ outcome, design, analysis, maxAltKm }: EndCardProps): { g
 }
 
 export default function EndCard(props: EndCardProps) {
+  if (props.mission) return <Debrief {...props} mission={props.mission} />;
   const { design, analysis, maxAltKm, maxSpeedMps, renderUrl, renderPending, strokes, video, onVideo, onDone, onReplay, recap, onImprove } =
     props;
   const { go, headline, line } = verdictCopy(props);
@@ -331,5 +345,77 @@ function RenderFrame({
         {playing ? "Grok Imagine replay" : sketch ? "Napkin sketch" : "Grok Imagine render"}
       </figcaption>
     </figure>
+  );
+}
+
+/** Mission mode: what happened on the real flight, what changed, and how it came back. */
+function Debrief({ mission, renderUrl, renderPending, strokes, design, video, onDone }: EndCardProps & { mission: HistoricMission }) {
+  const lost = mission.outcome === "lost";
+  const section = "border-t border-rule px-5 py-3 sm:px-7";
+  const label = "text-[11px] font-semibold uppercase tracking-[0.2em] text-haze";
+  return (
+    <div className="ls-fade absolute inset-0 flex items-start justify-center overflow-y-auto bg-umbra/75 px-4 py-8 backdrop-blur-[3px] sm:items-center">
+      <div className="ls-rise w-full max-w-3xl overflow-hidden rounded-[3px] border border-rule bg-panel text-starlight shadow-[0_30px_80px_rgba(0,0,0,0.55)]">
+        <div className="grid sm:grid-cols-[minmax(0,14rem)_1fr]">
+          <RenderFrame url={renderUrl} pending={renderPending} strokes={strokes} name={design.name} video={video} />
+          <div className="flex min-w-0 flex-col justify-center p-5 sm:p-7">
+            <div className="text-sm text-haze">
+              {mission.vehicle} · {mission.mission} · {mission.date} · {mission.site}
+            </div>
+            <h2
+              className={`mt-2 font-display text-[44px] font-semibold uppercase leading-none tracking-[0.06em] ${lost ? "text-nogo" : "text-go-signal"}`}
+            >
+              {lost ? "Lost" : "Success"}
+            </h2>
+          </div>
+        </div>
+        {(mission.failure || mission.rootCause) && (
+          <section className={section}>
+            <div className={label}>What failed</div>
+            {mission.failure && <div className="mt-1 font-display text-lg font-semibold uppercase tracking-[0.04em]">{mission.failure.label}</div>}
+            <p className="mt-1 text-sm leading-snug text-starlight/85">{mission.rootCause}</p>
+          </section>
+        )}
+        <section className={section}>
+          <div className={label}>What SpaceX changed</div>
+          <p className="mt-1 text-sm leading-snug text-starlight/85">{mission.whatChanged}</p>
+        </section>
+        <section className={section}>
+          <div className={label}>Return to flight</div>
+          <p className="mt-1 flex gap-2 text-sm leading-snug text-starlight">
+            <span className="text-go-signal">✓</span>
+            <span>{mission.returnToFlight}</span>
+          </p>
+        </section>
+        {mission.stats.length > 0 && (
+          <dl className="grid gap-px border-t border-rule bg-rule sm:grid-cols-3">
+            {mission.stats.slice(0, 3).map((st) => (
+              <div key={st.label} className="bg-panel px-5 py-3 sm:px-7">
+                <dt className="text-xs text-haze">{st.label}</dt>
+                <dd className="mt-0.5 font-display text-2xl font-semibold">{st.value}</dd>
+                <dd className="text-xs leading-snug text-haze">{st.meaning}</dd>
+              </div>
+            ))}
+          </dl>
+        )}
+        <div className="flex flex-wrap items-center justify-between gap-3 border-t border-rule px-5 py-4 sm:px-7">
+          <div className="flex min-w-0 flex-wrap gap-x-3 gap-y-1 text-[11px] text-haze">
+            {mission.sources.slice(0, 4).map((src) => (
+              <a key={src.url} href={src.url} target="_blank" rel="noopener noreferrer" className="underline-offset-2 hover:text-starlight hover:underline">
+                {src.title}
+              </a>
+            ))}
+          </div>
+          <button
+            type="button"
+            autoFocus
+            onClick={onDone}
+            className="rounded-[3px] border border-starlight bg-starlight px-4 py-2 text-sm font-semibold text-umbra transition-opacity hover:opacity-90"
+          >
+            Try another mission
+          </button>
+        </div>
+      </div>
+    </div>
   );
 }

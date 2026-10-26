@@ -242,6 +242,28 @@ export function startLaunch(
   /** Mesosphere meteors, in screen px. */
   const meteors: { x: number; y: number; vx: number; vy: number; age: number; life: number; len: number }[] = [];
   let crossIdx = 0;
+  let trIdx = 0;
+  /** After a breakup with a vehicle picture: tiles of the picture tumbling away. */
+  const tiles: {
+    sx: number;
+    sy: number;
+    sw: number;
+    sh: number;
+    lw: number;
+    lh: number;
+    x: number;
+    y: number;
+    vx: number;
+    vy: number;
+    rot: number;
+    vr: number;
+    age: number;
+    life: number;
+  }[] = [];
+  const TILE_COLS = 6;
+  const TILE_ROWS = 8;
+  /** Alpha per tile of the vehicle picture, so empty tiles don't fly as debris. */
+  let coverage: Uint8ClampedArray | null = null;
   const callouts: FlightEvent[] = [];
   let lastCallout = -Infinity;
   const wobbleRand = seeded(23);
@@ -335,10 +357,49 @@ export function startLaunch(
     exploded = true;
     sound?.boom();
     explodedAt = t;
-    blast = plan.outcome === "suborbital" ? toWorld(pose, [focus[0], top]) : toWorld(pose, focus);
+    // A suborbital crash hits nose-first; a breakup or pad explosion goes up where the vehicle is.
+    blast = plan.outcome === "suborbital" && !plan.lostAt ? toWorld(pose, [focus[0], top]) : toWorld(pose, focus);
+
+    // A vehicle picture breaks into tiles of itself; the chalk doodle into chunks of its strokes.
+    if (vehicle) {
+      const nap = doodle.napkin;
+      const tw = (nap.maxX - nap.minX) / TILE_COLS;
+      const th = (nap.maxY - nap.minY) / TILE_ROWS;
+      const iw = vehicle.naturalWidth / TILE_COLS;
+      const ih = vehicle.naturalHeight / TILE_ROWS;
+      for (let row = 0; row < TILE_ROWS; row++) {
+        for (let col = 0; col < TILE_COLS; col++) {
+          if (coverage && coverage[(row * TILE_COLS + col) * 4 + 3] < 12) continue;
+          const lx = nap.minX + (col + 0.5) * tw;
+          const ly = nap.minY + (row + 0.5) * th;
+          if (!pieces.some((p, i) => attached(i) && ly >= p.band.top && ly < p.band.bottom)) continue;
+          const [wx, wy] = toWorld(pose, [lx, ly]);
+          const dx = wx - blast[0];
+          const dy = wy - blast[1];
+          const len = Math.hypot(dx, dy) || 1e-6;
+          const sp = rnd(0.4, 1.4) * Hn;
+          tiles.push({
+            sx: col * iw,
+            sy: row * ih,
+            sw: iw,
+            sh: ih,
+            lw: tw,
+            lh: th,
+            x: wx,
+            y: wy,
+            vx: (dx / len) * sp + rnd(-0.2, 0.2) * Hn,
+            vy: (dy / len) * sp + rnd(0.2, 0.8) * Hn,
+            rot: pose.rot,
+            vr: rnd(-4, 4),
+            age: 0,
+            life: rnd(2.2, 3.2),
+          });
+        }
+      }
+    }
 
     // The doodle itself comes apart: every attached stroke breaks into chunks that fly.
-    const lines = pieces.flatMap((p, i) => (attached(i) ? p.lines : []));
+    const lines = vehicle ? [] : pieces.flatMap((p, i) => (attached(i) ? p.lines : []));
     const total = lines.reduce((n, l) => n + l.length, 0);
     const chunk = Math.max(4, Math.ceil(total / 110));
     for (const l of lines) {
@@ -701,6 +762,31 @@ export function startLaunch(
     stepParticles(local, dt);
     stepParticles(world, dt);
     const groundLevel = -GROUND * Hn;
+    // Burning debris trails smoke as it falls.
+    const trail = (x: number, y: number, age: number, rate: number) => {
+      if (age < 2.2 && Math.random() < rate * dt) {
+        world.push({ x, y, vx: rnd(-0.05, 0.05) * Hn, vy: rnd(-0.05, 0.05) * Hn, age: 0, life: rnd(1.2, 2.2), r0: 0.02 * Hn, r1: rnd(0.08, 0.14) * Hn, a0: 0.4, sprite: "smoke", drag: 1, g: 0, add: false });
+      }
+    };
+    for (let i = tiles.length - 1; i >= 0; i--) {
+      const f = tiles[i];
+      f.age += dt;
+      if (f.age >= f.life) {
+        tiles.splice(i, 1);
+        continue;
+      }
+      f.vy -= 1.4 * Hn * dt;
+      f.x += f.vx * dt;
+      f.y += f.vy * dt;
+      f.rot += f.vr * dt;
+      if (f.y < groundLevel) {
+        f.y = groundLevel;
+        f.vy = Math.abs(f.vy) * 0.3;
+        f.vx *= 0.6;
+        f.vr *= 0.6;
+      }
+      trail(f.x, f.y, f.age, 8);
+    }
     for (let i = frags.length - 1; i >= 0; i--) {
       const f = frags[i];
       f.age += dt;
@@ -712,6 +798,7 @@ export function startLaunch(
       f.x += f.vx * dt;
       f.y += f.vy * dt;
       f.rot += f.vr * dt;
+      if (plan.lostAt && i % 6 === 0) trail(f.x, f.y, f.age, 14);
       if (f.y < groundLevel) {
         f.y = groundLevel;
         f.vy = Math.abs(f.vy) * 0.3;
@@ -957,6 +1044,19 @@ export function startLaunch(
       }
       c.globalAlpha = 1;
     }
+    if (tiles.length && vehicle) {
+      for (const f of tiles) {
+        const k = f.age / f.life;
+        c.save();
+        c.translate(SX(f.x), SY(f.y));
+        c.rotate(f.rot);
+        c.scale(Z, Z);
+        c.globalAlpha = 1 - k * k;
+        c.drawImage(vehicle, f.sx, f.sy, f.sw, f.sh, -f.lw / 2, -f.lh / 2, f.lw, f.lh);
+        c.restore();
+      }
+      c.globalAlpha = 1;
+    }
     if (exploded && t - explodedAt < 0.8) {
       const k = 1 - (t - explodedAt) / 0.8;
       const bx = SX(blast[0]);
@@ -1035,6 +1135,9 @@ export function startLaunch(
         console.error(err);
       }
     }
+    while (trIdx < plan.transcripts.length && plan.transcripts[trIdx].at <= t) {
+      hooks.onCaption({ ...plan.transcripts[trIdx++], id: ++capId });
+    }
     while (crossIdx < plan.crossings.length && plan.crossings[crossIdx].at <= t) {
       hooks.onCrossing?.(plan.crossings[crossIdx++]);
     }
@@ -1058,12 +1161,28 @@ export function startLaunch(
     stop: () => cancelAnimationFrame(raf),
     setVehicle: (img) => {
       vehicle = img;
+      coverage = null;
+      if (img) {
+        try {
+          const probe = document.createElement("canvas");
+          probe.width = TILE_COLS;
+          probe.height = TILE_ROWS;
+          const pc = probe.getContext("2d", { willReadFrequently: true });
+          if (pc) {
+            pc.drawImage(img, 0, 0, TILE_COLS, TILE_ROWS);
+            coverage = pc.getImageData(0, 0, TILE_COLS, TILE_ROWS).data;
+          }
+        } catch {
+          // Unreadable picture: every tile counts as debris.
+        }
+      }
     },
     skip: () => {
       if (ended) return;
       cueIdx = plan.cues.length;
       capIdx = plan.captions.length;
       crossIdx = plan.crossings.length;
+      trIdx = plan.transcripts.length;
       callouts.length = 0;
       finaleShown = true;
       t = Math.max(t, plan.endAt);

@@ -7,6 +7,7 @@ import type {
   FlightEvent,
   FlightEventKind,
   FlightTrace,
+  HistoricMission,
   Recap,
   SketchReading,
   Stroke,
@@ -59,6 +60,8 @@ export interface LaunchSceneProps {
   recap?: Recap | null;
   /** Optional: apply an improvement's fix, re-check and relaunch (the studio remounts the scene). */
   onImprove?: (fix: DesignAction) => void;
+  /** Optional: a real flight from history being replayed; the end card becomes its debrief. */
+  mission?: HistoricMission | null;
 }
 
 const TONE: Record<Tone, string> = {
@@ -95,6 +98,8 @@ const KEYFRAMES = `
 @keyframes ls-hint { 0%, 80% { opacity: 1; } 100% { opacity: 0; } }
 .ls-hint { animation: ls-hint 9s ease-in both; }
 .ls-pending { animation: ls-pending 1.8s ease-in-out infinite; }
+@keyframes ls-transcript { 0% { opacity: 0; transform: translateY(6px); } 8% { opacity: 1; transform: none; } 88% { opacity: 1; } 100% { opacity: 0; } }
+.ls-transcript { animation: ls-transcript 3.2s ease-out forwards; }
 `;
 
 const MARK_LABEL: Partial<Record<FlightEventKind, string>> = {
@@ -216,6 +221,7 @@ function LaunchRun(props: RunProps) {
   const [log, setLog] = useState<Crossing[]>([]);
   const handle = useRef<LaunchHandle | null>(null);
   const [caption, setCaption] = useState<(CaptionCue & { id: number }) | null>(null);
+  const [transcript, setTranscript] = useState<(CaptionCue & { id: number }) | null>(null);
   const [finale, setFinale] = useState<Finale | null>(null);
   const [ended, setEnded] = useState(false);
   const stats = useMemo(() => flightStats(input.trace), [input]);
@@ -225,7 +231,8 @@ function LaunchRun(props: RunProps) {
     return () => window.clearTimeout(h);
   }, []);
   const renderPending = props.renderState ? props.renderState === "loading" : !renderGaveUp;
-  const marks = useMemo(() => milestones(planFor(input)), [input]);
+  const plan = useMemo(() => planFor(input), [input]);
+  const marks = useMemo(() => milestones(plan), [plan]);
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -248,7 +255,7 @@ function LaunchRun(props: RunProps) {
       },
     };
     const h = startLaunch(canvas, hud, input, {
-      onCaption: setCaption,
+      onCaption: (c) => (c.speaker ? setTranscript(c) : setCaption(c)),
       onCrossing: (c) => setLog((l) => [...l.slice(-3), c]),
       onFinale: setFinale,
       onEnd: () => setEnded(true),
@@ -396,6 +403,18 @@ function LaunchRun(props: RunProps) {
         </div>
       </div>
 
+      {/* Real recorded dialog, as subtitles: the speaker small, the words big. */}
+      {transcript && !ended && (
+        <div key={transcript.id} className="ls-transcript pointer-events-none absolute inset-x-0 bottom-[132px] flex justify-center px-6">
+          <div className="max-w-3xl text-center">
+            <div className={`text-[11px] font-semibold uppercase tracking-[0.22em] text-haze ${LIFT}`}>{transcript.speaker}</div>
+            <div className={`mt-1 text-xl font-medium leading-snug text-starlight sm:text-2xl ${LIFT}`}>
+              “{transcript.text}”
+            </div>
+          </div>
+        </div>
+      )}
+
       {caption && !ended && (
         <div key={caption.id} className="ls-caption pointer-events-none absolute left-1/2 top-[13%] w-max max-w-[92vw] text-center">
           <div
@@ -443,6 +462,8 @@ function LaunchRun(props: RunProps) {
           onReplay={props.onReplay}
           recap={props.recap}
           onImprove={props.onImprove}
+          lostAt={plan.lostAt}
+          mission={props.mission}
         />
       )}
     </div>

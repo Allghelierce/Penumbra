@@ -34,6 +34,8 @@ export interface Cue {
 
 export interface CaptionCue {
   at: number;
+  /** Set on transcript captions: real recorded dialog, e.g. "Launch Director". */
+  speaker?: string;
   text: string;
   sub?: string;
   tone: Tone;
@@ -72,6 +74,8 @@ export interface Plan {
   liftoffAt: number | null;
   cues: Cue[];
   captions: CaptionCue[];
+  /** Real dialog from event labels like `Launch Director: "…"`, shown as subtitles. */
+  transcripts: CaptionCue[];
   crossings: Crossing[];
   burns: Burn[];
   /** seps[i] is when pieces[i] lets go. */
@@ -80,6 +84,8 @@ export interface Plan {
   finaleAt: number;
   finale: Finale;
   tipAt: number | null;
+  /** Set when the vehicle broke up in flight (historic replays): where and when it was lost. */
+  lostAt: { tS: number; altKm: number } | null;
   explodeAt: number | null;
   endAt: number;
   maxAltKm: number;
@@ -116,7 +122,7 @@ export const DEST_NAME: Record<DestinationId, string> = {
   europa: "Europa",
 };
 
-const OFF_KINDS = new Set<FlightEventKind>(["engine-cutoff", "fuel-exhausted", "orbit", "arrival", "impact"]);
+const OFF_KINDS = new Set<FlightEventKind>(["engine-cutoff", "fuel-exhausted", "orbit", "arrival", "impact", "breakup"]);
 
 export const clamp01 = (x: number) => (x < 0 ? 0 : x > 1 ? 1 : x);
 
@@ -168,12 +174,14 @@ function padPlan(points: FlightPoint[], events: FlightEvent[], analysis: Analysi
     liftoffAt: null,
     cues,
     captions: captionsFor(cues, 0, true),
+    transcripts: transcriptsFor(cues),
     crossings: [],
     burns: [{ from: T_IGNITE, to: explodeAt, piece: 0 }],
     seps: [],
     finaleAt: explodeAt,
     finale: finaleFor("stuck-on-pad", design, explodeAt + 0.15),
     tipAt,
+    lostAt: null,
     explodeAt,
     endAt: explodeAt + 1.8,
     maxAltKm: 0,
@@ -195,7 +203,11 @@ function flightPlan(
   let maxAltKm = Math.max(trace.maxAltitudeKm || 0, ...points.map((p) => p.altitudeKm));
 
   let T: number;
-  if (outcome === "suborbital") {
+  // A breakup ends the flight right there, mid-air, whatever else the trace says.
+  const breakup = events.find((e) => e.kind === "breakup" && e.tS > 0);
+  if (breakup) {
+    T = breakup.tS;
+  } else if (outcome === "suborbital") {
     points = withFallTail(points);
     const impact = events.find((e) => e.kind === "impact");
     T = impact && impact.tS > 0 ? impact.tS : points[points.length - 1].tS;
@@ -234,7 +246,7 @@ function flightPlan(
   const karmanSims = crossingsFor(points, T, (sim) => sim)
     .filter((c) => c.hero)
     .map((c) => c.simT);
-  const warp = warpFor(T, [...events, ...synthetic], karmanSims, outcome);
+  const warp = warpFor(T, [...events, ...synthetic], karmanSims, breakup ? "breakup" : outcome);
   const flightDur = warp.duration;
   const liftoffAt = T_LIFTOFF;
   const finaleAt = liftoffAt + flightDur;
@@ -276,8 +288,10 @@ function flightPlan(
 
   const crossings = crossingsFor(points, T, playOf);
   const sepsSeen = { n: 0 };
-  const failed = outcome === "suborbital";
-  const finale = finaleFor(outcome, design, failed ? finaleAt + 0.15 : finaleAt + 0.35);
+  const failed = outcome === "suborbital" || !!breakup;
+  const finale: Finale = breakup
+    ? { at: finaleAt + 0.15, text: "RUD", ok: false }
+    : finaleFor(outcome, design, failed ? finaleAt + 0.15 : finaleAt + 0.35);
   const maxDown = Math.max(...points.map((p) => Math.abs(p.downrangeKm)));
 
   return {
@@ -292,15 +306,18 @@ function flightPlan(
       captionsFor(cues, maxAltKm, false, sepsSeen, outcome === "suborbital" ? Infinity : finaleAt - 0.2),
       crossings,
     ),
+    transcripts: transcriptsFor(cues),
     crossings,
     burns,
     seps,
     finaleAt,
     finale,
     tipAt: null,
+    lostAt: breakup ? { tS: breakup.tS, altKm: sampleAt(points, breakup.tS).alt } : null,
     explodeAt: failed ? finaleAt : null,
     // The end card follows the outcome closely: no long linger.
-    endAt: finaleAt + 1.8,
+    // Debris needs a moment to tumble away after a breakup.
+    endAt: finaleAt + (breakup ? 2.6 : 1.8),
     maxAltKm,
     maxSpeedMps: Math.max(0, ...points.filter((p) => p.tS <= T).map((p) => p.speedMps)),
     hasDownrange: maxDown > Math.max(0.5, maxAltKm * 0.02),
@@ -320,7 +337,7 @@ interface Beat {
  * play slowly; the gaps between them share what's left of FLIGHT_PLAY and fast-forward.
  * A monotone cubic through the knots keeps the speed changes smooth.
  */
-function warpFor(T: number, events: FlightEvent[], karmanSims: number[], outcome: Verdict) {
+function warpFor(T: number, events: FlightEvent[], karmanSims: number[], outcome: Verdict | "breakup") {
   const beat = (s: number, before: number, after: number, play: number): Beat => ({
     from: Math.max(0, s - before),
     to: Math.min(T, s + after),
@@ -341,7 +358,9 @@ function warpFor(T: number, events: FlightEvent[], karmanSims: number[], outcome
   }
   for (const k of karmanSims) beats.push(beat(k, 4, 4, 0.8));
   // The approach to the outcome: the fall and reentry before impact, or the last push to orbit.
-  beats.push(outcome === "suborbital" ? beat(T, 30, 0, 1.5) : beat(T, 12, 0, 0.6));
+  beats.push(
+    outcome === "suborbital" ? beat(T, 30, 0, 1.5) : outcome === "breakup" ? beat(T, 15, 0, 1.1) : beat(T, 12, 0, 0.6),
+  );
 
   beats.sort((a, b) => a.from - b.from);
   const merged: Beat[] = [];
@@ -513,6 +532,23 @@ function finaleFor(outcome: Verdict, design: Design, at: number): Finale {
   }
 }
 
+/** `Launch Director: "We have lost the vehicle."` → speaker and quote. */
+const DIALOG = /^\s*([^:"\u201c\u201d]{2,48}):\s*["\u201c]([\s\S]+?)["\u201d]\s*$/;
+
+/** Real dialog as subtitles, each held about 3 s before the next may replace it. */
+function transcriptsFor(cues: Cue[]): CaptionCue[] {
+  const out: CaptionCue[] = [];
+  let free = -Infinity;
+  for (const c of cues) {
+    const m = c.event.label ? DIALOG.exec(c.event.label) : null;
+    if (!m) continue;
+    const at = Math.max(c.at, free);
+    out.push({ at, text: m[2].trim(), speaker: m[1].trim(), tone: "chalk" });
+    free = at + 3;
+  }
+  return out;
+}
+
 function captionsFor(cues: Cue[], maxAltKm: number, onPad: boolean, sepsSeen = { n: 0 }, until = Infinity): CaptionCue[] {
   const out: CaptionCue[] = [];
   let lastAt = -Infinity;
@@ -530,7 +566,8 @@ function captionsFor(cues: Cue[], maxAltKm: number, onPad: boolean, sepsSeen = {
       cues.some((o) => o.event.kind === "stage-sep" && o.event.tS >= c.event.tS && o.event.tS - c.event.tS < 8);
     if (dryAtCutoff || cutAtSep) continue;
     const label = c.event.label?.trim();
-    const sub = label && normalize(label) !== normalize(base.text) ? label : undefined;
+    // Dialog goes to the transcript track, not under the callout.
+    const sub = label && !DIALOG.test(label) && normalize(label) !== normalize(base.text) ? label : undefined;
     const at = Math.max(c.at, lastAt + CAPTION_GAP);
     lastAt = at;
     out.push({ at, text: base.text, sub, tone: base.tone });

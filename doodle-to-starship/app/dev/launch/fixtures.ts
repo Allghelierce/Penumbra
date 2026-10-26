@@ -7,6 +7,7 @@ import {
   type FlightTrace,
   type Part,
   type Point,
+  type HistoricMission,
   type Recap,
   type SketchReading,
   type Stroke,
@@ -174,6 +175,24 @@ const reading = (design: Design, parts: Part[] = ROCKET_PARTS): SketchReading =>
 
 export const FIXTURES: LaunchFixture[] = [
   {
+    id: "breakup",
+    title: "Breakup",
+    note: "lost at T+34 s · dialog",
+    strokes: ROCKET_STROKES,
+    reading: reading({ ...DESIGN, name: "Falcon 1" }),
+    analysis: analysis("suborbital", 3100, 9400, 1.3, ["A fuel line nut cracked by corrosion leaked RP-1 onto the engine."]),
+    trace: {
+      points: ascent(520, 210, 1600, 7800, 158).filter((p) => p.tS <= 40),
+      events: [
+        { tS: 0, kind: "liftoff", label: 'Launch Director: "Liftoff."' },
+        { tS: 25, kind: "max-q", label: "Fire on the Merlin engine" },
+        { tS: 34, kind: "breakup", label: 'Range Safety: "We have lost the vehicle."' },
+      ],
+      outcome: "suborbital",
+      maxAltitudeKm: 2.9,
+    },
+  },
+  {
     id: "orbit",
     title: "Orbit",
     note: "2 stages · LEO · stage boxes",
@@ -295,3 +314,26 @@ export const VEHICLE_FIXTURE =
   encodeURIComponent(
     `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 300 400"><defs><linearGradient id="m" x1="0" x2="1"><stop offset="0" stop-color="#6f7782"/><stop offset=".45" stop-color="#e9edf2"/><stop offset="1" stop-color="#7b838e"/></linearGradient></defs><rect width="300" height="400" fill="#000"/><path d="M118 120 Q150 10 182 120 Z" fill="url(#m)"/><rect x="118" y="120" width="64" height="88" fill="url(#m)"/><rect x="118" y="208" width="64" height="4" fill="#3a3f46"/><rect x="118" y="212" width="64" height="108" fill="url(#m)"/><circle cx="150" cy="148" r="9" fill="#1b2430" stroke="#c9d1db" stroke-width="2"/><path d="M118 264 L97 312 L97 340 L118 320 Z" fill="#9aa3ad"/><path d="M182 264 L203 312 L203 340 L182 320 Z" fill="#9aa3ad"/><path d="M131 320 L126 338 L174 338 L169 320 Z" fill="#4a5058"/></svg>`,
   );
+
+/** A stand-in historic mission for the debrief card. */
+export const SAMPLE_MISSION: HistoricMission = {
+  id: "falcon1-f1",
+  sketchId: "napkin-hopper",
+  vehicle: "Falcon 1",
+  mission: "Flight 1 · FalconSAT-2",
+  date: "2006-03-24",
+  site: "Kwajalein Atoll",
+  destination: "leo",
+  outcome: "lost",
+  failure: { part: "engine", stageIndex: 0, label: "Fuel line nut", detail: "Corroded B-nut cracked" },
+  timeline: [],
+  rootCause: "An aluminum B-nut on the fuel pump inlet corroded in the salty island air, cracked, and leaked RP-1 onto the engine. A fire started at liftoff and the engine lost pressure at T+34 s.",
+  whatChanged: "Stainless-steel fittings replaced aluminum ones, and the team added more instrumentation and tighter checks on the pad.",
+  returnToFlight: "Flight 4, 28 Sep 2008: first privately developed liquid-fuel rocket to reach orbit.",
+  stats: [
+    { label: "Flight time", value: "34 s", meaning: "from liftoff to the engine losing pressure" },
+    { label: "Altitude", value: "2.9 km", meaning: "how high it got before the breakup" },
+    { label: "Attempts to orbit", value: "4", meaning: "flights it took before Falcon 1 made orbit" },
+  ],
+  sources: [{ title: "SpaceX Falcon 1 Flight 1 summary", url: "https://www.spacex.com" }],
+};

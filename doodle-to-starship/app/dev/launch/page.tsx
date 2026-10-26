@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import LaunchScene from "@/components/LaunchScene";
-import { FIXTURES, FIXTURE_RENDER, REAL_FIXTURES, SAMPLE_RECAP, VEHICLE_FIXTURE, type LaunchFixture } from "./fixtures";
+import { FIXTURES, FIXTURE_RENDER, REAL_FIXTURES, SAMPLE_MISSION, SAMPLE_RECAP, VEHICLE_FIXTURE, type LaunchFixture } from "./fixtures";
 
 type RenderMode = "late" | "now" | "none";
 
@@ -14,6 +14,7 @@ export default function LaunchDevPage() {
   const timer = useRef<number | undefined>(undefined);
   const runs = useRef(0);
   const [vehicle, setVehicle] = useState(false);
+  const [missionMode, setMissionMode] = useState(false);
   const [napkinRect, setNapkinRect] = useState<{ left: number; top: number; width: number; height: number } | null>(null);
 
   function play(fixture: LaunchFixture, m: RenderMode = mode) {
@@ -36,9 +37,12 @@ export default function LaunchDevPage() {
     const m: RenderMode = r === "now" || r === "none" || r === "late" ? r : mode;
     // ?vehicle=1 flies the stand-in vehicle picture instead of the chalk strokes.
     const v = params.get("vehicle") === "1";
+    // ?mission=1 shows the historic-mission debrief end card.
+    const ms = params.get("mission") === "1";
     const h = window.setTimeout(() => {
       if (height > 0) setNapkinRect({ left, top, width, height });
       setVehicle(v);
+      setMissionMode(ms);
       setMode(m);
       play(fixture, m);
     }, 0);
@@ -111,6 +115,7 @@ export default function LaunchDevPage() {
           renderState={mode === "none" ? "none" : renderUrl ? "done" : "loading"}
           napkinRect={napkinRect}
           vehicleImageUrl={vehicle ? VEHICLE_FIXTURE : null}
+          mission={missionMode ? SAMPLE_MISSION : null}
           recap={SAMPLE_RECAP}
           onImprove={(fix) => {
             setLog((l) => [...l, `onImprove ${JSON.stringify(fix)}`]);
