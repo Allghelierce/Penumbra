@@ -657,6 +657,31 @@ export default function Studio() {
     };
   });
 
+  /** Jump back to a finished step from the step bar: the same moves as Back, as many as it takes. */
+  function jumpTo(target: number) {
+    if (target >= step || step === 4) return; // never mid-flight
+    if (target === 0) {
+      if (retryTimer.current) clearTimeout(retryTimer.current);
+      anotherMission();
+      return;
+    }
+    if (target === 1) {
+      if (retryTimer.current) clearTimeout(retryTimer.current);
+      setFix(null);
+      runs.current.check++;
+      checking.current = false;
+      setReview(null);
+      setReading(null);
+      setDesign(null);
+      setIdentified(null);
+      setPhase("draw");
+      setStep(1);
+      return;
+    }
+    setFix(null);
+    setStep(target);
+  }
+
   /** Diagnose your own drawing: the full read and red-pen review. */
   async function diagnoseOwn() {
     setStep(2);
@@ -759,6 +784,7 @@ export default function Studio() {
       <StepBar
         steps={STEPS}
         current={step}
+        onStep={jumpTo}
         purposes={[
           "Choose a real rocket",
           mission ? "The engineer's napkin" : "Draw your spacecraft",
