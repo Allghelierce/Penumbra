@@ -720,6 +720,8 @@ export default function Studio() {
   }, []);
 
   const reviewed = phase === "reviewed" && reading && design;
+  // A real flight shows its full red-pen markup in Diagnose; from Build on, only the failed part stays lit.
+  const highlightOnly = Boolean(mission) && step >= 3;
 
   return (
     <div className="flex h-dvh flex-col overflow-hidden bg-black text-white">
@@ -854,13 +856,14 @@ export default function Studio() {
                     ) : null
                   }
                 >
-                  <div className={`absolute inset-0 transition-opacity duration-300 ${stale ? "opacity-30" : ""}`}>
+                  {/* From Build on, a real flight keeps only the failed part's outline: a red highlight over the photo. */}
+                  <div className={`absolute inset-0 transition-opacity duration-300 ${stale ? "opacity-30" : ""} ${highlightOnly ? "failed-highlight" : ""}`}>
                     <RedPenOverlay
-                      parts={reviewed ? reading.parts : []}
-                      marks={reviewed ? (review?.marks ?? []) : []}
+                      parts={reviewed && !highlightOnly ? reading.parts : []}
+                      marks={reviewed ? (highlightOnly ? (review?.marks ?? []).filter((m) => m.kind === "outline") : (review?.marks ?? [])) : []}
                       playKey={String(reviewKey)}
                       scanning={phase === "reading"}
-                      numbers={markNumbers}
+                      numbers={highlightOnly ? [] : markNumbers}
                       hidden={(review?.marks ?? []).map((_, i) => issues.some((issue) => issue.markIndex === i && issue.severity === "ok"))}
                       selectedMark={selectedMark}
                       onSelectMark={(markIndex) => selectIssue(issues.findIndex((issue) => issue.markIndex === markIndex))}

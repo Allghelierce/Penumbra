@@ -512,3 +512,19 @@ details > summary::-webkit-details-marker {
   pointer-events: none !important;
   transition: opacity 120ms ease-out;
 }
+
+/* Build and Fly on a real flight: the failed part, outlined in red, glowing softly. */
+.failed-highlight {
+  filter: drop-shadow(0 0 5px rgba(255, 75, 62, 0.85)) drop-shadow(0 0 14px rgba(255, 75, 62, 0.35));
+  animation: highlight-pulse 1.8s ease-in-out infinite;
+}
+@keyframes highlight-pulse {
+  50% {
+    opacity: 0.55;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .failed-highlight {
+    animation: none;
+  }
+}
