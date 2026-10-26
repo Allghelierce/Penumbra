@@ -801,7 +801,7 @@ export default function Studio() {
               </div>
             )}
             <p className={`h-5 text-[13px] ${error ? "text-nogo" : "text-haze"}`} aria-live="polite">
-              {error ?? (mission ? (identified ?? "") : reviewed && issues.some((issue) => issue.severity !== "ok") ? "Redraw to fix the numbered issues, then diagnose again." : "")}
+              {error ?? (!mission && reviewed && issues.some((issue) => issue.severity !== "ok") ? "Redraw to fix the numbered issues, then diagnose again." : "")}
             </p>
           </section>
 
@@ -918,7 +918,7 @@ function MissionBrief({ mission, step, identified }: { mission: HistoricMission;
           <p className="font-space text-[22px] font-semibold uppercase leading-tight tracking-[0.06em] text-white">{mission.vehicle}</p>
           <p className="mt-0.5 text-[14px] text-white/85">{mission.mission}</p>
           <p className="mt-0.5 text-[13px] text-haze">
-            {mission.date} · {mission.site}
+            {new Date(`${mission.date}T12:00:00Z`).toLocaleDateString("en-US", { year: "numeric", month: "long", day: "numeric", timeZone: "UTC" })} · {mission.site}
           </p>
           {step === 1 && <p className="mt-3 text-[14px] leading-snug text-haze">Here is the vehicle, drawn on a napkin. Press Diagnose to find what broke.</p>}
           {step >= 2 && mission.failure && (
