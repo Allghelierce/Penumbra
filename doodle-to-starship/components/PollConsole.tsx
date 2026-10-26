@@ -166,7 +166,14 @@ export default function PollConsole({ poll, revealed, onGo, onScrub }: PollConso
   const reported = segs.filter((s) => s.state === "go" || s.state === "nogo").length;
 
   return (
-    <section aria-label="GO/NO-GO poll" className="w-full border border-rule bg-black px-4 py-3 text-white">
+    // A fixed overlay with no in-flow height, so the napkin and photo keep their full size behind it.
+    // It stops above the voice dock so push-to-talk stays clickable during the poll.
+    <div className="h-0 w-full">
+      <section
+        aria-label="GO/NO-GO poll"
+        className="fixed inset-x-0 top-0 bottom-[76px] z-40 flex items-center justify-center bg-black/[.72] px-4 text-white lg:pr-[460px]"
+      >
+      <div className="w-full max-w-[760px] border border-rule bg-black px-6 py-5">
       <style>{CSS}</style>
       <div className="flex items-center justify-between gap-4">
         <h2 className="font-space text-[12px] font-semibold uppercase tracking-[0.2em] text-haze">Launch commit</h2>
@@ -175,7 +182,10 @@ export default function PollConsole({ poll, revealed, onGo, onScrub }: PollConso
         </button>
       </div>
 
-      <div className="relative mx-auto mt-1 w-full max-w-[600px]" style={{ height: SIZE }}>
+      <div
+        className="relative mx-auto mt-3 w-full max-w-[600px]"
+        style={{ height: SIZE, transform: "scale(1.3)", transformOrigin: "top center", marginBottom: SIZE * 0.3 }}
+      >
         <svg
           viewBox={`0 0 ${SIZE} ${SIZE}`}
           width={SIZE}
@@ -303,6 +313,8 @@ export default function PollConsole({ poll, revealed, onGo, onScrub }: PollConso
           {captionText}
         </span>
       </p>
-    </section>
+      </div>
+      </section>
+    </div>
   );
 }
