@@ -42,6 +42,8 @@ interface EndCardProps {
   lostAt?: { tS: number; altKm: number } | null;
   /** A real flight from history: the card becomes its debrief. */
   mission?: HistoricMission | null;
+  /** Lost missions with a comeback: apply the real fix and fly again. */
+  onFixRetry?: () => void;
   trace: FlightTrace;
 }
 
@@ -353,8 +355,9 @@ function RenderFrame({
 }
 
 /** Mission mode: what happened on the real flight, what changed, and how it came back. */
-function Debrief({ mission, renderUrl, renderPending, strokes, design, video, onDone, trace }: EndCardProps & { mission: HistoricMission }) {
+function Debrief({ mission, renderUrl, renderPending, strokes, design, video, onDone, onFixRetry, trace }: EndCardProps & { mission: HistoricMission }) {
   const lost = mission.outcome === "lost";
+  const retry = lost && onFixRetry ? onFixRetry : null;
   const [showReport, setShowReport] = useState(false);
   const closeReport = useCallback(() => setShowReport(false), []);
   const report = MISSION_REPORTS[mission.id];
@@ -430,12 +433,26 @@ function Debrief({ mission, renderUrl, renderPending, strokes, design, video, on
             )}
             <button
               type="button"
-              autoFocus
+              autoFocus={!retry}
               onClick={onDone}
-              className="rounded-[3px] border border-starlight bg-starlight px-4 py-2 text-sm font-semibold text-umbra transition-opacity hover:opacity-90"
+              className={
+                retry
+                  ? "rounded-[3px] border border-rule px-4 py-2 text-sm font-semibold text-starlight transition-colors hover:border-starlight"
+                  : "rounded-[3px] border border-starlight bg-starlight px-4 py-2 text-sm font-semibold text-umbra transition-opacity hover:opacity-90"
+              }
             >
               Try another mission
             </button>
+            {retry && (
+              <button
+                type="button"
+                autoFocus
+                onClick={retry}
+                className="rounded-[3px] border border-starlight bg-starlight px-4 py-2 text-sm font-semibold text-umbra transition-opacity hover:opacity-90"
+              >
+                Fix it &amp; fly again →
+              </button>
+            )}
           </div>
           {showReport && <MissionReport mission={mission} report={report} trace={trace} onClose={closeReport} />}
         </div>

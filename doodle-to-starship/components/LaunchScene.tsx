@@ -62,6 +62,8 @@ export interface LaunchSceneProps {
   onImprove?: (fix: DesignAction) => void;
   /** Optional: a real flight from history being replayed; the end card becomes its debrief. */
   mission?: HistoricMission | null;
+  /** Optional, for lost missions with a comeback: apply the real fix and fly again (primary button). */
+  onFixRetry?: () => void;
 }
 
 const TONE: Record<Tone, string> = {
@@ -494,6 +496,7 @@ function LaunchRun(props: RunProps) {
           onImprove={props.onImprove}
           lostAt={plan.lostAt}
           mission={props.mission}
+          onFixRetry={props.onFixRetry}
           trace={input.trace}
         />
       )}
