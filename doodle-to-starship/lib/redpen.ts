@@ -561,17 +561,50 @@ export function historicMarks(reading: SketchReading, analysis: Analysis, failur
 
   const detail = fewWords(failure.detail, 5);
   const arrow = arrowTo(edge, side, -0.07, detail, fewWords(failure.detail, 3));
-  const labelX = clamp(side > 0 ? whole[0] + whole[2] + 0.05 : whole[0] - 0.05, EDGE, 1 - EDGE);
-  const room = Math.floor((side > 0 ? 1 - EDGE - labelX : labelX - EDGE) / CALLOUT_CHAR_WIDTH);
-  const note = shorten(fewWords(failure.label, 4), Math.max(8, room));
-  let labelY = clamp(mid + 0.035, EDGE, 1 - EDGE);
-  // Keep the failure's name a line clear of ①'s note.
-  if (arrow.kind === "arrow" && Math.abs(labelY - arrow.from[1]) < CALLOUT_LINE) {
-    labelY = clamp(arrow.from[1] + CALLOUT_LINE, EDGE, 1 - EDGE);
-  }
-  const label: RedPenMark = { kind: "callout", anchor: edge, label: [labelX, labelY], note };
+  const label = failureLabel(parts, box, side, whole, fewWords(failure.label, 4), arrow);
 
   return [...dims, { kind: "outline", box: clampBox(box), note: "" }, label, arrow];
+}
+
+/**
+ * The failure's name, placed where the whole text fits: beside the failed part (open side,
+ * then the other), then just below it, then just above, each clear of the drawing at that row,
+ * of ①'s note and of the mission patch. Only if nothing fits is the text cut short.
+ */
+function failureLabel(parts: Part[], box: Box, side: 1 | -1, whole: Box, text: string, arrow: RedPenMark): RedPenMark {
+  const width = text.length * CALLOUT_CHAR_WIDTH;
+  const arrowY = arrow.kind === "arrow" ? arrow.from[1] : -1;
+  const mid = box[1] + box[3] / 2;
+  // How wide the drawing is at height y, so the label starts past it.
+  const extentAt = (y: number): [number, number] | null => {
+    const row = parts.filter((p) => p.box[1] <= y && y <= p.box[1] + p.box[3]);
+    return row.length ? [Math.min(...row.map((p) => p.box[0])), Math.max(...row.map((p) => p.box[0] + p.box[2]))] : null;
+  };
+  const tries: [number, 1 | -1][] = [
+    [mid + 0.035, side],
+    [mid + 0.035, -side as 1 | -1],
+    [box[1] + box[3] + 0.045, side],
+    [box[1] + box[3] + 0.045, -side as 1 | -1],
+    [box[1] - 0.03, side],
+    [box[1] - 0.03, -side as 1 | -1],
+  ];
+  for (const [rawY, s] of tries) {
+    const y = clamp(rawY, EDGE, 1 - EDGE);
+    if (Math.abs(y - arrowY) < CALLOUT_LINE) continue;
+    const extent = extentAt(y) ?? [box[0], box[0] + box[2]];
+    const x = s > 0 ? extent[1] + 0.03 : extent[0] - 0.03;
+    const [x0, x1] = s > 0 ? [x, x + width] : [x - width, x];
+    if (x0 < EDGE || x1 > 1 - EDGE || inPatch(x0, x1, y)) continue;
+    const anchor: Point = [clamp(s > 0 ? box[0] + box[2] : box[0], EDGE, 1 - EDGE), clamp(mid, EDGE, 1 - EDGE)];
+    return { kind: "callout", anchor, label: [x, y], note: text };
+  }
+  // Nothing fits whole: the open margin, cut to the room there.
+  const labelX = clamp(side > 0 ? whole[0] + whole[2] + 0.05 : whole[0] - 0.05, EDGE, 1 - EDGE);
+  const room = Math.floor((side > 0 ? 1 - EDGE - labelX : labelX - EDGE) / CALLOUT_CHAR_WIDTH);
+  let labelY = clamp(mid + 0.035, EDGE, 1 - EDGE);
+  if (Math.abs(labelY - arrowY) < CALLOUT_LINE) labelY = clamp(arrowY + CALLOUT_LINE, EDGE, 1 - EDGE);
+  const anchor: Point = [clamp(side > 0 ? box[0] + box[2] : box[0], EDGE, 1 - EDGE), clamp(mid, EDGE, 1 - EDGE)];
+  return { kind: "callout", anchor, label: [labelX, labelY], note: shorten(text, Math.max(8, room)) };
 }
 
 /** The first `n` words, without a dangling "a", "the" or "of", and "…" when cut. */

@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import type { HistoricMission, RedPenMark } from "./design";
 import { historicReading, historicReview, historicTrace } from "./history";
+import { HISTORIC_MISSIONS } from "./missions";
 
 /** A local stand-in until lib/missions.ts lands; the shape is HistoricMission's. */
 const crs7: HistoricMission = {
@@ -148,5 +149,36 @@ describe("historicTrace", () => {
     for (let i = 1; i < trace.points.length; i++) {
       expect(trace.points[i].downrangeKm).toBeGreaterThanOrEqual(trace.points[i - 1].downrangeKm);
     }
+  });
+});
+
+describe("the real missions", () => {
+  const lastEvent: Record<string, string> = { "falcon1-f1": "impact", crs7: "breakup", ift1: "breakup" };
+
+  it.each(HISTORIC_MISSIONS.map((m) => [m.id, m] as const))("%s: marks the failed part, fits its labels, ends right", (id, m) => {
+    const reading = historicReading(m);
+    const review = historicReview(m, reading);
+    const trace = historicTrace(m);
+
+    if (m.failure) {
+      const failure = m.failure;
+      const exact = reading.parts.filter(
+        (p) => p.kind === failure.part && (failure.stageIndex === undefined || p.stageIndex === failure.stageIndex),
+      );
+      expect(exact.length).toBeGreaterThan(0);
+      const label = review.marks.find((mk) => mk.kind === "callout");
+      expect(label?.note).toBe(failure.label.split(/\s+/).length <= 4 ? failure.label : label?.note);
+      expect(label?.note.endsWith("…") && failure.label.split(/\s+/).length <= 4).toBe(false);
+      if (label?.kind === "callout") {
+        const width = label.note.length * 0.012;
+        const [x0, x1] = label.label[0] < label.anchor[0] ? [label.label[0] - width, label.label[0]] : [label.label[0], label.label[0] + width];
+        expect(x0).toBeGreaterThanOrEqual(0);
+        expect(x1).toBeLessThanOrEqual(1);
+      }
+    }
+    review.marks.forEach(onNapkin);
+    if (lastEvent[id]) expect(trace.events.at(-1)?.kind).toBe(lastEvent[id]);
+    expect(trace.outcome).toBe(m.outcome === "lost" ? "suborbital" : "orbit");
+    expect(trace.points.length).toBeGreaterThan(1);
   });
 });
