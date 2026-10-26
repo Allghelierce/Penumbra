@@ -64,6 +64,8 @@ export interface NapkinRect {
 
 export interface LaunchInput {
   strokes: Stroke[];
+  /** A vehicle picture is on its way: draw nothing (rather than the strokes) while it loads. */
+  vehicleExpected?: boolean;
   /** A real flight being replayed; its id picks the scenario effects (crs7, ift1, falcon1-f1). */
   mission?: HistoricMission | null;
   /** Where the napkin sat on screen (viewport px), so the doodle starts exactly there. */
@@ -926,12 +928,9 @@ export function startLaunch(
     c.globalAlpha = 1;
     c.globalCompositeOperation = "source-over";
     c.clearRect(0, 0, W, H);
-    if (night < 1 && rect) {
-      // Lifting off the real napkin: the studio shows through until night falls, and the chalk
-      // doodle lifts off its patch of space (blacked out so the studio's own strokes don't ghost).
-      c.fillStyle = "#000000";
-      c.fillRect(rect.left, rect.top, rect.width, rect.height);
-    } else if (night < 1) {
+    // Lifting off the real napkin (rect set): nothing is painted behind the vehicle; the studio
+    // shows through until the sky fades in. Without its position, start from a plain table.
+    if (night < 1 && !rect) {
       // No napkin position: the napkin itself rides along from a plain table.
       c.fillStyle = rgba(pal.table, 1);
       c.fillRect(0, 0, W, H);
@@ -1098,8 +1097,13 @@ export function startLaunch(
         if (thr > 0.01) withPiece(i, (a) => drawFlame(p.nozzle, thr, plume, a, Z, i + 1));
       });
       drawParticles(local, (p) => [p.x, p.y, 1]);
+      // Waiting briefly for the vehicle picture beats flashing the strokes and swapping.
+      const waiting = !!input.vehicleExpected && !vehicle && t < 1.2;
       pieces.forEach((_, i) =>
-        withPiece(i, (a) => (vehicle ? drawVehiclePiece(i, a) : strokeDoodle(piecePaths[i], a, chalk, Z))),
+        withPiece(i, (a) => {
+          if (vehicle) drawVehiclePiece(i, a);
+          else if (!waiting) strokeDoodle(piecePaths[i], a, chalk, Z);
+        }),
       );
       if (reentry > 0.02) drawReentry(reentry, [focus[0], top], Z);
       if (fire.length) drawParticles(fire, (p) => [p.x, p.y, 1]);

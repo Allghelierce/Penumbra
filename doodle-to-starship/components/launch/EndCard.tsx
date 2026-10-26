@@ -318,7 +318,7 @@ function RenderFrame({
   const sketch = !playing && !show && (!pending || (url !== null && failed === url));
   return (
     <figure className="relative border-b border-rule sm:border-b-0 sm:border-r">
-      <div className="relative aspect-[4/3] h-full w-full overflow-hidden bg-night sm:aspect-auto sm:min-h-[16rem]">
+      <div className="relative aspect-[4/3] h-full w-full overflow-hidden sm:aspect-auto sm:min-h-[16rem]">
         {playing ? (
           <video
             key={video.url}

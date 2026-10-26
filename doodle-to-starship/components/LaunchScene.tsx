@@ -202,6 +202,7 @@ interface RunProps extends LaunchSceneProps {
 
 function LaunchRun(props: RunProps) {
   const [input] = useState(() => ({
+    vehicleExpected: !!props.vehicleImageUrl,
     mission: props.mission,
     napkinRect: props.napkinRect,
     strokes: props.strokes,
