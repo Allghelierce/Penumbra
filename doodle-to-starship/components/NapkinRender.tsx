@@ -28,6 +28,8 @@ const HOLD_MS = 900;
 const typing = (target: EventTarget | null) =>
   target instanceof HTMLElement && (target.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(target.tagName));
 
+const isPng = (src: string | null) => src !== null && (/\.png(\?|#|$)/i.test(src) || src.startsWith("data:image/png"));
+
 function shapesOf(reading: SketchReading | null): CleanShape[] {
   if (!reading) return [];
   try {
@@ -160,13 +162,13 @@ export default function NapkinRender({ url, loading, resetKey, reading = null, s
             </svg>
           )}
           {hasPhoto && (
-            // Screen drops the render's black background, so the vehicle floats on the napkin.
+            // Transparent PNG cutouts float as they are; screen drops a JPEG's black background instead.
             // eslint-disable-next-line @next/next/no-img-element
             <img
               src={track.photo ?? undefined}
               alt="Grok Imagine render of the sketch"
               draggable={false}
-              className={`napkin-render-img mix-blend-screen transition-opacity ${fade} ${shown === "photo" ? "opacity-100" : "opacity-0"}`}
+              className={`napkin-render-img transition-opacity ${fade} ${isPng(track.photo) ? "" : "mix-blend-screen"} ${shown === "photo" ? "opacity-100" : "opacity-0"}`}
             />
           )}
           {!track.swept && (
