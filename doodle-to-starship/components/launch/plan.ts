@@ -36,6 +36,8 @@ export interface CaptionCue {
   at: number;
   /** Set on transcript captions: real recorded dialog, e.g. "Launch Director". */
   speaker?: string;
+  /** Transcript captions: seconds the quote needs to be spoken. */
+  hold?: number;
   text: string;
   sub?: string;
   tone: Tone;
@@ -316,8 +318,11 @@ function flightPlan(
     lostAt: breakup ? { tS: breakup.tS, altKm: sampleAt(points, breakup.tS).alt } : null,
     explodeAt: failed ? finaleAt : null,
     // The end card follows the outcome closely: no long linger.
-    // Debris needs a moment to tumble away after a breakup.
-    endAt: finaleAt + (breakup ? 2.6 : 1.8),
+    // Debris needs a moment to tumble away after a breakup; a last quote gets to finish.
+    endAt: Math.max(
+      finaleAt + (breakup ? 2.6 : 1.8),
+      ...transcriptsFor(cues).map((tr) => tr.at + (tr.hold ?? 3) + 0.3),
+    ),
     maxAltKm,
     maxSpeedMps: Math.max(0, ...points.filter((p) => p.tS <= T).map((p) => p.speedMps)),
     hasDownrange: maxDown > Math.max(0.5, maxAltKm * 0.02),
@@ -357,6 +362,33 @@ function warpFor(T: number, events: FlightEvent[], karmanSims: number[], outcome
     else if (e.kind === "apogee") beats.push(beat(e.tS, 10, 10, 1));
   }
   for (const k of karmanSims) beats.push(beat(k, 4, 4, 0.8));
+
+  // Real dialog gets the time it takes to say it: the next event waits until the quote is done.
+  const sorted = events.filter((e) => e.tS >= 0 && e.tS <= T).sort((a, b) => a.tS - b.tS);
+  const quotes: Beat[] = [];
+  sorted.forEach((e, k) => {
+    const hold = quoteHold(e.label);
+    if (!hold) return;
+    const next = sorted.slice(k + 1).find((o) => o.tS > e.tS)?.tS ?? T;
+    if (next > e.tS) quotes.push({ from: e.tS, to: next, play: hold });
+  });
+  // Other beats give way where a quote is playing.
+  const free = beats.flatMap((b) => {
+    let parts = [b];
+    for (const q of quotes) {
+      parts = parts.flatMap((p) => {
+        if (p.to <= q.from || p.from >= q.to) return [p];
+        const span = p.to - p.from;
+        const out: Beat[] = [];
+        if (p.from < q.from) out.push({ from: p.from, to: q.from, play: (p.play * (q.from - p.from)) / span });
+        if (p.to > q.to) out.push({ from: q.to, to: p.to, play: (p.play * (p.to - q.to)) / span });
+        return out;
+      });
+    }
+    return parts;
+  });
+  beats.length = 0;
+  beats.push(...free);
   // The approach to the outcome: the fall and reentry before impact, or the last push to orbit.
   beats.push(
     outcome === "suborbital" ? beat(T, 30, 0, 1.5) : outcome === "breakup" ? beat(T, 15, 0, 1.1) : beat(T, 12, 0, 0.6),
@@ -377,6 +409,9 @@ function warpFor(T: number, events: FlightEvent[], karmanSims: number[], outcome
   const beatPlay = merged.reduce((n, b) => n + b.play, 0);
   const squeeze = Math.min(1, (FLIGHT_PLAY * 0.8) / Math.max(beatPlay, 1e-6));
   merged.forEach((b) => (b.play *= squeeze));
+  // Quotes are never squeezed; a dialog-heavy replay simply runs longer.
+  merged.push(...quotes);
+  merged.sort((a, b) => a.from - b.from);
 
   // Lay out beats and the gaps between them over [0, T].
   const segs: { from: number; to: number; play: number | null }[] = [];
@@ -535,6 +570,14 @@ function finaleFor(outcome: Verdict, design: Design, at: number): Finale {
 /** `Launch Director: "We have lost the vehicle."` → speaker and quote. */
 const DIALOG = /^\s*([^:"\u201c\u201d]{2,48}):\s*["\u201c]([\s\S]+?)["\u201d]\s*$/;
 
+/** Seconds a quoted label needs to be spoken (Quindar tones included), or null if it's no quote. */
+function quoteHold(label: string | undefined): number | null {
+  const m = label ? DIALOG.exec(label) : null;
+  if (!m) return null;
+  const words = m[2].trim().split(/\s+/).length;
+  return Math.max(2.5, 0.38 * words + 0.6);
+}
+
 /** Real dialog as subtitles, each held about 3 s before the next may replace it. */
 function transcriptsFor(cues: Cue[]): CaptionCue[] {
   const out: CaptionCue[] = [];
@@ -543,8 +586,9 @@ function transcriptsFor(cues: Cue[]): CaptionCue[] {
     const m = c.event.label ? DIALOG.exec(c.event.label) : null;
     if (!m) continue;
     const at = Math.max(c.at, free);
-    out.push({ at, text: m[2].trim(), speaker: m[1].trim(), tone: "chalk" });
-    free = at + 3;
+    const hold = quoteHold(c.event.label) ?? 3;
+    out.push({ at, text: m[2].trim(), speaker: m[1].trim(), tone: "chalk", hold });
+    free = at + hold;
   }
   return out;
 }

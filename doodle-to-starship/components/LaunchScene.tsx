@@ -405,7 +405,11 @@ function LaunchRun(props: RunProps) {
 
       {/* Real recorded dialog, as subtitles: the speaker small, the words big. */}
       {transcript && !ended && (
-        <div key={transcript.id} className="ls-transcript pointer-events-none absolute inset-x-0 bottom-[132px] flex justify-center px-6">
+        <div
+          key={transcript.id}
+          className="ls-transcript pointer-events-none absolute inset-x-0 bottom-[132px] flex justify-center px-6"
+          style={{ animationDuration: `${Math.max(3.2, (transcript.hold ?? 3) + 0.4)}s` }}
+        >
           <div className="max-w-3xl text-center">
             <div className={`text-[11px] font-semibold uppercase tracking-[0.22em] text-haze ${LIFT}`}>{transcript.speaker}</div>
             <div className={`mt-1 text-xl font-medium leading-snug text-starlight sm:text-2xl ${LIFT}`}>
