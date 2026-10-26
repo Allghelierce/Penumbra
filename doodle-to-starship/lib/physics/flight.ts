@@ -32,6 +32,7 @@ const EVENT_ORDER: Record<FlightEventKind, number> = {
   apogee: 7,
   impact: 8,
   "pad-failure": 9,
+  breakup: 10,
 };
 
 export function simulateFlight(design: Design, analysis: Analysis): FlightTrace {
