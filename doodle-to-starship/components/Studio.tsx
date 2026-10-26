@@ -43,7 +43,7 @@ import { buildReview } from "@/lib/redpen";
 import { readFromGeometry } from "@/lib/sketch/geometry";
 import { cutoutBlack } from "@/lib/cutout";
 import { DEMO_CONCEPTS } from "@/lib/demo-assets";
-import { historicReading, historicReview, historicTrace } from "@/lib/history";
+import { COMEBACK, fixNote, fixStrokes, historicReading, historicReview, historicTrace } from "@/lib/history";
 import { prefetchNarration } from "@/lib/voice/tts";
 import { ALL_MISSIONS } from "@/lib/mission-catalog";
 import MissionFile from "@/components/MissionFile";
@@ -163,6 +163,8 @@ export default function Studio() {
   const [step, setStep] = useState(0);
   // The real flight being diagnosed, or null when drawing your own.
   const [mission, setMission] = useState<HistoricMission | null>(null);
+  // "Fix and try again": the engineer's fix drawn in blue over the lost vehicle, before the comeback flight.
+  const [fix, setFix] = useState<{ strokes: Stroke[]; note: string } | null>(null);
   // What one read of the drawing found ("Grok vision identified: …").
   const [identified, setIdentified] = useState<string | null>(null);
   const [strokes, setStrokes] = useState<Stroke[]>([]);
@@ -513,6 +515,7 @@ export default function Studio() {
     setPatchUrl(null);
     setError(null);
     setIdentified(null);
+    setFix(null);
     setPhase("draw");
   }
 
@@ -597,6 +600,29 @@ export default function Studio() {
     setIdentified(found);
     setPhase("reviewed");
     setNarration(marks.summary);
+  }
+
+  /** After a lost flight: draw the fix on the same vehicle, then fly the mission where that fix flew. */
+  const retryTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  function fixAndRetry() {
+    const lostFlight = latest.current.mission;
+    const read = latest.current.reading;
+    const comeback = lostFlight ? ALL_MISSIONS.find((x) => x.id === COMEBACK[lostFlight.id]) : undefined;
+    if (!lostFlight || !read || !comeback) return;
+    unlockLaunchAudio(); // still inside the click, for Safari
+    setFlight(null);
+    setPhase("reviewed");
+    setStep(3);
+    setFix({ strokes: fixStrokes(lostFlight, read), note: fixNote(lostFlight) });
+    if (retryTimer.current) clearTimeout(retryTimer.current);
+    retryTimer.current = setTimeout(() => {
+      const comebackRead = historicReading(comeback);
+      latest.current = { ...latest.current, mission: comeback, reading: comebackRead, design: comebackRead.design };
+      setMission(comeback);
+      setReading(comebackRead);
+      setDesign(comebackRead.design);
+      startLaunch();
+    }, 2600);
   }
 
   /** Diagnose your own drawing: the full read and red-pen review. */
@@ -809,6 +835,7 @@ export default function Studio() {
                   </div>
                 </NapkinRender>
                 {!mission && <NapkinAssist strokes={strokes} destination={destination} onKeep={changeStrokes} active={phase === "draw"} />}
+                {fix && <FixOverlay strokes={fix.strokes} note={fix.note} />}
               </NapkinCanvas>
             </div>
 
@@ -962,11 +989,52 @@ export default function Studio() {
             if (flightRecap) setOffer(offerFor(flightRecap));
           }}
           mission={mission ?? undefined}
+          onFixRetry={mission && mission.outcome === "lost" && COMEBACK[mission.id] && ALL_MISSIONS.some((x) => x.id === COMEBACK[mission.id]) ? fixAndRetry : undefined}
           recap={mission ? missionRecap(mission) : flightRecap}
           onImprove={mission ? undefined : improveAndFly}
         />
       )}
     </div>
+  );
+}
+
+/** The fix, drawn on the napkin in blue technical pen, with the red pen's note beside it. */
+function FixOverlay({ strokes, note }: { strokes: Stroke[]; note: string }) {
+  const pts = strokes.flatMap((s) => s.points);
+  if (pts.length === 0) return null;
+  const minX = Math.min(...pts.map((p) => p[0]));
+  const maxX = Math.max(...pts.map((p) => p[0]));
+  const minY = Math.min(...pts.map((p) => p[1]));
+  const right = maxX < 0.72;
+  return (
+    <svg viewBox="0 0 300 400" className="pointer-events-none absolute inset-0 h-full w-full" aria-hidden>
+      {strokes.map((st, i) => (
+        <polyline
+          key={i}
+          className="pen-draw"
+          style={{ animationDelay: `${0.2 + i * 0.12}s`, animationDuration: "0.5s" }}
+          pathLength={1}
+          points={st.points.map(([x, y]) => `${x * 300},${y * 400}`).join(" ")}
+          fill="none"
+          stroke="#5aaeff"
+          strokeWidth="1.6"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+        />
+      ))}
+      <text
+        className="pen-note font-hand"
+        style={{ animationDelay: `${0.4 + strokes.length * 0.12}s` }}
+        x={right ? maxX * 300 + 8 : minX * 300 - 8}
+        y={Math.max(14, minY * 400 + 10)}
+        textAnchor={right ? "start" : "end"}
+        fontSize="13"
+        fontWeight="700"
+        fill="var(--redpen)"
+      >
+        {note}
+      </text>
+    </svg>
   );
 }
 
