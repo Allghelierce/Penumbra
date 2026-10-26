@@ -235,6 +235,8 @@ export function startLaunch(
   const plan = buildPlan(input.trace, input.analysis, design, pieces.length, input.mission?.id);
   /** Historic replay effects, by mission id. */
   const scenario = input.mission?.id ?? null;
+  /** Reduced motion: no camera shake or plasma shimmer. */
+  const calm = typeof window !== "undefined" && !!window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
   let simNow = 0;
   /** IFT-1: the end-over-end tumble after the failed separation. */
   let tumble = 0;
@@ -588,7 +590,7 @@ export function startLaunch(
         const yy = n.y + L * (0.42 + 0.13 * i);
         const w = hw * (0.42 - 0.07 * i);
         const h = L * 0.04;
-        c.globalAlpha = alpha * dia * (0.95 - 0.2 * i);
+        c.globalAlpha = alpha * dia * (0.95 - 0.2 * i) * (0.7 + 0.3 * Math.sin(t * 22 + i * 1.3));
         c.beginPath();
         c.moveTo(n.x, yy - h);
         c.lineTo(n.x + w, yy);
@@ -751,9 +753,18 @@ export function startLaunch(
       const followY = 0.47 + (orbitish ? 0.15 * ease((t - plan.finaleAt) / 1) : 0);
       camY = Math.max(camY, fw[1] - ((0.5 - followY) * H) / Z);
     }
-    const quake = exploded ? 14 * Math.exp(-3 * (t - explodedAt)) : 0;
-    const qx = rnd(-quake, quake);
-    const qy = rnd(-quake, quake);
+    // Camera shake from smooth noise: a rumble at ignition, building through Max-Q, a jolt at
+    // each separation and a kick when the vehicle is lost; 0–6 px, scaled by playback speed.
+    let shakeAmp = 0;
+    if (!calm) {
+      if (t >= T_IGNITE && !exploded) shakeAmp = flying ? 0.8 : 0.6;
+      if (maxQAt !== null && flying) shakeAmp += 4 * Math.exp(-(((t - maxQAt) / 0.9) ** 2));
+      for (const at of plan.seps) if (t >= at) shakeAmp += 4 * Math.exp(-(t - at) * 6);
+      if (exploded) shakeAmp += 6 * Math.exp(-3 * (t - explodedAt));
+      shakeAmp = Math.min(6, shakeAmp) * Math.min(1.5, Math.max(0.5, speed));
+    }
+    const qx = shakeAmp * (0.6 * Math.sin(t * 47.3) + 0.4 * Math.sin(t * 91.7 + 1.3));
+    const qy = shakeAmp * (0.6 * Math.sin(t * 53.1 + 0.7) + 0.4 * Math.sin(t * 83.9 + 2.1));
     const SX = (wx: number) => W / 2 + (wx - camX) * Z + qx;
     const SY = (wy: number) => H / 2 - (wy - camY) * Z + qy;
 
@@ -1019,7 +1030,8 @@ export function startLaunch(
     if (speedLines.length) {
       c.save();
       c.strokeStyle = "#ffffff";
-      c.lineWidth = 1;
+      // Streaks thicken with speed.
+      c.lineWidth = 1 + Math.min(1.5, (flying ? s.speed : 0) / 1500);
       for (let i = speedLines.length - 1; i >= 0; i--) {
         const l = speedLines[i];
         l.age += dt;
@@ -1093,6 +1105,8 @@ export function startLaunch(
       if (fire.length) drawParticles(fire, (p) => [p.x, p.y, 1]);
       // Vapor cone around Max-Q: a crisp condensation collar as it goes transonic.
       const vapor = maxQAt !== null && flying ? 1 - clamp01(Math.abs(t - maxQAt) / 1.1) : 0;
+      // Heat shimmer: a plasma glow on the nose through Max-Q.
+      if (vapor > 0.05 && !calm) drawReentry(vapor * 0.55, [focus[0], top], Z);
       if (vapor > 0.02) {
         const b = doodle.box;
         const h = b.maxY - b.minY;
@@ -1190,6 +1204,18 @@ export function startLaunch(
       c.fillStyle = g;
       c.fillRect(0, 0, W, H);
       c.globalCompositeOperation = "source-over";
+    }
+
+    // A vignette that tightens around Max-Q.
+    const maxQPulse = maxQAt !== null && flying ? Math.exp(-(((t - maxQAt) / 1.1) ** 2)) : 0;
+    if (maxQPulse > 0.02) {
+      const v = c.createRadialGradient(W / 2, H / 2, Math.min(W, H) * 0.35, W / 2, H / 2, Math.max(W, H) * 0.75);
+      v.addColorStop(0, "rgba(0,0,0,0)");
+      v.addColorStop(1, `rgba(0,0,0,${0.55 * maxQPulse})`);
+      c.globalAlpha = 1;
+      c.globalCompositeOperation = "source-over";
+      c.fillStyle = v;
+      c.fillRect(0, 0, W, H);
     }
 
     // --- HUD ---
