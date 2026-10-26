@@ -43,7 +43,7 @@ import { buildReview } from "@/lib/redpen";
 import { readFromGeometry } from "@/lib/sketch/geometry";
 import { cutoutBlack } from "@/lib/cutout";
 import { DEMO_CONCEPTS } from "@/lib/demo-assets";
-import { COMEBACK, fixNote, fixStrokes, historicReading, historicReview, historicTrace } from "@/lib/history";
+import { COMEBACK, defectStrokes, fixNote, fixStrokes, historicReading, historicReview, historicTrace } from "@/lib/history";
 import { prefetchNarration } from "@/lib/voice/tts";
 import { ALL_MISSIONS } from "@/lib/mission-catalog";
 import MissionFile from "@/components/MissionFile";
@@ -551,10 +551,13 @@ export default function Studio() {
     setMission(m);
     setDestination(m.destination);
     setStep(1);
+    // A lost flight's flaw (a leaking fitting, a cracked strut, broken bells) draws in last, so it's on the
+    // napkin before Diagnose circles it. The part boxes come from the local historic reading; no API.
+    const flaw = defectStrokes(m, historicReading(m));
     const controller = new AbortController();
     replay.current = controller;
     setReplaying(true);
-    void replaySketch(sketch.strokes, setStrokes, { signal: controller.signal }).finally(() => {
+    void replaySketch([...sketch.strokes, ...flaw], setStrokes, { signal: controller.signal }).finally(() => {
       if (replay.current === controller) setReplaying(false);
     });
   }
