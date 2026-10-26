@@ -708,9 +708,11 @@ export default function Studio() {
       />
 
       {step === 0 ? (
-        <main className="space-stage flex min-h-0 flex-1 flex-col items-center overflow-y-auto px-10 py-10">
+        // The stage clips (space-stage hides overflow); the list scrolls in its own layer above the backdrop.
+        <main className="space-stage relative min-h-0 flex-1">
           <SpaceBackdrop />
-          <div className="w-full max-w-[1200px]">
+          <div className="absolute inset-0 overflow-y-auto">
+          <div className="mx-auto w-full max-w-[1200px] px-10 py-10">
             <h2 className="font-space text-[26px] font-semibold uppercase tracking-[0.1em] text-white">Pick a real flight to diagnose</h2>
             <p className="mb-6 mt-1 text-[15px] text-haze">Each rocket is drawn on a napkin. Find what broke, watch it get built, then fly what actually happened.</p>
             <MissionPicker missions={FEATURED_MISSIONS} onPick={pickMission} onDrawOwn={drawOwn} />
@@ -757,6 +759,7 @@ export default function Studio() {
                 </div>
               </div>
             )}
+          </div>
           </div>
         </main>
       ) : (
