@@ -1,0 +1,69 @@
+"use client";
+
+import type { HistoricMission } from "@/lib/design";
+import { DEMO_CONCEPTS } from "@/lib/demo-assets";
+
+interface MissionPickerProps {
+  missions: HistoricMission[];
+  onPick: (mission: HistoricMission) => void;
+  onDrawOwn: () => void;
+}
+
+const formatDate = (iso: string) =>
+  new Date(`${iso}T12:00:00Z`).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric", timeZone: "UTC" });
+
+/** The first step: real missions to diagnose, each with its pinned render, plus a blank napkin. */
+export default function MissionPicker({ missions, onPick, onDrawOwn }: MissionPickerProps) {
+  return (
+    <section aria-label="Pick a mission" className="w-full font-ui text-white">
+      <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
+        {missions.map((m) => {
+          const photo = DEMO_CONCEPTS[m.sketchId];
+          return (
+            <button
+              key={m.id}
+              type="button"
+              onClick={() => onPick(m)}
+              className="group flex flex-col border border-white/15 bg-black text-left transition-colors hover:border-white focus-visible:border-white"
+            >
+              <div className="relative aspect-[3/4] w-full overflow-hidden bg-black">
+                {photo && (
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img
+                    src={photo}
+                    alt={`${m.vehicle}, rendered`}
+                    draggable={false}
+                    className="absolute inset-0 h-full w-full object-contain transition-transform duration-500 group-hover:scale-[1.03]"
+                  />
+                )}
+                {m.outcome === "lost" && (
+                  <span className="absolute left-3 top-3 bg-redpen px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-[0.2em] text-white">Lost</span>
+                )}
+              </div>
+              <div className="flex flex-1 flex-col gap-1 border-t border-white/15 p-4">
+                <p className="text-[18px] font-semibold uppercase leading-tight tracking-[0.08em]">{m.vehicle}</p>
+                <p className="text-[12px] text-white/70">{m.mission}</p>
+                <p className="font-mono text-[11px] text-haze">{formatDate(m.date)}</p>
+                {m.failure && (
+                  <p className="mt-2 text-[12px] leading-snug text-white/85">
+                    <span className="mr-1.5 text-[10px] font-semibold uppercase tracking-[0.18em] text-nogo">What failed?</span>
+                    {m.failure.label}
+                  </p>
+                )}
+              </div>
+            </button>
+          );
+        })}
+        <button
+          type="button"
+          onClick={onDrawOwn}
+          className="flex min-h-64 flex-col items-center justify-center gap-3 border border-white/40 bg-black p-6 text-white/75 transition-colors hover:border-white hover:text-white focus-visible:border-white"
+        >
+          <span className="text-4xl font-light leading-none">+</span>
+          <span className="text-[13px] font-semibold uppercase tracking-[0.18em]">Draw your own</span>
+          <span className="text-[12px] text-haze">Start from a blank napkin</span>
+        </button>
+      </div>
+    </section>
+  );
+}
