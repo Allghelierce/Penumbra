@@ -19,7 +19,7 @@ import { parseCommand } from "@/lib/voice/intent";
 import { ackLine, buildInstructions, deltaLine, nudge, speakable, toolResult, verdictLine } from "@/lib/voice/persona";
 import { voiceActivity } from "@/lib/voice/activity";
 import { createRealtimeSession, type RealtimeSession } from "@/lib/voice/realtime";
-import { fetchSpeech, hashName, playSpeech, stopSpeech, type Speaker } from "@/lib/voice/tts";
+import { fetchSpeech, hashName, playSpeech, splitDialog, stopSpeech, type Speaker } from "@/lib/voice/tts";
 import { toolCallToAction, VOICE_TOOLS } from "@/lib/voice/tools";
 
 export interface VoiceDockProps {
@@ -56,12 +56,6 @@ const SILENT_LINE_MS = 900;
 
 /** Ends the browser line in progress (cancel() doesn't always fire onend). */
 let endBrowserLine: (() => void) | null = null;
-
-/** Replay dialog arrives as `Speaker: "quote"`; returns the parts, or null for plain narration. */
-function splitDialog(text: string): { speaker: string; quote: string } | null {
-  const m = /^\s*([^:"“”]{1,48}?):\s*["“]([\s\S]+?)["”]\s*$/.exec(text);
-  return m ? { speaker: m[1].trim(), quote: m[2].trim() } : null;
-}
 
 /** Browser voice for a role, or a stable pitch and rate hashed from a named speaker. */
 function browserVoice(speaker: string): { pitch: number; rate: number } {

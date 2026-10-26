@@ -66,6 +66,15 @@ describe("calloutFor", () => {
   });
 });
 
+describe("calloutFor with replay dialog", () => {
+  it("passes a historic event's quoted dialog through unchanged", () => {
+    const { design } = demo("two-stage-orbiter");
+    const label = 'CAPCOM: "Roger, go at throttle up."';
+    expect(calloutFor({ tS: 70, kind: "max-q", label }, design)).toBe(label);
+    expect(calloutFor({ tS: 70, kind: "max-q", label: "Max Q" }, design)).toBe("Max-Q.");
+  });
+});
+
 describe("offerFor and parseReply", () => {
   it("offers the top improvement and asks to fly again", () => {
     const fix = { type: "scale-tanks", stageIndex: 0, factor: 1.12 } as const;

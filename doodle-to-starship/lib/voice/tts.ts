@@ -41,6 +41,23 @@ export function performance(text: string, speaker: string): string {
   return text.replace(/^([A-Za-z]+, (?:NO-GO|GO)\.)\s+/, "$1 [pause] ");
 }
 
+/** Replay dialog arrives as `Speaker: "quote"`; returns the parts, or null for plain narration. */
+export function splitDialog(text: string): { speaker: string; quote: string } | null {
+  const m = /^\s*([^:"“”]{1,48}?):\s*["“]([\s\S]+?)["”]\s*$/.exec(text);
+  return m ? { speaker: m[1].trim(), quote: m[2].trim() } : null;
+}
+
+/**
+ * Fetch a whole flight's callouts up front (call when the flight starts) so each plays the moment
+ * its event fires. Lines are narration strings: plain callouts or `Speaker: "quote"`.
+ */
+export function prefetchNarration(lines: string[]) {
+  for (const line of new Set(lines)) {
+    const dialog = splitDialog(line);
+    void fetchSpeech(dialog ? dialog.quote : line, dialog ? dialog.speaker : "Callout");
+  }
+}
+
 const fetched = new Map<string, Promise<string | null>>();
 
 /** Fetch (once) the audio for a line; resolves to an object URL or null. Safe to call early to prefetch. */

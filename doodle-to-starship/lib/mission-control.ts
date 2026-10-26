@@ -142,6 +142,8 @@ function altitudeAt(trace: FlightTrace | undefined, tS: number): number | null {
 
 /** One short webcast-style line per flight event. Kept to a breath: events can come 1.2 s apart. */
 export function calloutFor(event: FlightEvent, design: Design, trace?: FlightTrace): string {
+  // Historic replays carry the real loop dialog as `Speaker: "quote"`: say that, not a stock line.
+  if (/^\s*[^:"“”]{1,48}:\s*["“]/.test(event.label)) return event.label;
   const alt = altitudeAt(trace, event.tS);
   switch (event.kind) {
     case "liftoff":
