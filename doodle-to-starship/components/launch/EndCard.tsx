@@ -1,12 +1,15 @@
 "use client";
 
-import { useState } from "react";
+import { useCallback, useState } from "react";
+import MissionReport from "@/components/MissionReport";
+import { MISSION_REPORTS } from "@/lib/mission-reports";
 import {
   NAPKIN_ASPECT,
   type Analysis,
   type Design,
   type DesignAction,
   type DestinationId,
+  type FlightTrace,
   type Improvement,
   type Recap,
   type HistoricMission,
@@ -39,6 +42,7 @@ interface EndCardProps {
   lostAt?: { tS: number; altKm: number } | null;
   /** A real flight from history: the card becomes its debrief. */
   mission?: HistoricMission | null;
+  trace: FlightTrace;
 }
 
 /** Same names the studio's "Where it can go" list uses. */
@@ -349,8 +353,11 @@ function RenderFrame({
 }
 
 /** Mission mode: what happened on the real flight, what changed, and how it came back. */
-function Debrief({ mission, renderUrl, renderPending, strokes, design, video, onDone }: EndCardProps & { mission: HistoricMission }) {
+function Debrief({ mission, renderUrl, renderPending, strokes, design, video, onDone, trace }: EndCardProps & { mission: HistoricMission }) {
   const lost = mission.outcome === "lost";
+  const [showReport, setShowReport] = useState(false);
+  const closeReport = useCallback(() => setShowReport(false), []);
+  const report = MISSION_REPORTS[mission.id];
   const section = "border-t border-rule px-5 py-3 sm:px-7";
   const label = "text-[11px] font-semibold uppercase tracking-[0.2em] text-haze";
   return (
@@ -371,13 +378,18 @@ function Debrief({ mission, renderUrl, renderPending, strokes, design, video, on
         </div>
         {(mission.failure || mission.rootCause) && (
           <section className={section}>
-            <div className={label}>What failed</div>
-            {mission.failure && <div className="mt-1 font-display text-lg font-semibold uppercase tracking-[0.04em]">{mission.failure.label}</div>}
+            <div className={label}>{lost ? "What failed" : "What went right"}</div>
+            {mission.failure &&
+              (lost ? (
+                <div className="mt-1 font-display text-lg font-semibold uppercase tracking-[0.04em]">{mission.failure.label}</div>
+              ) : (
+                <div className="mt-1 text-xs text-haze">Anomaly: {mission.failure.label}</div>
+              ))}
             <p className="mt-1 text-sm leading-snug text-starlight/85">{mission.rootCause}</p>
           </section>
         )}
         <section className={section}>
-          <div className={label}>What SpaceX changed</div>
+          <div className={label}>{lost ? "What SpaceX changed" : "What it proved"}</div>
           <p className="mt-1 text-sm leading-snug text-starlight/85">{mission.whatChanged}</p>
         </section>
         <section className={section}>
@@ -406,14 +418,26 @@ function Debrief({ mission, renderUrl, renderPending, strokes, design, video, on
               </a>
             ))}
           </div>
-          <button
-            type="button"
-            autoFocus
-            onClick={onDone}
-            className="rounded-[3px] border border-starlight bg-starlight px-4 py-2 text-sm font-semibold text-umbra transition-opacity hover:opacity-90"
-          >
-            Try another mission
-          </button>
+          <div className="flex items-center gap-2">
+            {report && (
+              <button
+                type="button"
+                onClick={() => setShowReport(true)}
+                className="rounded-[3px] border border-rule px-4 py-2 text-sm font-semibold text-starlight transition-colors hover:border-starlight"
+              >
+                Full report
+              </button>
+            )}
+            <button
+              type="button"
+              autoFocus
+              onClick={onDone}
+              className="rounded-[3px] border border-starlight bg-starlight px-4 py-2 text-sm font-semibold text-umbra transition-opacity hover:opacity-90"
+            >
+              Try another mission
+            </button>
+          </div>
+          {showReport && <MissionReport mission={mission} report={report} trace={trace} onClose={closeReport} />}
         </div>
       </div>
     </div>

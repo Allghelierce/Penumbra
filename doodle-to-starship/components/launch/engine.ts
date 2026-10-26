@@ -1,4 +1,12 @@
-import { NAPKIN_ASPECT, type Analysis, type FlightEvent, type FlightTrace, type SketchReading, type Stroke } from "@/lib/design";
+import {
+  NAPKIN_ASPECT,
+  type Analysis,
+  type FlightEvent,
+  type FlightTrace,
+  type HistoricMission,
+  type SketchReading,
+  type Stroke,
+} from "@/lib/design";
 import { ladderPos, ladderTop, layerAt } from "./atmosphere";
 import type { LaunchAudio } from "./audio";
 import { buildDoodle, unionBox, type Nozzle, type Vec } from "./geometry";
@@ -56,6 +64,8 @@ export interface NapkinRect {
 
 export interface LaunchInput {
   strokes: Stroke[];
+  /** A real flight being replayed; its id picks the scenario effects (crs7, ift1, falcon1-f1). */
+  mission?: HistoricMission | null;
   /** Where the napkin sat on screen (viewport px), so the doodle starts exactly there. */
   napkinRect?: NapkinRect | null;
   reading: SketchReading;
@@ -100,11 +110,13 @@ export interface HudRefs {
 export function planFor(input: LaunchInput): Plan {
   const design = input.reading.design;
   const doodle = buildDoodle(input.strokes, input.reading.parts ?? [], design.stages?.length ?? 1);
-  return buildPlan(input.trace, input.analysis, design, doodle.pieces.length);
+  return buildPlan(input.trace, input.analysis, design, doodle.pieces.length, input.mission?.id);
 }
 
 export interface LaunchHandle {
   stop: () => void;
+  /** Playback speed multiplier (0.5–2). */
+  setSpeed: (x: number) => void;
   /** Fly a picture of the vehicle (same 3:4 frame as the strokes) instead of the chalk strokes. */
   setVehicle: (img: HTMLImageElement | null) => void;
   /** Jump straight to the end card. */
@@ -214,13 +226,22 @@ export function startLaunch(
   const ctx = canvas.getContext("2d");
   if (!ctx) {
     hooks.onEnd();
-    return { stop: () => {}, skip: () => {}, setVehicle: () => {} };
+    return { stop: () => {}, skip: () => {}, setVehicle: () => {}, setSpeed: () => {} };
   }
 
   const design = input.reading.design;
   const doodle = buildDoodle(input.strokes, input.reading.parts ?? [], design.stages?.length ?? 1);
   const pieces = doodle.pieces;
-  const plan = buildPlan(input.trace, input.analysis, design, pieces.length);
+  const plan = buildPlan(input.trace, input.analysis, design, pieces.length, input.mission?.id);
+  /** Historic replay effects, by mission id. */
+  const scenario = input.mission?.id ?? null;
+  let simNow = 0;
+  /** IFT-1: the end-over-end tumble after the failed separation. */
+  let tumble = 0;
+  /** Falcon 1 Flight 1: the engine-bay fire, drawn over the body. */
+  const fire: Particle[] = [];
+  /** CRS-7: the Dragon capsule, tumbling away intact from the breakup. */
+  let capsule: { x: number; y: number; vx: number; vy: number; rot: number; vr: number; cx: number; cy: number; top: number; bottom: number } | null = null;
   const pal = readPalette();
   const Hn = doodle.height;
   const Wn = doodle.width;
@@ -309,6 +330,9 @@ export function startLaunch(
     el.textContent = text;
   };
   let ignited = false;
+  /** Playback speed (0.5×, 1×, 2×); held to 1× while a recorded quote plays so it's never cut off. */
+  let speed = 1;
+  let quoteUntil = -Infinity;
   let vehicle: HTMLImageElement | null = null;
   let cutArmed = false;
   const sound = hooks.sound;
@@ -360,6 +384,9 @@ export function startLaunch(
     // A suborbital crash hits nose-first; a breakup or pad explosion goes up where the vehicle is.
     blast = plan.outcome === "suborbital" && !plan.lostAt ? toWorld(pose, [focus[0], top]) : toWorld(pose, focus);
 
+    // CRS-7: the nose (Dragon) is not debris; it comes away whole.
+    const crs7 = scenario === "crs7";
+    const capBottom = top + 0.18 * Hn;
     // A vehicle picture breaks into tiles of itself; the chalk doodle into chunks of its strokes.
     if (vehicle) {
       const nap = doodle.napkin;
@@ -373,6 +400,7 @@ export function startLaunch(
           const lx = nap.minX + (col + 0.5) * tw;
           const ly = nap.minY + (row + 0.5) * th;
           if (!pieces.some((p, i) => attached(i) && ly >= p.band.top && ly < p.band.bottom)) continue;
+          if (crs7 && ly < capBottom) continue;
           const [wx, wy] = toWorld(pose, [lx, ly]);
           const dx = wx - blast[0];
           const dy = wy - blast[1];
@@ -404,7 +432,9 @@ export function startLaunch(
     const chunk = Math.max(4, Math.ceil(total / 110));
     for (const l of lines) {
       for (let s = 0; s < l.length - 1; s += chunk - 1) {
-        const seg = l.slice(s, s + chunk).map((v) => toWorld(pose, v));
+        const raw = l.slice(s, s + chunk);
+        if (crs7 && raw.reduce((a, v) => a + v[1], 0) / raw.length < capBottom) continue;
+        const seg = raw.map((v) => toWorld(pose, v));
         if (seg.length < 2) continue;
         const cx = seg.reduce((a, q) => a + q[0], 0) / seg.length;
         const cy = seg.reduce((a, q) => a + q[1], 0) / seg.length;
@@ -425,8 +455,31 @@ export function startLaunch(
         });
       }
     }
+    if (crs7) {
+      const hx = Math.sin(pose.rot);
+      const hy = Math.cos(pose.rot);
+      // The stack shreds into a cone along its flight path.
+      for (const f of tiles) {
+        f.vx += hx * rnd(0.4, 1.2) * Hn;
+        f.vy += hy * rnd(0.4, 1.2) * Hn;
+      }
+      for (const f of frags) {
+        f.vx += hx * rnd(0.4, 1.2) * Hn;
+        f.vy += hy * rnd(0.4, 1.2) * Hn;
+      }
+      const cy = (top + capBottom) / 2;
+      const [cxw, cyw] = toWorld(pose, [focus[0], cy]);
+      capsule = { x: cxw, y: cyw, vx: hx * 0.5 * Hn + 0.15 * Hn, vy: hy * 0.5 * Hn + 0.35 * Hn, rot: pose.rot, vr: 1.1, cx: focus[0], cy, top: top - 0.02, bottom: capBottom };
+      // Helium and oxygen vapor bursting out of the second stage.
+      const [vx0, vy0] = toWorld(pose, [focus[0], top + 0.35 * Hn]);
+      for (let i = 0; i < 60; i++) {
+        const a = rnd(0, Math.PI * 2);
+        const sp = rnd(0.2, 1) * Hn;
+        world.push({ x: vx0, y: vy0, vx: Math.cos(a) * sp + hx * 0.3 * Hn, vy: Math.sin(a) * sp + hy * 0.3 * Hn, age: 0, life: rnd(3, 5), r0: 0.06 * Hn, r1: rnd(0.4, 0.9) * Hn, a0: 0.7, sprite: "puff", drag: 1.4, g: 0, add: false });
+      }
+    }
     const [bx, by] = blast;
-    for (let i = 0; i < 70; i++) {
+    for (let i = 0; i < (scenario === "crs7" ? 20 : 70); i++) {
       const a = rnd(0, Math.PI * 2);
       const sp = rnd(0.2, 1.3) * Hn;
       world.push({ x: bx, y: by, vx: Math.cos(a) * sp, vy: Math.sin(a) * sp * 0.8 + 0.2 * Hn, age: 0, life: rnd(0.5, 1.4), r0: 0.06 * Hn, r1: rnd(0.25, 0.55) * Hn, a0: 0.9, sprite: i % 3 ? "fire" : "hot", drag: 2, g: 0, add: true });
@@ -494,6 +547,25 @@ export function startLaunch(
     c.globalCompositeOperation = "lighter";
     c.globalAlpha = 0.35 * thr * alpha;
     c.drawImage(sprites.fire, n.x - hw * 3, n.y - hw * 1.2, hw * 6, L * 1.15 + hw * 2);
+    // IFT-1: a row of separate engine plumes with gaps where engines are out, more dropping out as it climbs.
+    if (scenario === "ift1" && seed === 1) {
+      const out = new Set([2, 6, 4, 8, 0].slice(0, 2 + (simNow > 40 ? 1 : 0) + (simNow > 100 ? 1 : 0) + (simNow > 150 ? 1 : 0)));
+      for (let k = 0; k < 9; k++) {
+        if (out.has(k)) continue;
+        const kx = n.x + (k - 4) * ((hw * 2) / 9);
+        const kL = L * (0.78 + 0.18 * Math.sin(t * 37 + k * 1.7));
+        const gk = c.createLinearGradient(0, n.y, 0, n.y + kL);
+        gk.addColorStop(0, rgba(pal.flameHot, 0.95));
+        gk.addColorStop(0.5, rgba(pal.flame, 0.75));
+        gk.addColorStop(1, rgba(pal.flame, 0));
+        c.globalAlpha = alpha;
+        c.fillStyle = gk;
+        teardrop(kx, n.y, hw / 4.5, kL);
+        c.fill();
+      }
+      c.restore();
+      return;
+    }
     const g = c.createLinearGradient(0, n.y, 0, n.y + L);
     g.addColorStop(0, rgba(pal.flameHot, 0.95));
     g.addColorStop(0.4, rgba(pal.flame, 0.8));
@@ -608,13 +680,15 @@ export function startLaunch(
     raf = requestAnimationFrame(frame);
     const dt = Math.min(0.05, Math.max(0, (now - last) / 1000));
     last = now;
-    t += dt;
+    t += dt * (t < quoteUntil ? Math.min(speed, 1) : speed);
     resize();
     const c = ctx!;
 
     // --- Where the flight is ---
     const flying = plan.liftoffAt !== null && t >= plan.liftoffAt;
     const sim = plan.simAt(t);
+    simNow = sim;
+    if (scenario === "ift1" && flying && sim >= 170 && !exploded) tumble += dt * 1.5;
     const s = sampleAt(plan.points, sim);
     const altKm = flying ? s.alt : 0;
 
@@ -627,7 +701,7 @@ export function startLaunch(
     pitch += angleDiff(target, pitch) * (1 - Math.exp(-dt * 2.5));
 
     let pose: Pose = { x: 0, y: Hn / 2, rot: 0 };
-    if (flying) pose = { x: s.down * nuPerKm, y: s.alt * nuPerKm + Hn / 2, rot: pitch };
+    if (flying) pose = { x: s.down * nuPerKm, y: s.alt * nuPerKm + Hn / 2, rot: pitch + tumble };
     if (plan.tipAt !== null && t >= plan.tipAt) {
       const th = 1.5 * Math.pow(clamp01((t - plan.tipAt) / ((plan.explodeAt ?? plan.tipAt + 1) - plan.tipAt)), 2);
       const [px, py] = tipPivot;
@@ -726,6 +800,31 @@ export function startLaunch(
         });
       }
     });
+    // Falcon 1 Flight 1: a fire above the engine from T+25 s, growing until it hits the island.
+    if (scenario === "falcon1-f1" && flying && !exploded && sim >= 25 && pieces[0]) {
+      const p0 = pieces[0];
+      const grow = clamp01((sim - 25) / 20);
+      const rate = (20 + 70 * grow) * dt;
+      const count = Math.floor(rate) + (Math.random() < rate % 1 ? 1 : 0);
+      for (let k = 0; k < count; k++) {
+        fire.push({
+          x: p0.nozzle.x + rnd(-0.9, 0.9) * p0.nozzle.w,
+          y: p0.box.maxY - rnd(0.02, 0.1 + 0.12 * grow) * Hn,
+          vx: rnd(-0.08, 0.08) * Hn,
+          vy: -rnd(0.1, 0.35) * Hn,
+          age: 0,
+          life: rnd(0.25, 0.55),
+          r0: (0.015 + 0.02 * grow) * Hn,
+          r1: (0.04 + 0.05 * grow) * Hn,
+          a0: 0.85,
+          sprite: Math.random() < 0.5 ? "hot" : "fire",
+          drag: 1,
+          g: 0,
+          add: true,
+        });
+      }
+    }
+    stepParticles(fire, dt);
     const baseAlt = flying ? s.alt * nuPerKm : 0;
     if (thrMax > 0.05 && baseAlt < Hn * 0.9) {
       emitSmoke += (plan.liftoffAt === null ? 95 : 70) * thrMax * (1 - baseAlt / (Hn * 0.9)) * dt;
@@ -991,6 +1090,7 @@ export function startLaunch(
         withPiece(i, (a) => (vehicle ? drawVehiclePiece(i, a) : strokeDoodle(piecePaths[i], a, chalk, Z))),
       );
       if (reentry > 0.02) drawReentry(reentry, [focus[0], top], Z);
+      if (fire.length) drawParticles(fire, (p) => [p.x, p.y, 1]);
       // Vapor cone around Max-Q: a crisp condensation collar as it goes transonic.
       const vapor = maxQAt !== null && flying ? 1 - clamp01(Math.abs(t - maxQAt) / 1.1) : 0;
       if (vapor > 0.02) {
@@ -1057,8 +1157,28 @@ export function startLaunch(
       }
       c.globalAlpha = 1;
     }
-    if (exploded && t - explodedAt < 0.8) {
-      const k = 1 - (t - explodedAt) / 0.8;
+    // IFT-1's flight termination is a long, bright flash; other losses a short one.
+    const flashDur = scenario === "ift1" ? 1.6 : 0.8;
+    if (capsule) {
+      capsule.vy -= 0.8 * Hn * dt;
+      capsule.x += capsule.vx * dt;
+      capsule.y += capsule.vy * dt;
+      capsule.rot += capsule.vr * dt;
+      const nap = doodle.napkin;
+      c.save();
+      c.translate(SX(capsule.x), SY(capsule.y));
+      c.rotate(capsule.rot);
+      c.scale(Z, Z);
+      c.translate(-capsule.cx, -capsule.cy);
+      c.beginPath();
+      c.rect(nap.minX, capsule.top - 0.05, nap.maxX - nap.minX, capsule.bottom - capsule.top + 0.05);
+      c.clip();
+      if (vehicle) c.drawImage(vehicle, nap.minX, nap.minY, nap.maxX - nap.minX, nap.maxY - nap.minY);
+      else strokeDoodle(piecePaths[pieces.length - 1], 1, chalk, Z);
+      c.restore();
+    }
+    if (exploded && t - explodedAt < flashDur) {
+      const k = (1 - (t - explodedAt) / flashDur) * (scenario === "ift1" ? 1.2 : 1);
       const bx = SX(blast[0]);
       const by = SY(blast[1]);
       const R = Math.max(W, H) * 0.7;
@@ -1136,7 +1256,9 @@ export function startLaunch(
       }
     }
     while (trIdx < plan.transcripts.length && plan.transcripts[trIdx].at <= t) {
-      hooks.onCaption({ ...plan.transcripts[trIdx++], id: ++capId });
+      const tr = plan.transcripts[trIdx++];
+      quoteUntil = tr.at + (tr.hold ?? 3);
+      hooks.onCaption({ ...tr, id: ++capId });
     }
     while (crossIdx < plan.crossings.length && plan.crossings[crossIdx].at <= t) {
       hooks.onCrossing?.(plan.crossings[crossIdx++]);
@@ -1159,6 +1281,9 @@ export function startLaunch(
 
   return {
     stop: () => cancelAnimationFrame(raf),
+    setSpeed: (x) => {
+      speed = Math.min(2, Math.max(0.5, x));
+    },
     setVehicle: (img) => {
       vehicle = img;
       coverage = null;

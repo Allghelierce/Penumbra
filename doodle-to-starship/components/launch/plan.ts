@@ -132,7 +132,7 @@ export function fmtKm(km: number): string {
   return km >= 100 ? Math.round(km).toLocaleString("en-US") : km.toFixed(1);
 }
 
-export function buildPlan(trace: FlightTrace, analysis: Analysis, design: Design, pieceCount: number): Plan {
+export function buildPlan(trace: FlightTrace, analysis: Analysis, design: Design, pieceCount: number, scenario?: string): Plan {
   const outcome: Verdict = trace.outcome ?? analysis.verdict;
   let points = (trace.points ?? [])
     .filter((p) => Number.isFinite(p.tS) && Number.isFinite(p.altitudeKm))
@@ -148,7 +148,7 @@ export function buildPlan(trace: FlightTrace, analysis: Analysis, design: Design
   const events = (trace.events ?? []).filter((e) => Number.isFinite(e.tS)).sort((a, b) => a.tS - b.tS);
 
   if (outcome === "stuck-on-pad") return padPlan(points, events, analysis, design);
-  return flightPlan(outcome, points, events, trace, design, pieceCount);
+  return flightPlan(outcome, points, events, trace, design, pieceCount, scenario);
 }
 
 function padPlan(points: FlightPoint[], events: FlightEvent[], analysis: Analysis, design: Design): Plan {
@@ -200,6 +200,7 @@ function flightPlan(
   trace: FlightTrace,
   design: Design,
   pieceCount: number,
+  scenario?: string,
 ): Plan {
   const synthetic: FlightEvent[] = [];
   let maxAltKm = Math.max(trace.maxAltitudeKm || 0, ...points.map((p) => p.altitudeKm));
@@ -248,7 +249,7 @@ function flightPlan(
   const karmanSims = crossingsFor(points, T, (sim) => sim)
     .filter((c) => c.hero)
     .map((c) => c.simT);
-  const warp = warpFor(T, [...events, ...synthetic], karmanSims, breakup ? "breakup" : outcome);
+  const warp = warpFor(T, [...events, ...synthetic], karmanSims, breakup ? "breakup" : outcome, scenario);
   const flightDur = warp.duration;
   const liftoffAt = T_LIFTOFF;
   const finaleAt = liftoffAt + flightDur;
@@ -320,7 +321,7 @@ function flightPlan(
     // The end card follows the outcome closely: no long linger.
     // Debris needs a moment to tumble away after a breakup; a last quote gets to finish.
     endAt: Math.max(
-      finaleAt + (breakup ? 2.6 : 1.8),
+      finaleAt + (breakup ? (scenario === "crs7" ? 4.6 : 2.6) : 1.8),
       ...transcriptsFor(cues).map((tr) => tr.at + (tr.hold ?? 3) + 0.3),
     ),
     maxAltKm,
@@ -342,7 +343,7 @@ interface Beat {
  * play slowly; the gaps between them share what's left of FLIGHT_PLAY and fast-forward.
  * A monotone cubic through the knots keeps the speed changes smooth.
  */
-function warpFor(T: number, events: FlightEvent[], karmanSims: number[], outcome: Verdict | "breakup") {
+function warpFor(T: number, events: FlightEvent[], karmanSims: number[], outcome: Verdict | "breakup", scenario?: string) {
   const beat = (s: number, before: number, after: number, play: number): Beat => ({
     from: Math.max(0, s - before),
     to: Math.min(T, s + after),
@@ -362,6 +363,10 @@ function warpFor(T: number, events: FlightEvent[], karmanSims: number[], outcome
     else if (e.kind === "apogee") beats.push(beat(e.tS, 10, 10, 1));
   }
   for (const k of karmanSims) beats.push(beat(k, 4, 4, 0.8));
+  // Historic replays: real time for the moments that made each flight what it was.
+  if (scenario === "ift1") beats.push(beat(170, 0, 69, 3.2));
+  else if (scenario === "crs7") beats.push(beat(139, 14, 0, 1.2));
+  else if (scenario === "falcon1-f1") beats.push(beat(25, 3, 11, 2));
 
   // Real dialog gets the time it takes to say it: the next event waits until the quote is done.
   const sorted = events.filter((e) => e.tS >= 0 && e.tS <= T).sort((a, b) => a.tS - b.tS);
@@ -406,8 +411,10 @@ function warpFor(T: number, events: FlightEvent[], karmanSims: number[], outcome
       merged.push({ ...b });
     }
   }
+  // Historic replays get a calmer pace than your own design's flight.
+  const flightPlay = scenario ? 22 : FLIGHT_PLAY;
   const beatPlay = merged.reduce((n, b) => n + b.play, 0);
-  const squeeze = Math.min(1, (FLIGHT_PLAY * 0.8) / Math.max(beatPlay, 1e-6));
+  const squeeze = Math.min(1, (flightPlay * 0.8) / Math.max(beatPlay, 1e-6));
   merged.forEach((b) => (b.play *= squeeze));
   // Quotes are never squeezed; a dialog-heavy replay simply runs longer.
   merged.push(...quotes);
@@ -423,7 +430,7 @@ function warpFor(T: number, events: FlightEvent[], karmanSims: number[], outcome
   }
   if (cursor < T) segs.push({ from: cursor, to: T, play: null });
   const gaps = segs.filter((g) => g.play === null);
-  const left = Math.max(0.5, FLIGHT_PLAY - merged.reduce((n, b) => n + b.play, 0));
+  const left = Math.max(0.5, flightPlay - merged.reduce((n, b) => n + b.play, 0));
   const weight = gaps.reduce((n, g) => n + Math.pow(g.to - g.from, 0.6), 0) || 1;
   gaps.forEach((g) => (g.play = Math.max(0.12, (left * Math.pow(g.to - g.from, 0.6)) / weight)));
 

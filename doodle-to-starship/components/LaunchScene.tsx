@@ -164,6 +164,7 @@ export default function LaunchScene(props: LaunchSceneProps) {
     }
   }, []);
   const [muted, setMuted] = useState(isLaunchAudioMuted);
+  const [speed, setSpeed] = useState(1);
   // Lives out here so a paid video job survives "fly again".
   const replay = useReplay(props.renderUrl, props.trace.outcome ?? props.analysis.verdict);
   return (
@@ -174,6 +175,8 @@ export default function LaunchScene(props: LaunchSceneProps) {
       onVideo={replay.start}
       onReplay={() => setRun((r) => r + 1)}
       muted={muted}
+      speed={speed}
+      onSpeed={setSpeed}
       hint={hint && run === 0}
       onMute={() => {
         unlockLaunchAudio();
@@ -190,11 +193,14 @@ interface RunProps extends LaunchSceneProps {
   onReplay: () => void;
   muted: boolean;
   onMute: () => void;
+  speed: number;
+  onSpeed: (x: number) => void;
   hint: boolean;
 }
 
 function LaunchRun(props: RunProps) {
   const [input] = useState(() => ({
+    mission: props.mission,
     napkinRect: props.napkinRect,
     strokes: props.strokes,
     reading: props.reading,
@@ -297,8 +303,15 @@ function LaunchRun(props: RunProps) {
   }, [props.vehicleImageUrl]);
 
   useEffect(() => {
+    handle.current?.setSpeed(props.speed);
+  }, [props.speed]);
+
+  useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") handle.current?.skip();
+      // 1 / 2 / 3: half, normal and double speed.
+      const x = e.key === "1" ? 0.5 : e.key === "2" ? 1 : e.key === "3" ? 2 : null;
+      if (x !== null) latest.current.onSpeed(x);
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
@@ -350,6 +363,19 @@ function LaunchRun(props: RunProps) {
       {/* Overlay chrome waits for the sky to cover the studio, so it never overlaps the studio's header. */}
       {!ended && (
         <div className="ls-fade absolute right-4 top-4 flex items-center gap-5 text-[11px] font-semibold uppercase tracking-[0.18em] text-haze [animation-delay:1.3s] sm:right-6 sm:top-5">
+          <div className="flex items-center gap-1" role="group" aria-label="Playback speed">
+            {[0.5, 1, 2].map((x) => (
+              <button
+                key={x}
+                type="button"
+                onClick={() => props.onSpeed(x)}
+                aria-pressed={props.speed === x}
+                className={`rounded-[3px] px-1.5 py-0.5 ${props.speed === x ? "bg-starlight text-umbra" : control}`}
+              >
+                {x}×
+              </button>
+            ))}
+          </div>
           <button type="button" onClick={props.onMute} aria-pressed={props.muted} className={control}>
             {props.muted ? "Sound off" : "Sound on"}
           </button>
@@ -468,6 +494,7 @@ function LaunchRun(props: RunProps) {
           onImprove={props.onImprove}
           lostAt={plan.lostAt}
           mission={props.mission}
+          trace={input.trace}
         />
       )}
     </div>
