@@ -66,7 +66,7 @@ function markDelays(marks: RedPenMark[], start: number): number[] {
   const order = marks
     .map((m, i) => ({ i, rank: MARKUP_ORDER[m.kind] }))
     .sort((a, b) => a.rank - b.rank || a.i - b.i);
-  const step = Math.min(0.55, 2.6 / Math.max(1, marks.length));
+  const step = Math.min(0.28, 1.3 / Math.max(1, marks.length));
   const delays = new Array<number>(marks.length);
   order.forEach(({ i }, k) => (delays[i] = start + k * step));
   return delays;
@@ -86,6 +86,8 @@ export default function RedPenOverlay({
 }: RedPenOverlayProps) {
   const penStart = 0.3;
   const delays = markDelays(marks, penStart);
+  // A real mission's markup has a single outline, the part that failed: that one is drawn heavier.
+  const outlineCount = marks.filter((m) => m.kind === "outline").length;
   return (
     <>
       {scanning && (
@@ -132,6 +134,7 @@ export default function RedPenOverlay({
                   seed={i + 1}
                   delay={delays[i]}
                   onFix={onFix}
+                  heavy={mark.kind === "outline" && outlineCount === 1}
                 />
               </g>
             ),
@@ -159,16 +162,16 @@ export default function RedPenOverlay({
                 <circle
                   cx={bx}
                   cy={by}
-                  r={8.5}
+                  r={5.6}
                   fill={active ? "var(--redpen)" : "#fffdf8"}
                   stroke="var(--redpen)"
-                  strokeWidth={1.6}
+                  strokeWidth={1.1}
                 />
                 <text
                   x={bx}
-                  y={by + 3.6}
+                  y={by + 2.6}
                   textAnchor="middle"
-                  fontSize="10.5"
+                  fontSize="7.5"
                   fontWeight="700"
                   fill={active ? "#fff" : "var(--redpen)"}
                   fontFamily="var(--font-barlow)"
@@ -386,14 +389,16 @@ function Mark({
   seed,
   delay,
   onFix,
+  heavy = false,
 }: {
   mark: RedPenMark;
   seed: number;
   delay: number;
   onFix?: OnFix;
+  heavy?: boolean;
 }) {
-  const draw = { animationDelay: `${delay}s` };
-  const write = { animationDelay: `${delay + 0.55}s` };
+  const draw = { animationDelay: `${delay}s`, animationDuration: "0.45s" };
+  const write = { animationDelay: `${delay + 0.3}s` };
   const fix = mark.fix && onFix ? () => onFix(mark.fix!) : undefined;
 
   if (mark.kind === "arrow") {
@@ -416,7 +421,7 @@ function Mark({
           d={`M${fx} ${fy} Q${cx} ${cy} ${tx} ${ty} ${head(0.5)} ${head(-0.5)}`}
           fill="none"
           stroke="var(--redpen)"
-          strokeWidth="2.2"
+          strokeWidth="1.1"
           strokeLinecap="round"
           strokeLinejoin="round"
         />
@@ -445,7 +450,7 @@ function Mark({
           d={penLoop(cx, cy, rx, ry, seed)}
           fill="none"
           stroke="var(--redpen)"
-          strokeWidth="2.2"
+          strokeWidth="1.1"
           strokeLinecap="round"
         />
         <Note
@@ -463,7 +468,7 @@ function Mark({
   if (mark.kind === "outline") {
     // A pen traced around the part: rounded corners, a little wobble, and an overshoot where it closes.
     const rand = wobble(seed);
-    const j = (k: number) => (rand() - 0.5) * k;
+    const j = (k: number) => (rand() - 0.5) * k * (heavy ? 0.5 : 0.15);
     const pad = 4;
     const x0 = mark.box[0] * W - pad;
     const y0 = mark.box[1] * H - pad;
@@ -473,7 +478,7 @@ function Mark({
     const d =
       `M${x0 + r + j(2)} ${y0 + j(2)} L${x1 - r + j(2)} ${y0 + j(2)} Q${x1 + j(1)} ${y0 + j(1)} ${x1 + j(1.5)} ${y0 + r + j(2)} ` +
       `L${x1 + j(2)} ${y1 - r + j(2)} Q${x1 + j(1)} ${y1 + j(1)} ${x1 - r + j(2)} ${y1 + j(1.5)} L${x0 + r + j(2)} ${y1 + j(2)} ` +
-      `Q${x0 + j(1)} ${y1 + j(1)} ${x0 + j(1.5)} ${y1 - r + j(2)} L${x0 + j(2)} ${y0 + r + j(2)} Q${x0 + j(1)} ${y0 + j(1)} ${x0 + r + 9} ${y0 - 1.8}`;
+      `Q${x0 + j(1)} ${y1 + j(1)} ${x0 + j(1.5)} ${y1 - r + j(2)} L${x0 + j(2)} ${y0 + r + j(2)} Q${x0 + j(1)} ${y0 + j(1)} ${heavy ? `${x0 + r + 9} ${y0 - 1.8}` : `${x0 + r} ${y0}`}`;
     return (
       <g>
         <path
@@ -483,7 +488,7 @@ function Mark({
           d={d}
           fill="none"
           stroke="var(--redpen)"
-          strokeWidth="1.7"
+          strokeWidth={heavy ? 1.4 : 1.1}
           strokeLinecap="round"
           strokeLinejoin="round"
         />
@@ -496,7 +501,8 @@ function Mark({
             text={mark.note}
             style={write}
             onClick={fix}
-            size={12}
+            size={9.5}
+            label
           />
         )}
       </g>
@@ -522,7 +528,7 @@ function Mark({
           d={`M${fx + nx * tick} ${fy + ny * tick} L${fx - nx * tick} ${fy - ny * tick} M${fx} ${fy} L${tx} ${ty} M${tx + nx * tick} ${ty + ny * tick} L${tx - nx * tick} ${ty - ny * tick}`}
           fill="none"
           stroke="var(--redpen)"
-          strokeWidth="1.3"
+          strokeWidth="1"
           strokeLinecap="round"
         />
         {vertical ? (
@@ -534,7 +540,8 @@ function Mark({
               text={mark.note}
               style={write}
               onClick={fix}
-              size={12}
+              size={9.5}
+              label
             />
           </g>
         ) : (
@@ -545,7 +552,8 @@ function Mark({
             text={mark.note}
             style={write}
             onClick={fix}
-            size={12}
+            size={9.5}
+            label
           />
         )}
       </g>
@@ -563,27 +571,28 @@ function Mark({
           style={draw}
           cx={ax}
           cy={ay}
-          r={2.2}
+          r={1.6}
           fill="var(--redpen)"
         />
         <path
           className="pen-draw"
           style={draw}
           pathLength={1}
-          d={`M${ax} ${ay} L${lx} ${ly}`}
+          d={`M${ax} ${ay} L${ax + (toLeft ? -8 : 8)} ${ly} L${lx} ${ly}`}
           fill="none"
           stroke="var(--redpen)"
-          strokeWidth="1.2"
+          strokeWidth="1"
           strokeLinecap="round"
         />
         <Note
           x={toLeft ? lx - 3 : lx + 3}
-          y={ly + 4}
+          y={ly + 3.2}
           anchor={toLeft ? "end" : "start"}
           text={mark.note}
           style={write}
           onClick={fix}
-          size={13}
+          size={9.5}
+          label
         />
       </g>
     );
@@ -602,8 +611,8 @@ function Mark({
         points={points.map(([x, y]) => `${x},${y}`).join(" ")}
         fill="none"
         stroke="var(--redpen)"
-        strokeWidth="1.8"
-        strokeDasharray="6 5"
+        strokeWidth="1.1"
+        strokeDasharray="5 4"
         strokeLinecap="round"
         opacity="0.85"
       />
@@ -626,7 +635,8 @@ function Note({
   text,
   style,
   onClick,
-  size = 15,
+  size = 12,
+  label = false,
 }: {
   x: number;
   y: number;
@@ -635,21 +645,23 @@ function Note({
   style: React.CSSProperties;
   onClick?: () => void;
   size?: number;
+  /** A neat engineering label (condensed caps) rather than a handwritten note. */
+  label?: boolean;
 }) {
   return (
     <text
       x={x}
       y={y}
       textAnchor={anchor}
-      className={`pen-note font-hand ${onClick ? "pen-fix" : ""}`}
-      style={style}
+      className={`pen-note ${label ? "" : "font-hand"} ${onClick ? "pen-fix" : ""}`}
+      style={label ? { ...style, fontFamily: "var(--font-barlow-condensed)", letterSpacing: "0.6px" } : { ...style, letterSpacing: "0.2px" }}
       fontSize={size}
-      fontWeight="700"
+      fontWeight={label ? 600 : 700}
       fill="var(--redpen)"
       onClick={onClick}
     >
       {onClick && <title>Tap to apply this fix</title>}
-      {text}
+      {label ? text.toUpperCase() : text}
       {onClick && " ↻"}
     </text>
   );

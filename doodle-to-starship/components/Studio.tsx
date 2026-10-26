@@ -45,6 +45,7 @@ import { cutoutBlack } from "@/lib/cutout";
 import { DEMO_CONCEPTS } from "@/lib/demo-assets";
 import { historicReading, historicReview, historicTrace } from "@/lib/history";
 import { prefetchNarration } from "@/lib/voice/tts";
+import { HISTORIC_MISSIONS } from "@/lib/missions";
 import MissionFile from "@/components/MissionFile";
 import MissionPicker from "@/components/MissionPicker";
 import StepBar from "@/components/StepBar";
@@ -99,10 +100,6 @@ function untouchedDemo(strokes: Stroke[]) {
     }) ?? null
   );
 }
-
-// The real flights to diagnose. lib/missions.ts is still being written; until it lands the
-// picker offers only "Draw your own".
-const HISTORIC_MISSIONS: HistoricMission[] = [];
 
 /** The flow, one step at a time, one primary button per step. */
 const STEPS = ["Pick", "Sketch", "Diagnose", "Build", "Fly", "Debrief"];
@@ -887,9 +884,15 @@ export default function Studio() {
           onDone={() => {
             setFlight(null);
             setPhase("reviewed");
+            // A real flight's end card is its debrief, and its one button is "Try another mission".
+            if (mission) {
+              anotherMission();
+              return;
+            }
             setStep(5);
-            if (!mission && flightRecap) setOffer(offerFor(flightRecap));
+            if (flightRecap) setOffer(offerFor(flightRecap));
           }}
+          mission={mission ?? undefined}
           recap={mission ? missionRecap(mission) : flightRecap}
           onImprove={mission ? undefined : improveAndFly}
         />
