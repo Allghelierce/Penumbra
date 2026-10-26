@@ -694,7 +694,18 @@ export default function Studio() {
           )}
         </div>
       </header>
-      <StepBar steps={STEPS} current={step} />
+      <StepBar
+        steps={STEPS}
+        current={step}
+        purposes={[
+          "Choose a real rocket",
+          mission ? "The engineer's napkin" : "Draw your spacecraft",
+          !mission ? "Red pen reviews your design" : mission.outcome === "lost" ? "Red pen finds what failed" : "See what made it work",
+          "See it real",
+          mission ? "Relive the flight" : "Fly your design",
+          mission ? (mission.outcome === "lost" ? "What SpaceX learned" : "How it came together") : "How it flew",
+        ]}
+      />
 
       {step === 0 ? (
         <main className="space-stage flex min-h-0 flex-1 flex-col items-center overflow-y-auto px-10 py-10">
