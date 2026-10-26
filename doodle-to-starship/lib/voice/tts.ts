@@ -20,8 +20,23 @@ export const CAST: Record<Speaker, { voice: string; speed: number }> = {
   Engineer: { voice: "ara", speed: 1.0 },
 };
 
+/** Voices for named speakers in flight replays ("CAPCOM", "Kranz"…): each name always gets the same one. */
+const VOICE_POOL = ["atlas", "orion", "kepler", "castor", "helios", "rigel", "sirius", "perseus", "eve", "ara", "luna", "carina"];
+
+/** The cast entry for a role, or a stable voice hashed from any other speaker's name. */
+export function castFor(speaker: string): { voice: string; speed: number } {
+  if (Object.prototype.hasOwnProperty.call(CAST, speaker)) return CAST[speaker as Speaker];
+  return { voice: VOICE_POOL[hashName(speaker) % VOICE_POOL.length], speed: 1.0 };
+}
+
+export function hashName(name: string): number {
+  let h = 2166136261;
+  for (const ch of name.trim().toLowerCase()) h = Math.imul(h ^ ch.charCodeAt(0), 16777619);
+  return h >>> 0;
+}
+
 /** Light speech tags: a beat after the GO/NO-GO call, so it lands like a real loop. */
-export function performance(text: string, speaker: Speaker): string {
+export function performance(text: string, speaker: string): string {
   if (speaker === "Callout" || speaker === "Engineer") return text;
   return text.replace(/^([A-Za-z]+, (?:NO-GO|GO)\.)\s+/, "$1 [pause] ");
 }
@@ -29,8 +44,8 @@ export function performance(text: string, speaker: Speaker): string {
 const fetched = new Map<string, Promise<string | null>>();
 
 /** Fetch (once) the audio for a line; resolves to an object URL or null. Safe to call early to prefetch. */
-export function fetchSpeech(text: string, speaker: Speaker): Promise<string | null> {
-  const { voice, speed } = CAST[speaker];
+export function fetchSpeech(text: string, speaker: string): Promise<string | null> {
+  const { voice, speed } = castFor(speaker);
   const spoken = performance(text, speaker);
   const key = `${voice}|${speed}|${spoken}`;
   let pending = fetched.get(key);

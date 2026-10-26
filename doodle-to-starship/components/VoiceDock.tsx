@@ -19,7 +19,7 @@ import { parseCommand } from "@/lib/voice/intent";
 import { ackLine, buildInstructions, deltaLine, nudge, speakable, toolResult, verdictLine } from "@/lib/voice/persona";
 import { voiceActivity } from "@/lib/voice/activity";
 import { createRealtimeSession, type RealtimeSession } from "@/lib/voice/realtime";
-import { fetchSpeech, playSpeech, stopSpeech, type Speaker } from "@/lib/voice/tts";
+import { fetchSpeech, hashName, playSpeech, stopSpeech, type Speaker } from "@/lib/voice/tts";
 import { toolCallToAction, VOICE_TOOLS } from "@/lib/voice/tools";
 
 export interface VoiceDockProps {
@@ -57,6 +57,19 @@ const SILENT_LINE_MS = 900;
 /** Ends the browser line in progress (cancel() doesn't always fire onend). */
 let endBrowserLine: (() => void) | null = null;
 
+/** Replay dialog arrives as `Speaker: "quote"`; returns the parts, or null for plain narration. */
+function splitDialog(text: string): { speaker: string; quote: string } | null {
+  const m = /^\s*([^:"“”]{1,48}?):\s*["“]([\s\S]+?)["”]\s*$/.exec(text);
+  return m ? { speaker: m[1].trim(), quote: m[2].trim() } : null;
+}
+
+/** Browser voice for a role, or a stable pitch and rate hashed from a named speaker. */
+function browserVoice(speaker: string): { pitch: number; rate: number } {
+  if (Object.prototype.hasOwnProperty.call(BROWSER_VOICE, speaker)) return BROWSER_VOICE[speaker as Speaker];
+  const h = hashName(speaker);
+  return { pitch: 0.85 + ((h % 7) / 6) * 0.3, rate: 0.95 + (((h >>> 3) % 5) / 4) * 0.1 };
+}
+
 /** Module-level clock, so it's plainly not called during render. */
 const clock = () => Date.now();
 /** The same line in the same phase within this window is a duplicate and isn't spoken again. */
@@ -74,10 +87,11 @@ function hush() {
 }
 
 /** Browser speech for one line, with a synthetic level for the visuals. Resolves when it's said. */
-function browserLine(text: string, speaker: Speaker, index?: number): Promise<void> {
+function browserLine(text: string, speaker: string, index?: number): Promise<void> {
   return new Promise((resolve) => {
     const estimateMs = 600 + text.split(/\s+/).length * 340;
-    const info = { role: speaker, text, index };
+    const named = !Object.prototype.hasOwnProperty.call(BROWSER_VOICE, speaker);
+    const info = { role: (named ? "Callout" : speaker) as Speaker, text, index, ...(named && { speaker }) };
     let level = 0.6;
     const pulse = setInterval(() => {
       level = Math.max(0.12, level * 0.82);
@@ -104,7 +118,7 @@ function browserLine(text: string, speaker: Speaker, index?: number): Promise<vo
       onBoundary: () => {
         level = 1;
       },
-      ...BROWSER_VOICE[speaker],
+      ...browserVoice(speaker),
     });
   });
 }
@@ -306,14 +320,14 @@ export default function VoiceDock({
     sessionRef.current?.updateInstructions(buildInstructions(design, analysis, review));
   }, [design, analysis, review]);
 
-  const sayReply = useRef<(text: string, speaker?: Speaker) => void>(() => {});
-  const speakLineRef = useRef<(text: string, speaker: Speaker, index?: number) => Promise<void>>(async () => {});
+  const sayReply = useRef<(text: string, speaker?: string) => void>(() => {});
+  const speakLineRef = useRef<(text: string, speaker: string, index?: number) => Promise<void>>(async () => {});
   // Only the latest utterance may clear the "reviewer is talking" state.
   const utteranceId = useRef(0);
   // Grok Voice bills per connected minute and needs the mic, so only push-to-talk opens a session;
   // until then (and after it idles out) lines go through xAI text-to-speech or the browser's voice.
   const lastSaid = useRef({ text: "", phase: "", at: 0 });
-  sayReply.current = (text: string, speaker: Speaker = "Engineer") => {
+  sayReply.current = (text: string, speaker: string = "Engineer") => {
     const at = clock();
     const last = lastSaid.current;
     if (last.text === text && last.phase === phaseRef.current && at - last.at < DEDUPE_MS) return;
@@ -337,18 +351,26 @@ export default function VoiceDock({
     if (!narration || narration === lastNarration.current || mode === "checking") return;
     lastNarration.current = narration;
     if (holdingRef.current) return; // don't talk over the user
+    // Replay dialog (`CAPCOM: "Roger, go at throttle up."`): speak only the quote, in that speaker's voice.
+    const dialog = splitDialog(narration);
+    const say = () => {
+      if (dialog) {
+        sayReply.current(dialog.quote, dialog.speaker);
+        setReplyCaption(`${dialog.speaker}: “${dialog.quote}”`);
+      } else sayReply.current(narration, phase === "launch" ? "Callout" : "Engineer");
+    };
     if (phase === "launch") {
-      const timer = setTimeout(() => sayReply.current(narration, "Callout"), playQuindar() * 1000);
+      const timer = setTimeout(say, playQuindar() * 1000);
       return () => clearTimeout(timer); // a newer callout replaces one still waiting on its tones
     }
-    sayReply.current(narration);
+    say();
   }, [narration, mode, phase]);
 
   /**
    * Speaks one scripted line and resolves when it has been said: Grok Voice if push-to-talk already
    * opened a session, else xAI text-to-speech (cached), else the browser's voice.
    */
-  const speakLine = useCallback(async (text: string, speaker: Speaker, index?: number): Promise<void> => {
+  const speakLine = useCallback(async (text: string, speaker: string, index?: number): Promise<void> => {
     hush();
     const generation = hushes;
     setReplyCaption(text);
@@ -376,7 +398,8 @@ export default function VoiceDock({
     const url = await fetchSpeech(text, speaker);
     // Something newer started, or Esc/scrub hushed us, while the audio was loading.
     if (id !== utteranceId.current || generation !== hushes) return;
-    if (url) await playSpeech(url, { role: speaker, text, index });
+    const named = !Object.prototype.hasOwnProperty.call(BROWSER_VOICE, speaker);
+    if (url) await playSpeech(url, { role: (named ? "Callout" : speaker) as Speaker, text, index, ...(named && { speaker }) });
     else await browserLine(text, speaker, index);
     quietIfLatest();
   }, []);

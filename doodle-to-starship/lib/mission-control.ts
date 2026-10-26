@@ -166,6 +166,8 @@ export function calloutFor(event: FlightEvent, design: Design, trace?: FlightTra
         : `Arrival, ${TARGET[design.destination]}.`;
     case "pad-failure":
       return "Pad failure.";
+    case "breakup":
+      return "Vehicle breakup. Range safety.";
   }
 }
 

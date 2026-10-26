@@ -10,6 +10,8 @@ export interface VoiceActivity {
   level: number;
   /** Index of the poll call being read, during the poll. */
   index?: number;
+  /** A named speaker in a flight replay ("CAPCOM"), when role is "Callout". */
+  speaker?: string;
 }
 
 type Listener = (activity: VoiceActivity) => void;
