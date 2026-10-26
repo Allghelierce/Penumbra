@@ -409,6 +409,8 @@ export default function Studio() {
   const openPollRef = useRef<() => void>(() => {});
   // The Cmd+Z listener is registered once; it reaches the latest undo (defined below) through this ref.
   const undoRef = useRef<() => void>(() => {});
+  // Esc on the Sketch step goes back to Pick; the listener reaches the latest goBack through this ref.
+  const escRef = useRef<() => void>(() => {});
 
   /** Voice commands and destination chips both edit the design, then the red pen re-checks it. */
   const handleAction = useCallback(
@@ -625,6 +627,33 @@ export default function Studio() {
     }, 2600);
   }
 
+  /** One step back. Sketch → Pick resets the napkin (clearAll aborts any replay); Diagnose → Sketch drops the markup. */
+  function goBack() {
+    if (retryTimer.current) clearTimeout(retryTimer.current);
+    setFix(null);
+    if (step <= 1) {
+      anotherMission();
+      return;
+    }
+    if (step === 2) {
+      runs.current.check++; // a diagnosis still in flight lands nowhere
+      checking.current = false;
+      setReview(null);
+      setReading(null);
+      setDesign(null);
+      setIdentified(null);
+      setPhase("draw");
+      setStep(1);
+      return;
+    }
+    setStep(step >= 4 ? 3 : step - 1);
+  }
+  useEffect(() => {
+    escRef.current = () => {
+      if (step === 1) goBack();
+    };
+  });
+
   /** Diagnose your own drawing: the full read and red-pen review. */
   async function diagnoseOwn() {
     setStep(2);
@@ -679,6 +708,8 @@ export default function Studio() {
       if ((e.metaKey || e.ctrlKey) && e.key === "z") {
         e.preventDefault();
         undoRef.current();
+      } else if (e.key === "Escape") {
+        escRef.current();
       }
     }
     window.addEventListener("keydown", onKey);
@@ -862,6 +893,15 @@ export default function Studio() {
                       Clear
                     </button>
                   </>
+                )}
+                {step >= 1 && step !== 4 && (
+                  <button
+                    type="button"
+                    onClick={goBack}
+                    className="h-11 px-3 text-[11px] uppercase tracking-[0.18em] text-haze transition-colors hover:text-white"
+                  >
+                    ← Back
+                  </button>
                 )}
                 {step === 1 && (
                   <button
