@@ -2,7 +2,6 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import AttractMode from "@/components/AttractMode";
-import Link from "next/link";
 import LaunchScene, { unlockLaunchAudio } from "@/components/LaunchScene";
 import NapkinCanvas from "@/components/NapkinCanvas";
 import NapkinAssist from "@/components/NapkinAssist";
@@ -24,6 +23,8 @@ import type {
   DesignAction,
   DestinationId,
   FlightTrace,
+  HistoricMission,
+  Recap,
   Phase,
   Poll,
   PriorArtResult,
@@ -42,6 +43,11 @@ import { buildReview } from "@/lib/redpen";
 import { readFromGeometry } from "@/lib/sketch/geometry";
 import { cutoutBlack } from "@/lib/cutout";
 import { DEMO_CONCEPTS } from "@/lib/demo-assets";
+import { historicReading, historicReview, historicTrace } from "@/lib/history";
+import { prefetchNarration } from "@/lib/voice/tts";
+import MissionFile from "@/components/MissionFile";
+import MissionPicker from "@/components/MissionPicker";
+import StepBar from "@/components/StepBar";
 import { recap } from "@/lib/recap";
 import { calloutFor, offerFor, pollRoom } from "@/lib/mission-control";
 import { analyze, DESTINATIONS, simulateFlight } from "@/lib/physics";
@@ -94,6 +100,30 @@ function untouchedDemo(strokes: Stroke[]) {
   );
 }
 
+// The real flights to diagnose. lib/missions.ts is still being written; until it lands the
+// picker offers only "Draw your own".
+const HISTORIC_MISSIONS: HistoricMission[] = [];
+
+/** The flow, one step at a time, one primary button per step. */
+const STEPS = ["Pick", "Sketch", "Diagnose", "Build", "Fly", "Debrief"];
+
+/** What a read of the drawing found, in a few words: "2 stages, 9 engines, landing legs". */
+function describeRead(d: Design): string {
+  const engines = d.stages.reduce((n, s) => n + s.engines.reduce((k, e) => k + e.count, 0), 0);
+  const bits = [`${d.stages.length} ${d.stages.length === 1 ? "stage" : "stages"}`, `${engines} ${engines === 1 ? "engine" : "engines"}`];
+  for (const f of d.features.slice(0, 3)) bits.push(f.replace(/-/g, " "));
+  return bits.join(", ");
+}
+
+/** The end card for a real flight: what went wrong, what changed, how it came back. */
+function missionRecap(m: HistoricMission): Recap {
+  return {
+    headline: `${m.vehicle} ${m.mission}: ${m.outcome === "lost" ? "what went wrong" : "how it flew"}`,
+    delta: m.rootCause,
+    improvements: [{ text: `Fix: ${m.whatChanged}` }, { text: `Return to flight: ${m.returnToFlight}` }],
+  };
+}
+
 /** Search terms for NASA's Technical Reports Server, from what the sketch contains. */
 function priorArtQuery(design: Design): string {
   const destination: Record<DestinationId, string> = {
@@ -121,6 +151,12 @@ function priorArtQuery(design: Design): string {
 
 export default function Studio() {
   const [phase, setPhase] = useState<Phase>("draw");
+  // Pick → Sketch → Diagnose → Build → Fly → Debrief.
+  const [step, setStep] = useState(0);
+  // The real flight being diagnosed, or null when drawing your own.
+  const [mission, setMission] = useState<HistoricMission | null>(null);
+  // What one read of the drawing found ("Grok vision identified: …").
+  const [identified, setIdentified] = useState<string | null>(null);
   const [strokes, setStrokes] = useState<Stroke[]>([]);
   const [destination, setDestination] = useState<DestinationId>("leo");
   const [reading, setReading] = useState<SketchReading | null>(null);
@@ -147,20 +183,20 @@ export default function Studio() {
   // The design review: which issue is selected (its mark pulses on the napkin), and whether this
   // review has been looked at; Launch stays secondary until it has.
   const [selectedIssue, setSelectedIssue] = useState<number | null>(null);
-  const [seenReview, setSeenReview] = useState(-1);
+  const [, setSeenReview] = useState(-1);
   // A scribble that doesn't read as a vehicle gets coaching, not physics.
   const unreadable = useMemo(
     () => (reading && (reading.confidence ?? 1) < 0.5 ? { problem: reading.problem ?? "These strokes don't form a vehicle outline." } : null),
     [reading],
   );
   const issues = useMemo<ReviewIssue[]>(() => {
-    if (!design || !analysis || unreadable || !review) return [];
+    if (!design || !analysis || unreadable || !review || mission) return [];
     try {
       return diagnose(design, analysis, reading ?? undefined).map((issue) => ({ ...issue, id: `issue-${issue.n}` }));
     } catch {
       return [];
     }
-  }, [design, analysis, reading, review, unreadable]);
+  }, [design, analysis, reading, review, unreadable, mission]);
   const trades = useMemo<Trade[]>(() => {
     if (!design || !analysis || unreadable) return [];
     try {
@@ -189,10 +225,10 @@ export default function Studio() {
   }, [design, analysis]);
 
   // Latest values for callbacks that outlive a render (voice tool calls, async responses).
-  const latest = useRef({ reading, design, strokes, destination, review });
+  const latest = useRef({ reading, design, strokes, destination, review, mission });
   useEffect(() => {
-    latest.current = { reading, design, strokes, destination, review };
-  }, [reading, design, strokes, destination, review]);
+    latest.current = { reading, design, strokes, destination, review, mission };
+  }, [reading, design, strokes, destination, review, mission]);
   // Mission control: the GO/NO-GO poll before launch, and the spoken offer after a flight.
   const [poll, setPoll] = useState<Poll | null>(null);
   const [revealed, setRevealed] = useState(0);
@@ -335,10 +371,14 @@ export default function Studio() {
     if (!current || !read || !currentAnalysis) return;
     const box = napkinArea.current?.querySelector(".napkin")?.getBoundingClientRect();
     const napkinRect = box ? { left: box.left, top: box.top, width: box.width, height: box.height } : null;
-    const trace = simulateFlight(current, currentAnalysis);
-    setFlight({ trace, renderUrl: null, renderState: "loading", napkinRect });
+    const flown = latest.current.mission;
+    const trace = flown ? historicTrace(flown) : simulateFlight(current, currentAnalysis);
+    prefetchNarration(trace.events.map((e) => calloutFor(e, current, trace)));
+    setFlight({ trace, renderUrl: null, renderState: flown ? "none" : "loading", napkinRect });
+    setStep(4);
     setAttempts((prev) => [...prev, { n: prev.length + 1, design: current, analysis: currentAnalysis, maxAltitudeKm: trace.maxAltitudeKm }]);
     setPhase("launch");
+    if (flown) return; // a real flight already has its photo; no outcome render to pay for
     const body: RenderRequest = {
       design: current,
       analysis: currentAnalysis,
@@ -437,6 +477,8 @@ export default function Studio() {
   function changeStrokes(next: Stroke[]) {
     setStrokes(next);
     if (latest.current.reading) setStale(true);
+    if (mission) setMission(null);
+    if (step > 1) setStep(1);
   }
 
   // Aborts an in-progress demo-sketch replay when something else takes over the napkin.
@@ -462,6 +504,7 @@ export default function Studio() {
     setPriorArt([]);
     setPatchUrl(null);
     setError(null);
+    setIdentified(null);
     setPhase("draw");
   }
 
@@ -487,6 +530,85 @@ export default function Studio() {
     });
   }
 
+  // ---- The flow.
+  function pickMission(m: HistoricMission) {
+    const sketch = DEMO_SKETCHES.find((d) => d.id === m.sketchId);
+    if (!sketch) return;
+    clearAll();
+    setMission(m);
+    setDestination(m.destination);
+    setStep(1);
+    const controller = new AbortController();
+    replay.current = controller;
+    setReplaying(true);
+    void replaySketch(sketch.strokes, setStrokes, { signal: controller.signal }).finally(() => {
+      if (replay.current === controller) setReplaying(false);
+    });
+  }
+
+  function drawOwn() {
+    clearAll();
+    setMission(null);
+    setStep(1);
+  }
+
+  function anotherMission() {
+    clearAll();
+    setMission(null);
+    setStep(0);
+  }
+
+  /** Diagnose a real flight: one read of the drawing, then the red pen marks what actually failed. */
+  async function diagnoseMission() {
+    const m = mission;
+    if (!m || replaying) return;
+    const id = ++runs.current.check;
+    setStep(2);
+    setError(null);
+    setPhase("reading");
+    const started = Date.now();
+    let found: string | null = null;
+    try {
+      const body: ReadRequest = { image: strokesToPng(strokes), strokes, destination: m.destination };
+      const res = await postJson<ReadResponse>("/api/read", body);
+      found = `${res.source === "grok" ? "Grok vision" : "The geometry reader"} identified: ${describeRead(res.reading.design)}.`;
+    } catch {
+      found = null;
+    }
+    // Let the laser sweep at least once.
+    await wait(Math.max(0, 1500 - (Date.now() - started)));
+    if (id !== runs.current.check) return;
+    const read = historicReading(m);
+    const marks = historicReview(m, read);
+    latest.current = { ...latest.current, reading: read, design: read.design };
+    setReading(read);
+    setDesign(read.design);
+    setReview(marks);
+    setReviewKey((k) => k + 1);
+    setStale(false);
+    setIdentified(found);
+    setPhase("reviewed");
+    setNarration(marks.summary);
+  }
+
+  /** Diagnose your own drawing: the full read and red-pen review. */
+  async function diagnoseOwn() {
+    setStep(2);
+    await check();
+    if (!latest.current.reading) setStep(1);
+  }
+
+  /** Build: the clean profile draws on, then the rendered vehicle. */
+  function build() {
+    setStep(3);
+    if (mission) {
+      const url = DEMO_CONCEPTS[mission.sketchId] ?? null;
+      runs.current.concept++;
+      setConcept({ url, loading: false });
+      if (url) void cutoutBlack(url);
+    }
+  }
+
   // A bump of this counter asks for a check of whatever is on the napkin in that render.
   const [checkRequest, setCheckRequest] = useState(0);
   const autoLaunch = useRef(false);
@@ -501,6 +623,7 @@ export default function Studio() {
     setAttract(params.get("attract") === "1");
     const sketch = DEMO_SKETCHES.find((s) => s.id === params.get("demo"));
     if (!sketch) return;
+    setStep(1);
     setStrokes(sketch.strokes);
     setDestination(sketch.destination);
     if (params.get("check") === "1") setCheckRequest((n) => n + 1);
@@ -532,190 +655,211 @@ export default function Studio() {
 
   return (
     <div className="flex h-dvh flex-col overflow-hidden bg-black text-white">
-      <header className="relative z-30 flex h-14 shrink-0 items-center gap-6 border-b border-rule bg-black px-6">
-        <h1 aria-label="Penumbra">
+      <header className="relative z-30 flex h-14 shrink-0 items-center gap-6 bg-black px-6">
+        <button type="button" onClick={anotherMission} aria-label="Penumbra: back to the missions">
           <PenumbraLockup />
-        </h1>
+        </button>
+        {step > 0 && (
+          <span className="border-l border-rule pl-5 font-space text-[12px] font-semibold uppercase tracking-[0.2em] text-haze">
+            {mission ? "Real missions" : "Your design"}
+          </span>
+        )}
         <div className="ml-auto flex items-center gap-2">
-          <Dropdown label={`Target: ${DESTINATION_CHIPS.find((c) => c.id === destination)?.label ?? DESTINATIONS[destination].name}`}>
-            {(close) =>
-              DESTINATION_CHIPS.map((chip) => (
-                <MenuItem
-                  key={chip.id}
-                  active={destination === chip.id}
-                  onClick={() => {
-                    if (design) handleAction({ type: "set-destination", destination: chip.id });
-                    else setDestination(chip.id);
-                    close();
-                  }}
-                >
-                  {DESTINATIONS[chip.id].name}
-                </MenuItem>
-              ))
-            }
-          </Dropdown>
-          <Dropdown label="Menu">
-            {(close) => (
-              <>
-                <p className="px-3 pb-1 pt-2 text-[10px] uppercase tracking-[0.2em] text-haze">Example sketches</p>
-                {DEMO_SKETCHES.map((sketch) => (
+          {!mission && step > 0 && step < 4 && (
+            <Dropdown label={`Target: ${DESTINATION_CHIPS.find((c) => c.id === destination)?.label ?? DESTINATIONS[destination].name}`}>
+              {(close) =>
+                DESTINATION_CHIPS.map((chip) => (
                   <MenuItem
-                    key={sketch.id}
+                    key={chip.id}
+                    active={destination === chip.id}
                     onClick={() => {
-                      loadDemo(sketch.id);
+                      if (design) handleAction({ type: "set-destination", destination: chip.id });
+                      else setDestination(chip.id);
                       close();
                     }}
                   >
-                    {sketch.title}
+                    {DESTINATIONS[chip.id].name}
                   </MenuItem>
-                ))}
-                <div className="my-1 border-t border-rule" />
-                <Link href="/about" className="block px-3 py-2 text-[13px] text-white hover:bg-white/[0.06]">
-                  How it works
-                </Link>
-              </>
-            )}
-          </Dropdown>
+                ))
+              }
+            </Dropdown>
+          )}
         </div>
       </header>
+      <StepBar steps={STEPS} current={step} />
 
-      <main className="grid min-h-0 flex-1 grid-cols-[minmax(0,1fr)_460px]">
-        <section className="space-stage flex min-h-0 min-w-0 flex-col items-center gap-4 px-8 pb-4 pt-6">
+      {step === 0 ? (
+        <main className="space-stage flex min-h-0 flex-1 flex-col items-center overflow-y-auto px-10 py-10">
           <SpaceBackdrop />
-          <div ref={napkinArea} className="flex min-h-0 w-full flex-1 justify-center">
-            <NapkinCanvas
-              strokes={strokes}
-              onChange={changeStrokes}
-              disabled={phase === "reading"}
-              hint={
-                <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center gap-2 px-6 text-center">
-                  <p className="font-space text-[20px] font-semibold uppercase tracking-[0.14em] text-white/85">Draw your spacecraft here</p>
-                  <p className="text-[14px] text-haze">Chalk on the night sky. A rocket, a lander, a Mars ship. Rough is fine.</p>
-                  <p className="mt-6 text-[10px] uppercase tracking-[0.2em] text-haze">Or start from an example</p>
-                  <div className="pointer-events-auto flex flex-wrap justify-center gap-2">
-                    {DEMO_SKETCHES.map((sketch) => (
-                      <button key={sketch.id} type="button" onClick={() => loadDemo(sketch.id)} className="btn-outline h-8 px-3 text-[10px]">
-                        {sketch.title}
-                      </button>
-                    ))}
+          <div className="w-full max-w-[1200px]">
+            <h2 className="font-space text-[26px] font-semibold uppercase tracking-[0.1em] text-white">Pick a real flight to diagnose</h2>
+            <p className="mb-6 mt-1 text-[15px] text-haze">Each rocket is drawn on a napkin. Find what broke, watch it get built, then fly what actually happened.</p>
+            <MissionPicker missions={HISTORIC_MISSIONS} onPick={pickMission} onDrawOwn={drawOwn} />
+          </div>
+        </main>
+      ) : (
+        <main className="grid min-h-0 flex-1 grid-cols-[minmax(0,1fr)_460px]">
+          <section className="space-stage flex min-h-0 min-w-0 flex-col items-center gap-4 px-8 pb-4 pt-6">
+            <SpaceBackdrop />
+            <div ref={napkinArea} className="flex min-h-0 w-full flex-1 justify-center">
+              <NapkinCanvas
+                strokes={strokes}
+                onChange={changeStrokes}
+                disabled={phase === "reading" || Boolean(mission)}
+                hint={
+                  <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center gap-2 px-6 text-center">
+                    <p className="font-space text-[20px] font-semibold uppercase tracking-[0.14em] text-white/85">Draw your spacecraft here</p>
+                    <p className="text-[14px] text-haze">Chalk on the night sky. A rocket, a lander, a Mars ship. Rough is fine.</p>
                   </div>
-                </div>
-              }
-            >
-              <NapkinRender
-                reading={reviewed && !unreadable ? reading : null}
-                url={concept.url}
-                loading={concept.loading}
-                resetKey={strokes}
-                sticker={
-                  patchUrl && (
-                    // eslint-disable-next-line @next/next/no-img-element
-                    <img
-                      src={patchUrl}
-                      alt="Grok Imagine mission patch"
-                      className="sticker-in absolute right-[5%] top-[3%] aspect-square w-[24%] rounded-full object-cover shadow-[0_6px_14px_-4px_rgba(0,0,0,0.45)]"
-                    />
-                  )
                 }
               >
-                <div className={`absolute inset-0 transition-opacity duration-300 ${stale ? "opacity-30" : ""}`}>
-                  <RedPenOverlay
-                    parts={reviewed ? reading.parts : []}
-                    marks={reviewed ? (review?.marks ?? []) : []}
-                    playKey={String(reviewKey)}
-                    scanning={phase === "reading"}
-                    numbers={markNumbers}
-                    hidden={(review?.marks ?? []).map((_, i) => issues.some((issue) => issue.markIndex === i && issue.severity === "ok"))}
-                    selectedMark={selectedMark}
-                    onSelectMark={(markIndex) => selectIssue(issues.findIndex((issue) => issue.markIndex === markIndex))}
-                    problem={reviewed && unreadable ? unreadable.problem : null}
-                  />
-                </div>
-              </NapkinRender>
-              <NapkinAssist strokes={strokes} destination={destination} onKeep={changeStrokes} active={phase === "draw"} />
-            </NapkinCanvas>
-          </div>
-
-          {phase === "poll" && poll ? (
-            <PollConsole poll={poll} revealed={revealed} onGo={goForLaunch} onScrub={scrub} onFix={fixAndRepoll} />
-          ) : (
-          <div className="flex w-full items-center justify-center">
-            <div className="flex shrink-0 items-center gap-2">
-              <button
-                type="button"
-                onClick={undo}
-                disabled={strokes.length === 0}
-                className="h-11 px-2 text-[11px] uppercase tracking-[0.18em] text-haze transition-colors hover:text-white disabled:opacity-40"
-              >
-                Undo
-              </button>
-              <button
-                type="button"
-                onClick={clearAll}
-                disabled={strokes.length === 0}
-                className="h-11 px-2 text-[11px] uppercase tracking-[0.18em] text-haze transition-colors hover:text-white disabled:opacity-40"
-              >
-                Clear
-              </button>
-              <button
-                type="button"
-                onClick={check}
-                disabled={strokes.length === 0 || phase === "reading" || replaying}
-                className="btn-outline h-11 px-6 text-[12px]"
-              >
-                {phase === "reading" ? "Reading…" : reading && !stale ? "Check again" : "Check design"}
-              </button>
-              <button
-                type="button"
-                onClick={openPoll}
-                disabled={!reviewed || !analysis || Boolean(unreadable)}
-                className={`${issues.some((issue) => issue.severity !== "ok") && seenReview !== reviewKey ? "btn-outline" : "btn-solid"} h-11 px-8 text-[12px]`}
-              >
-                Launch
-              </button>
+                <NapkinRender
+                  reading={step >= 3 && reviewed && !unreadable ? reading : null}
+                  url={step >= 3 ? concept.url : null}
+                  loading={step >= 3 && concept.loading}
+                  resetKey={strokes}
+                  sticker={
+                    !mission && patchUrl ? (
+                      // eslint-disable-next-line @next/next/no-img-element
+                      <img
+                        src={patchUrl}
+                        alt="Grok Imagine mission patch"
+                        className="sticker-in absolute right-[5%] top-[3%] aspect-square w-[24%] rounded-full object-cover shadow-[0_6px_14px_-4px_rgba(0,0,0,0.45)]"
+                      />
+                    ) : null
+                  }
+                >
+                  <div className={`absolute inset-0 transition-opacity duration-300 ${stale ? "opacity-30" : ""}`}>
+                    <RedPenOverlay
+                      parts={reviewed ? reading.parts : []}
+                      marks={reviewed ? (review?.marks ?? []) : []}
+                      playKey={String(reviewKey)}
+                      scanning={phase === "reading"}
+                      numbers={markNumbers}
+                      hidden={(review?.marks ?? []).map((_, i) => issues.some((issue) => issue.markIndex === i && issue.severity === "ok"))}
+                      selectedMark={selectedMark}
+                      onSelectMark={(markIndex) => selectIssue(issues.findIndex((issue) => issue.markIndex === markIndex))}
+                      problem={reviewed && unreadable ? unreadable.problem : null}
+                    />
+                  </div>
+                </NapkinRender>
+                {!mission && <NapkinAssist strokes={strokes} destination={destination} onKeep={changeStrokes} active={phase === "draw"} />}
+              </NapkinCanvas>
             </div>
-          </div>
-          )}
-          <p className={`h-5 text-[13px] ${error ? "text-nogo" : "text-haze"}`} aria-live="polite">
-            {error ?? (reviewed && issues.some((issue) => issue.severity !== "ok") ? "Redraw to fix the numbered issues, then Check again." : "")}
-          </p>
-        </section>
 
-        <section className="min-h-0 overflow-y-auto border-l border-rule bg-black">
-          <VerdictPanel
-            issues={issues}
-            trades={trades}
-            selectedIssue={selectedIssue}
-            onSelectIssue={selectIssue}
-            unreadable={unreadable}
-            samples={DEMO_SKETCHES.map((d) => ({ id: d.id, title: d.title }))}
-            onSample={loadDemo}
-            trace={predicted}
-            onLaunch={openPoll}
-            canLaunch={Boolean(reviewed && analysis)}
-            attempts={attempts}
-            recap={flightRecap}
-            phase={phase}
-            design={design}
-            analysis={analysis}
-            review={review}
-            conceptUrl={concept.url}
-            conceptLoading={concept.loading}
-            priorArt={priorArt}
-          />
-        </section>
-      </main>
+            {phase === "poll" && poll ? (
+              <PollConsole poll={poll} revealed={revealed} onGo={goForLaunch} onScrub={scrub} onFix={fixAndRepoll} />
+            ) : (
+              <div className="flex w-full items-center justify-center gap-2">
+                {!mission && step <= 3 && (
+                  <>
+                    <button
+                      type="button"
+                      onClick={undo}
+                      disabled={strokes.length === 0}
+                      className="h-11 px-2 text-[11px] uppercase tracking-[0.18em] text-haze transition-colors hover:text-white disabled:opacity-40"
+                    >
+                      Undo
+                    </button>
+                    <button
+                      type="button"
+                      onClick={clearAll}
+                      disabled={strokes.length === 0}
+                      className="h-11 px-2 text-[11px] uppercase tracking-[0.18em] text-haze transition-colors hover:text-white disabled:opacity-40"
+                    >
+                      Clear
+                    </button>
+                  </>
+                )}
+                {step === 1 && (
+                  <button
+                    type="button"
+                    onClick={mission ? diagnoseMission : diagnoseOwn}
+                    disabled={replaying || strokes.length === 0 || phase === "reading"}
+                    className="btn-solid h-11 px-8 text-[12px]"
+                  >
+                    Diagnose →
+                  </button>
+                )}
+                {step === 2 && (
+                  <button
+                    type="button"
+                    onClick={build}
+                    disabled={phase !== "reviewed" || !reading || Boolean(unreadable)}
+                    className="btn-solid h-11 px-8 text-[12px]"
+                  >
+                    {phase === "reading" ? "Diagnosing…" : "Build it →"}
+                  </button>
+                )}
+                {step === 3 && (
+                  <button type="button" onClick={startLaunch} disabled={!reviewed || !analysis} className="btn-solid h-11 px-8 text-[12px]">
+                    Fly it →
+                  </button>
+                )}
+                {step >= 4 && (
+                  <button type="button" onClick={anotherMission} className="btn-solid h-11 px-8 text-[12px]">
+                    Try another mission
+                  </button>
+                )}
+              </div>
+            )}
+            <p className={`h-5 text-[13px] ${error ? "text-nogo" : "text-haze"}`} aria-live="polite">
+              {error ?? (mission ? (identified ?? "") : reviewed && issues.some((issue) => issue.severity !== "ok") ? "Redraw to fix the numbered issues, then diagnose again." : "")}
+            </p>
+          </section>
+
+          <section className="min-h-0 overflow-y-auto border-l border-rule bg-black">
+            {mission ? (
+              step >= 4 ? (
+                <MissionFile mission={mission} onLaunch={startLaunch} canLaunch={Boolean(reviewed && analysis)} />
+              ) : (
+                <MissionBrief mission={mission} step={step} identified={identified} />
+              )
+            ) : (
+              <VerdictPanel
+                issues={issues}
+                trades={trades}
+                selectedIssue={selectedIssue}
+                onSelectIssue={selectIssue}
+                unreadable={unreadable}
+                samples={DEMO_SKETCHES.map((d) => ({ id: d.id, title: d.title }))}
+                onSample={loadDemo}
+                trace={predicted}
+                onLaunch={startLaunch}
+                canLaunch={Boolean(reviewed && analysis)}
+                attempts={attempts}
+                recap={flightRecap}
+                phase={phase}
+                design={design}
+                analysis={analysis}
+                review={review}
+                conceptUrl={concept.url}
+                conceptLoading={concept.loading}
+                priorArt={priorArt}
+              />
+            )}
+          </section>
+        </main>
+      )}
 
       <AttractMode
         enabled={attract}
         phase={phase}
-        onStrokes={(next) => (next.length === 0 ? clearAll() : setStrokes(next))}
+        onStrokes={(next) => {
+          if (next.length === 0) clearAll();
+          else {
+            setStrokes(next);
+            setStep((s) => (s === 0 ? 1 : s));
+          }
+        }}
         onDestination={setDestination}
         onCheck={() => setCheckRequest((n) => n + 1)}
         onLaunch={startLaunch}
       />
 
+      {/* The narrator speaks callouts and replay dialog; it has only a small mute toggle, no bar. */}
       <VoiceDock
+        variant="narrator"
         phase={phase}
         design={design}
         analysis={analysis}
@@ -743,13 +887,65 @@ export default function Studio() {
           onDone={() => {
             setFlight(null);
             setPhase("reviewed");
-            if (flightRecap) setOffer(offerFor(flightRecap));
+            setStep(5);
+            if (!mission && flightRecap) setOffer(offerFor(flightRecap));
           }}
-          recap={flightRecap}
-          onImprove={improveAndFly}
+          recap={mission ? missionRecap(mission) : flightRecap}
+          onImprove={mission ? undefined : improveAndFly}
         />
       )}
     </div>
+  );
+}
+
+/** The side panel while a real flight is diagnosed: what it is, then only what failed and the numbers that matter. */
+function MissionBrief({ mission, step, identified }: { mission: HistoricMission; step: number; identified: string | null }) {
+  return (
+    <aside className="flex flex-col gap-3 p-3">
+      <section className="module">
+        <header className="module-head">
+          <h3 className="font-space text-[11px] font-semibold uppercase tracking-[0.22em] text-white/70">{step === 1 ? "The flight" : "What failed"}</h3>
+          {mission.outcome === "lost" ? (
+            <span className="font-space text-[12px] font-semibold tracking-[0.2em] text-nogo">LOST</span>
+          ) : (
+            <span className="font-space text-[12px] font-semibold tracking-[0.2em] text-go-signal">SUCCESS</span>
+          )}
+        </header>
+        <div className="px-4 py-3">
+          <p className="font-space text-[22px] font-semibold uppercase leading-tight tracking-[0.06em] text-white">{mission.vehicle}</p>
+          <p className="mt-0.5 text-[14px] text-white/85">{mission.mission}</p>
+          <p className="mt-0.5 text-[13px] text-haze">
+            {mission.date} · {mission.site}
+          </p>
+          {step === 1 && <p className="mt-3 text-[14px] leading-snug text-haze">Here is the vehicle, drawn on a napkin. Press Diagnose to find what broke.</p>}
+          {step >= 2 && mission.failure && (
+            <div className="mt-4 border-t border-rule pt-3">
+              <p className="text-[18px] font-semibold leading-snug text-nogo">{mission.failure.label}</p>
+              <p className="mt-1.5 text-[14px] leading-snug text-white/85">{mission.failure.detail}</p>
+            </div>
+          )}
+          {step >= 2 && !mission.failure && <p className="mt-4 text-[16px] font-semibold text-go-signal">Nothing failed: it flew as planned.</p>}
+          {step >= 2 && identified && <p className="mt-3 text-[12px] leading-snug text-haze">{identified}</p>}
+        </div>
+      </section>
+      {step >= 2 && mission.stats.length > 0 && (
+        <section className="module">
+          <header className="module-head">
+            <h3 className="font-space text-[11px] font-semibold uppercase tracking-[0.22em] text-white/70">The numbers</h3>
+          </header>
+          <ul className="divide-y divide-rule">
+            {mission.stats.slice(0, 4).map((s) => (
+              <li key={s.label} className="px-4 py-3">
+                <p className="font-space text-[26px] font-medium leading-none tabular-nums text-white">{s.value}</p>
+                <p className="mt-1 text-[11px] uppercase tracking-[0.16em] text-haze">{s.label}</p>
+                <p className="mt-1 text-[13px] leading-snug text-white/80">{s.meaning}</p>
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
+      {step === 3 && <p className="px-1 text-[12px] leading-snug text-haze">Grok Imagine built this vehicle from the napkin sketch.</p>}
+    </aside>
   );
 }
 
