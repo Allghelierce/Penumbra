@@ -249,7 +249,7 @@ function flightPlan(
   const karmanSims = crossingsFor(points, T, (sim) => sim)
     .filter((c) => c.hero)
     .map((c) => c.simT);
-  const warp = warpFor(T, [...events, ...synthetic], karmanSims, breakup ? "breakup" : outcome, scenario);
+  const warp = warpFor(T, [...events, ...synthetic], karmanSims, breakup ? "breakup" : outcome, scenario, events);
   const flightDur = warp.duration;
   const liftoffAt = T_LIFTOFF;
   const finaleAt = liftoffAt + flightDur;
@@ -343,7 +343,15 @@ interface Beat {
  * play slowly; the gaps between them share what's left of FLIGHT_PLAY and fast-forward.
  * A monotone cubic through the knots keeps the speed changes smooth.
  */
-function warpFor(T: number, events: FlightEvent[], karmanSims: number[], outcome: Verdict | "breakup", scenario?: string) {
+function warpFor(
+  T: number,
+  events: FlightEvent[],
+  karmanSims: number[],
+  outcome: Verdict | "breakup",
+  scenario?: string,
+  /** The trace's own events: quotes run to the next of these, not to a synthetic marker. */
+  quoteEvents: FlightEvent[] = events,
+) {
   const beat = (s: number, before: number, after: number, play: number): Beat => ({
     from: Math.max(0, s - before),
     to: Math.min(T, s + after),
@@ -368,8 +376,14 @@ function warpFor(T: number, events: FlightEvent[], karmanSims: number[], outcome
   else if (scenario === "crs7") beats.push(beat(139, 14, 0, 1.2));
   else if (scenario === "falcon1-f1") beats.push(beat(25, 3, 11, 2));
 
+  // The approach to the outcome: the fall and reentry before impact, or the last push to orbit.
+  // Pushed before the quote carve-out, so a quote inside it splits it like any other beat.
+  beats.push(
+    outcome === "suborbital" ? beat(T, 30, 0, 1.5) : outcome === "breakup" ? beat(T, 15, 0, 1.1) : beat(T, 12, 0, 0.6),
+  );
+
   // Real dialog gets the time it takes to say it: the next event waits until the quote is done.
-  const sorted = events.filter((e) => e.tS >= 0 && e.tS <= T).sort((a, b) => a.tS - b.tS);
+  const sorted = quoteEvents.filter((e) => e.tS >= 0 && e.tS <= T).sort((a, b) => a.tS - b.tS);
   const quotes: Beat[] = [];
   sorted.forEach((e, k) => {
     const hold = quoteHold(e.label);
@@ -394,11 +408,6 @@ function warpFor(T: number, events: FlightEvent[], karmanSims: number[], outcome
   });
   beats.length = 0;
   beats.push(...free);
-  // The approach to the outcome: the fall and reentry before impact, or the last push to orbit.
-  beats.push(
-    outcome === "suborbital" ? beat(T, 30, 0, 1.5) : outcome === "breakup" ? beat(T, 15, 0, 1.1) : beat(T, 12, 0, 0.6),
-  );
-
   beats.sort((a, b) => a.from - b.from);
   const merged: Beat[] = [];
   for (const b of beats) {
@@ -424,8 +433,11 @@ function warpFor(T: number, events: FlightEvent[], karmanSims: number[], outcome
   const segs: { from: number; to: number; play: number | null }[] = [];
   let cursor = 0;
   for (const b of merged) {
-    if (b.from > cursor) segs.push({ from: cursor, to: b.from, play: null });
-    segs.push(b);
+    // Never step back in sim time: trim anything that overlaps what's already laid out.
+    const from = Math.max(b.from, cursor);
+    if (b.to <= from) continue;
+    if (from > cursor) segs.push({ from: cursor, to: from, play: null });
+    segs.push(from === b.from ? b : { ...b, from, play: (b.play * (b.to - from)) / (b.to - b.from) });
     cursor = b.to;
   }
   if (cursor < T) segs.push({ from: cursor, to: T, play: null });
@@ -578,7 +590,7 @@ function finaleFor(outcome: Verdict, design: Design, at: number): Finale {
 const DIALOG = /^\s*([^:"\u201c\u201d]{2,48}):\s*["\u201c]([\s\S]+?)["\u201d]\s*$/;
 
 /** Seconds a quoted label needs to be spoken (Quindar tones included), or null if it's no quote. */
-function quoteHold(label: string | undefined): number | null {
+export function quoteHold(label: string | undefined): number | null {
   const m = label ? DIALOG.exec(label) : null;
   if (!m) return null;
   const words = m[2].trim().split(/\s+/).length;

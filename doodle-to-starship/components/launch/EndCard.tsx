@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useState } from "react";
+import { createPortal } from "react-dom";
 import MissionReport from "@/components/MissionReport";
 import { MISSION_PHOTOS } from "@/lib/mission-photos";
 import { MISSION_REPORTS } from "@/lib/mission-reports";
@@ -367,7 +368,8 @@ function Debrief({ mission, renderUrl, renderPending, strokes, design, video, on
   };
   const [showReport, setShowReport] = useState(false);
   const closeReport = useCallback(() => setShowReport(false), [setShowReport]);
-  const report = MISSION_REPORTS[mission.id];
+  const reportMission = mission;
+  const report = MISSION_REPORTS[reportMission.id];
   // Photos from the real flight (Wikimedia Commons), when there are any.
   const photos = (MISSION_PHOTOS[mission.id] ?? []).slice(0, 2);
   const section = "border-t border-rule px-5 py-3 sm:px-7";
@@ -507,7 +509,18 @@ function Debrief({ mission, renderUrl, renderPending, strokes, design, video, on
               </button>
             )}
           </div>
-          {showReport && <MissionReport mission={mission} report={report} trace={trace} photos={MISSION_PHOTOS[mission.id]} onClose={closeReport} />}
+          {/* Portaled out of the card: its transform would otherwise trap and clip the fixed report. */}
+          {showReport &&
+            createPortal(
+              <MissionReport
+                mission={reportMission}
+                report={report}
+                trace={trace}
+                photos={MISSION_PHOTOS[reportMission.id]}
+                onClose={closeReport}
+              />,
+              document.body,
+            )}
         </div>
       </div>
     </div>

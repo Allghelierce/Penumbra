@@ -167,6 +167,12 @@ export default function LaunchScene(props: LaunchSceneProps) {
   }, []);
   const [muted, setMuted] = useState(isLaunchAudioMuted);
   const [speed, setSpeed] = useState(1);
+  // The narrator can flip the shared mute too; keep this toggle's label in step.
+  useEffect(() => {
+    const onMuteEvent = (e: Event) => setMuted(Boolean((e as CustomEvent<boolean>).detail));
+    window.addEventListener("penumbra:mute", onMuteEvent);
+    return () => window.removeEventListener("penumbra:mute", onMuteEvent);
+  }, []);
   // Lives out here so a paid video job survives "fly again".
   const replay = useReplay(props.renderUrl, props.trace.outcome ?? props.analysis.verdict);
   return (
@@ -496,7 +502,7 @@ function LaunchRun(props: RunProps) {
           recap={props.recap}
           onImprove={props.onImprove}
           lostAt={plan.lostAt}
-          mission={props.mission}
+          mission={input.mission}
           onFixRetry={props.onFixRetry}
           trace={input.trace}
         />

@@ -13,6 +13,7 @@ import { buildDoodle, unionBox, type Nozzle, type Vec } from "./geometry";
 import {
   buildPlan,
   headingAt,
+  quoteHold,
   sampleAt,
   T_CAM_FROM,
   T_FRAMED,
@@ -290,7 +291,9 @@ export function startLaunch(
   /** Alpha per tile of the vehicle picture, so empty tiles don't fly as debris. */
   let coverage: Uint8ClampedArray | null = null;
   const callouts: FlightEvent[] = [];
+  /** Wall-clock seconds of the last onEvent, and until when its line is being spoken. */
   let lastCallout = -Infinity;
+  let speechUntil = -Infinity;
   const wobbleRand = seeded(23);
   const horizon = Array.from({ length: 48 }, () => (wobbleRand() - 0.5) * 3);
   const sprites: Record<SpriteId, HTMLCanvasElement> = {
@@ -684,7 +687,8 @@ export function startLaunch(
     raf = requestAnimationFrame(frame);
     const dt = Math.min(0.05, Math.max(0, (now - last) / 1000));
     last = now;
-    t += dt * (t < quoteUntil ? Math.min(speed, 1) : speed);
+    // Held to 1× while a recorded quote or a spoken callout plays, so speech is never cut off.
+    t += dt * (t < quoteUntil || now / 1000 < speechUntil ? Math.min(speed, 1) : speed);
     resize();
     const c = ctx!;
 
@@ -1277,9 +1281,12 @@ export function startLaunch(
     }
     // The narrator speaks each event (Quindar tones, then a short callout), so events that
     // land together go out at least EVENT_GAP apart, in order, never dropped.
-    if (callouts.length && t - lastCallout >= EVENT_GAP) {
-      lastCallout = t;
+    const wall = now / 1000;
+    if (callouts.length && wall - lastCallout >= EVENT_GAP) {
+      lastCallout = wall;
       const e = callouts.shift() as FlightEvent;
+      // The narrator plays the Quindar tones, then the line: hold playback to 1× until it's said.
+      speechUntil = wall + (quoteHold(e.label) ?? 2);
       try {
         hooks.onEvent(e);
       } catch (err) {
