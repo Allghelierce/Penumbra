@@ -138,7 +138,9 @@ export const TEMPLATES: RocketTemplate[] = [
       heightM: 18,
       diameterM: 1.2,
     },
-    // Updated LEO capacity (originally 225 kg), per the Electron infobox.
+    // Updated LEO capacity (originally 225 kg), per the Electron infobox. The rated payload rides on
+    // the Curie kick stage, whose mass isn't published and isn't modelled here, so the physics comes
+    // out above 300 kg (about 118%).
     realPayloadLeoKg: 300,
     sources: [
       { title: "Rocket Lab Electron: height 18 m, diameter 1.2 m, lift-off mass 13.0 t, stage lengths, 300 kg to LEO", url: wiki("Rocket_Lab_Electron") },
