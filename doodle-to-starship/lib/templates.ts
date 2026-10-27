@@ -93,8 +93,9 @@ export const TEMPLATES: RocketTemplate[] = [
         },
       ],
       // The published 140,000 kg "to LEO" INCLUDES the S-IVB stage and its translunar propellant
-      // (infobox footnote), so it overstates payload above a spent third stage. Calibrate knowing that.
-      payloadMassKg: 140_000,
+      // (infobox footnote). Above a burned-out S-IVB that is 140 t − 15.2 t ≈ 124.8 t; the physics
+      // model tops out at 120.7 t (97% of that), so the baseline is trimmed to 118 t to reach orbit.
+      payloadMassKg: 118_000,
       destination: "leo",
       features: ["fins"],
       heightM: 110.6,

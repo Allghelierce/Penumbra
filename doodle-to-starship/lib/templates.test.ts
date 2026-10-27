@@ -28,7 +28,9 @@ describe("TEMPLATES", () => {
     expect(TEMPLATES.map((t) => t.id)).toEqual(["falcon9", "saturn-v", "electron", "starship"]);
     for (const t of TEMPLATES) {
       expect(t.design.destination, t.id).toBe("leo");
-      expect(t.design.payloadMassKg, t.id).toBe(t.realPayloadLeoKg);
+      // Saturn V's published figure includes the S-IVB itself, so its baseline payload is lower.
+      if (t.id === "saturn-v") expect(t.design.payloadMassKg).toBe(118_000);
+      else expect(t.design.payloadMassKg, t.id).toBe(t.realPayloadLeoKg);
       expect(t.sources.length, t.id).toBeGreaterThan(0);
       for (const s of t.sources) expect(s.url, t.id).toMatch(/^https:\/\//);
       expect(templateById(t.id)).toBe(t);
@@ -58,6 +60,17 @@ describe("TEMPLATES", () => {
         for (const c of s.engines) expect(ENGINES[c.engine], `${t.id} ${c.engine}`).toBeDefined();
       });
     }
+  });
+
+  it("reaches orbit on every default launch, and Falcon 9 does too with the booster recovered", () => {
+    for (const t of TEMPLATES) expect(analyze(t.design).verdict, t.id).toBe("destination");
+    const f9 = templateById("falcon9");
+    const recovered: Design = {
+      ...f9.design,
+      payloadMassKg: f9.realPayloadLeoReusableKg!,
+      stages: f9.design.stages.map((s, i) => (i === 0 ? { ...s, recover: true } : s)),
+    };
+    expect(analyze(recovered).verdict).toBe("destination");
   });
 
   it("weighs what the real vehicle weighs at lift-off (within 7%) and gets off the pad", () => {
