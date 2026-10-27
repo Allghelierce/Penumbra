@@ -1,0 +1,195 @@
+import { describe, expect, it } from "vitest";
+
+import { applyAction } from "./actions";
+import type { Design } from "./design";
+import { analyze, ascentLossesMps } from "./physics";
+import { TEMPLATES } from "./templates";
+import { explainCurve, maxPayloadKg, MIN_LIFTOFF_TWR, realStageFor, recoveryCostKg, stretchFromReal, tradeCurve } from "./trade";
+
+const template = (id: string) => TEMPLATES.find((t) => t.id === id)!;
+const withRecovery = (d: Design, stages: number[]): Design => ({
+  ...d,
+  stages: d.stages.map((s, i) => ({ ...s, recover: stages.includes(i) })),
+});
+const within = (value: number, target: number, tolerance = 0.25) => {
+  expect(value).toBeGreaterThanOrEqual(target * (1 - tolerance));
+  expect(value).toBeLessThanOrEqual(target * (1 + tolerance));
+};
+
+describe("maxPayloadKg against the real rockets (±25% where the comparison is like for like)", () => {
+  it("Falcon 9: 22.8 t expended, and 17.4 t with the booster landing on a drone ship", () => {
+    const f9 = template("falcon9");
+    within(maxPayloadKg(withRecovery(f9.design, []), "leo"), f9.realPayloadLeoKg);
+    within(maxPayloadKg(withRecovery(f9.design, [0]), "leo"), f9.realPayloadLeoReusableKg ?? 17_400);
+  });
+
+  it("Saturn V: 140 t to LEO counts the S-IVB and its leftover propellant; 48.6 t to translunar injection", () => {
+    const saturn = template("saturn-v");
+    const sivbDry = saturn.design.stages.at(-1)!.dryMassKg!;
+    within(maxPayloadKg(saturn.design, "leo") + sivbDry, saturn.realPayloadLeoKg);
+    // Translunar injection: the most payload with 3,260 m/s left after reaching LEO.
+    const tli = bisect((kg) => {
+      const a = analyze({ ...saturn.design, destination: "leo", payloadMassKg: kg });
+      return a.liftoffTwr >= MIN_LIFTOFF_TWR && a.marginMps >= 3_260;
+    });
+    within(tli, 48_600);
+  });
+
+  it("Electron: 300 kg", () => {
+    const electron = template("electron");
+    within(maxPayloadKg(electron.design, "leo"), electron.realPayloadLeoKg);
+  });
+
+  it("Starship: the published 35 t (both stages recovered) is far below what its published masses allow", () => {
+    // SpaceX's figure folds in early-block shortfalls and conservative margins the model doesn't
+    // know about; with the published masses and both landing reserves, the physics allows far more.
+    const starship = template("starship");
+    expect(starship.design.stages.every((s) => s.recover)).toBe(true);
+    expect(maxPayloadKg(starship.design, "leo")).toBeGreaterThan(starship.realPayloadLeoKg);
+  });
+
+  it("carries less to harder destinations, and nothing it can't reach", () => {
+    const f9 = template("falcon9").design;
+    const leo = maxPayloadKg(f9, "leo");
+    const gto = maxPayloadKg(f9, "gto");
+    expect(gto).toBeGreaterThan(0);
+    expect(gto).toBeLessThan(leo);
+    expect(maxPayloadKg(template("electron").design, "europa")).toBe(0);
+  });
+
+  it("is what the rocket really lifts: at that payload it reaches LEO at a safe liftoff, and 2% more doesn't", () => {
+    const f9 = template("falcon9").design;
+    const kg = maxPayloadKg(f9, "leo");
+    const at = analyze({ ...f9, destination: "leo", payloadMassKg: kg });
+    expect(at.marginMps).toBeGreaterThanOrEqual(0);
+    expect(at.liftoffTwr).toBeGreaterThanOrEqual(MIN_LIFTOFF_TWR);
+    expect(analyze({ ...f9, destination: "leo", payloadMassKg: kg * 1.02 }).marginMps).toBeLessThan(0);
+  });
+});
+
+describe("physics realism", () => {
+  it("needs a realistic 8.5 to 10.5 km/s for LEO, more of it lost the lower the thrust-to-weight", () => {
+    for (const t of TEMPLATES) {
+      const a = analyze({ ...t.design, destination: "leo", payloadMassKg: maxPayloadKg(t.design, "leo") });
+      expect(a.requiredDeltaVMps, t.id).toBeGreaterThan(8_500);
+      expect(a.requiredDeltaVMps, t.id).toBeLessThan(10_500);
+    }
+    const f9 = template("falcon9").design;
+    const loss = (engines: number) => {
+      const d = applyAction(f9, { type: "set-engines", stageIndex: 0, engine: "merlin-1d", count: engines });
+      return ascentLossesMps(d, analyze(d).stages).reduce((a, b) => a + b, 0);
+    };
+    expect(loss(8)).toBeGreaterThan(loss(9));
+    expect(loss(9)).toBeGreaterThan(loss(12));
+  });
+
+  it("adds the destination legs on top of the design's own LEO requirement", () => {
+    const f9 = template("falcon9").design;
+    const leo = analyze({ ...f9, destination: "leo" }).requiredDeltaVMps;
+    expect(analyze({ ...f9, destination: "gto" }).requiredDeltaVMps - leo).toBeCloseTo(2_440, 6);
+    expect(analyze({ ...f9, destination: "moon-orbit" }).requiredDeltaVMps - leo).toBeCloseTo(3_940, 6);
+  });
+
+  it("keeps a recovered stage's landing reserve unburned, and charges its recovery hardware", () => {
+    const f9 = template("falcon9").design;
+    const thrown = analyze(withRecovery(f9, [])).stages[0];
+    const landed = analyze(withRecovery(f9, [0])).stages[0];
+    expect(landed.propellantMassKg).toBeCloseTo(thrown.propellantMassKg * 0.92, 3);
+    expect(landed.dryMassKg).toBeGreaterThan(thrown.dryMassKg);
+    expect(landed.deltaVMps).toBeLessThan(thrown.deltaVMps);
+    expect(recoveryCostKg(withRecovery(f9, [0]), "leo")).toBeGreaterThan(4_000);
+  });
+});
+
+describe("tradeCurve", () => {
+  const stretchBest = (id: string, stageIndex: number) =>
+    tradeCurve(template(id).design, { kind: "tank-stretch", stageIndex }, { destination: "leo" });
+
+  it("puts the real rocket at 1×, on the max payload, with a real interior peak", () => {
+    for (const t of TEMPLATES) {
+      t.design.stages.forEach((_, stageIndex) => {
+        const curve = stretchBest(t.id, stageIndex);
+        expect(curve.realX).toBe(1);
+        const real = curve.points.find((p) => p.x === 1)!;
+        expect(real.payloadKg).toBe(maxPayloadKg(t.design, "leo"));
+        const best = curve.points.find((p) => p.x === curve.bestX)!;
+        expect(best.payloadKg).toBeGreaterThanOrEqual(real.payloadKg);
+        // A peak, not a slope running off the end of the sweep.
+        expect(curve.points.at(-1)!.payloadKg, `${t.id} stage ${stageIndex}`).toBeLessThan(best.payloadKg);
+      });
+    }
+  });
+
+  it("peaks near the real first stage: within 1.0–1.3× for Falcon 9, Saturn V and Starship", () => {
+    for (const id of ["falcon9", "saturn-v", "starship"]) {
+      const { bestX } = stretchBest(id, 0);
+      expect(bestX, id).toBeGreaterThanOrEqual(1);
+      expect(bestX, id).toBeLessThanOrEqual(1.3);
+    }
+    // Electron lifts off at thrust-to-weight 1.8, so a longer first stage keeps paying until the
+    // safe-liftoff floor: its peak sits further out.
+    expect(stretchBest("electron", 0).bestX).toBeLessThanOrEqual(1.6);
+  });
+
+  it("peaks at or below the real upper stage", () => {
+    for (const t of TEMPLATES) expect(stretchBest(t.id, t.design.stages.length - 1).bestX, t.id).toBeLessThanOrEqual(1.1);
+  });
+
+  it("sweeps engine counts from the real rocket's, with nothing at too few engines to lift off", () => {
+    const f9 = template("falcon9").design;
+    const curve = tradeCurve(f9, { kind: "engine-count", stageIndex: 0 }, { destination: "leo" });
+    expect(curve.realX).toBe(9);
+    expect(curve.unit).toBe("engines");
+    expect(curve.points[0].x).toBe(1);
+    expect(curve.points[0].payloadKg).toBe(0);
+    expect(curve.points.find((p) => p.x === 9)!.payloadKg).toBe(maxPayloadKg(f9, "leo"));
+  });
+
+  it("measures your stretch against the real tanks, so the penalty never compounds", () => {
+    const real = template("falcon9").design;
+    // Two drags of 1.25× each, built from the real stage, equal one 1.5625× stretch.
+    const once = stretchFromReal(real, real, 0, 1.5625);
+    const twice = stretchFromReal(stretchFromReal(real, real, 0, 1.25), real, 0, 1.5625);
+    expect(twice).toEqual(once);
+    expect(once).toEqual(applyAction(real, { type: "scale-tanks", stageIndex: 0, factor: 1.5625 }));
+    // A booster added underneath doesn't confuse which real stage the second stage came from.
+    const stacked = applyAction(real, { type: "add-stage" });
+    expect(realStageFor(stacked, real, 2)).toBe(real.stages[1]);
+    expect(realStageFor(stacked, real, 1)).toBe(real.stages[0]);
+  });
+});
+
+describe("explainCurve", () => {
+  it("says where the best point is and why, in a sentence or two", () => {
+    const curve = tradeCurve(template("falcon9").design, { kind: "tank-stretch", stageIndex: 0 }, { destination: "leo" });
+    const text = explainCurve(curve);
+    expect(text).toMatch(/^The most payload is at 1\.\d\d×: \d+(\.\d)? t, \d+% more than the real \d+(\.\d)? t\./);
+    expect(text).toMatch(/thrust-to-weight/);
+  });
+
+  it("says when the real rocket is already at the peak", () => {
+    const curve = tradeCurve(template("saturn-v").design, { kind: "tank-stretch", stageIndex: 0 }, { destination: "leo" });
+    expect(explainCurve(curve)).toMatch(/^The real rocket already sits at the peak/);
+  });
+
+  it("adds what landing the recovered stages costs", () => {
+    const starship = template("starship").design;
+    const curve = tradeCurve(starship, { kind: "tank-stretch", stageIndex: 0 }, { destination: "leo" });
+    expect(explainCurve(curve, { design: starship })).toMatch(/Landing the Super Heavy and the Ship costs about \d+ t of payload\.$/);
+  });
+});
+
+function bisect(ok: (kg: number) => boolean): number {
+  let lo = 0;
+  let hi = 1_000;
+  while (ok(hi)) {
+    lo = hi;
+    hi *= 2;
+  }
+  for (let i = 0; i < 40; i++) {
+    const mid = (lo + hi) / 2;
+    if (ok(mid)) lo = mid;
+    else hi = mid;
+  }
+  return lo;
+}
