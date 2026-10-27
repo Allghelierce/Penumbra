@@ -358,3 +358,54 @@ export interface HistoricMission {
   stats: { label: string; value: string; meaning: string }[];
   sources: { title: string; url: string }[];
 }
+
+// ---- v2: start from a real rocket, then modify it ----
+
+export type TemplateId = "falcon9" | "saturn-v" | "electron" | "starship";
+
+/** A real launch vehicle the user starts from and then modifies. All figures are published ones, with sources. */
+export interface RocketTemplate {
+  id: TemplateId;
+  /** e.g. "Falcon 9 Block 5". */
+  name: string;
+  /** One line on what it was built for, e.g. "Reusable medium-lift launcher, first flown 2018". */
+  blurb: string;
+  /** The real vehicle as a Design: real stage propellant volumes, dry masses and engines; payloadMassKg = its LEO reference payload. */
+  design: Design;
+  /** Published payload to low Earth orbit, in kg (the calibration target for the physics model). */
+  realPayloadLeoKg: number;
+  sources: { title: string; url: string }[];
+}
+
+/** How a template is drawn on the napkin for a given (possibly modified) design. */
+export interface TemplateDrawing {
+  /** Clean hand-drawn outline, normalized to the 3:4 napkin. */
+  strokes: Stroke[];
+  /** Exact part boxes (no sketch reading needed), with stageIndex. */
+  parts: Part[];
+  /** Vertical extent of each stage's tank section on the napkin, [top, bottom] normalized, index 0 = bottom stage. Drag handles sit on these edges. */
+  stageBands: [number, number][];
+}
+
+/** One point on a trade-off curve: what happens to the rocket when one parameter changes. */
+export interface TradePoint {
+  /** The swept value, e.g. a tank stretch factor (1 = as built) or an engine count. */
+  x: number;
+  /** Maximum payload to the chosen destination at this x, in kg (0 if it can't make it). */
+  payloadKg: number;
+  totalDeltaVMps: number;
+  liftoffTwr: number;
+}
+
+/** A full sweep, plus where the real rocket and the best point sit on it. */
+export interface TradeCurve {
+  /** e.g. "Stage 1 tank stretch". */
+  label: string;
+  /** e.g. "×" or "engines". */
+  unit: string;
+  points: TradePoint[];
+  /** x of the real, unmodified rocket. */
+  realX: number;
+  /** x with the highest payload. */
+  bestX: number;
+}
