@@ -67,6 +67,8 @@ export function setLaunchAudioMuted(next: boolean) {
     // Private mode: the toggle still works for this visit.
   }
   if (ctx && master) master.gain.setTargetAtTime(next ? 0 : MASTER_GAIN, ctx.currentTime, 0.05);
+  // Lets the narrator (VoiceDock) cut a line in progress when sound is turned off.
+  window.dispatchEvent(new CustomEvent("penumbra:mute", { detail: next }));
 }
 
 let lastQuindar = -Infinity;

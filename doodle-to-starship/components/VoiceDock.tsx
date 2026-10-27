@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState, type FormEvent } from "react";
 import { playQuindar, unlockLaunchAudio } from "@/components/LaunchScene";
+import { isLaunchAudioMuted, setLaunchAudioMuted } from "@/components/launch/audio";
 import TypeOut from "@/components/TypeOut";
 import type { Analysis, Design, DesignAction, Phase, Poll, Review } from "@/lib/design";
 import { parseReply } from "@/lib/mission-control";
@@ -188,7 +189,16 @@ export default function VoiceDock({
   variant = "dock",
 }: VoiceDockProps) {
   const [mode, setMode] = useState<Mode>("checking");
+  // One mute for everything: the launch's "Sound off" and the narrator toggle share the launch
+  // audio mute (persisted by launch/audio), so either one silences rumble, Quindar and voice.
   const [muted, setMuted] = useState(false);
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- sync from storage after hydration
+    setMuted(isLaunchAudioMuted());
+    const onMute = (e: Event) => setMuted(Boolean((e as CustomEvent<boolean>).detail));
+    window.addEventListener("penumbra:mute", onMute);
+    return () => window.removeEventListener("penumbra:mute", onMute);
+  }, []);
   const instance = useRef(Symbol("voice"));
   // On every mount (page load, Fast Refresh, StrictMode): claim the voice, and treat whatever
   // narration and offer are already showing as heard, so a remount never speaks.
@@ -424,7 +434,7 @@ export default function VoiceDock({
    */
   const speakLine = useCallback(async (text: string, speaker: string, index?: number): Promise<void> => {
     if (penDown()) return;
-    if (mutedRef.current || silentHere() || owner !== instance.current) {
+    if (mutedRef.current || isLaunchAudioMuted() || silentHere() || owner !== instance.current) {
       // Muted: keep the pacing (poll tiles still light one by one), just say nothing.
       setReplyCaption(text);
       await new Promise((resolve) => setTimeout(resolve, SILENT_LINE_MS));
@@ -726,8 +736,14 @@ export default function VoiceDock({
         type="button"
         aria-label={muted ? "Unmute the narrator" : "Mute the narrator"}
         aria-pressed={muted}
-        onClick={() => setMuted((m) => !m)}
-        className="fixed bottom-4 right-4 z-50 flex h-8 w-8 items-center justify-center rounded-full border border-white/70 bg-black/60 text-[14px] leading-none text-white transition-colors hover:bg-white hover:text-black"
+        onClick={() => {
+          const next = !muted;
+          unlockLaunchAudio();
+          setLaunchAudioMuted(next);
+          setMuted(next);
+        }}
+        // Above the launch overlay (z-50); during a flight, tucked under its top-right controls.
+        className={`fixed ${phase === "launch" ? "right-4 top-14" : "bottom-4 right-4"} z-[70] flex h-8 w-8 items-center justify-center rounded-full border border-white/70 bg-black/60 text-[14px] leading-none text-white transition-colors hover:bg-white hover:text-black`}
       >
         {muted ? "🔇" : "🔊"}
       </button>
