@@ -2,7 +2,10 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import AttractMode from "@/components/AttractMode";
+import EditHandles, { type Stretch } from "@/components/EditHandles";
 import LaunchScene, { unlockLaunchAudio } from "@/components/LaunchScene";
+import ModifyPanel from "@/components/ModifyPanel";
+import { realStageIndex, stretchFromReal, stretchOf } from "@/components/modify/trade";
 import NapkinCanvas from "@/components/NapkinCanvas";
 import NapkinAssist from "@/components/NapkinAssist";
 import NapkinRender from "@/components/NapkinRender";
@@ -10,7 +13,7 @@ import { PenumbraLockup } from "@/components/PenumbraLogo";
 import PollConsole from "@/components/PollConsole";
 import RedPenOverlay from "@/components/RedPenOverlay";
 import SpaceBackdrop from "@/components/SpaceBackdrop";
-import VerdictPanel from "@/components/VerdictPanel";
+import VerdictPanel, { FlightLog } from "@/components/VerdictPanel";
 import VoiceDock from "@/components/VoiceDock";
 import type { NapkinRect } from "@/components/launch/engine";
 import { applyAction } from "@/lib/actions";
@@ -36,9 +39,12 @@ import type {
   Review,
   ReviewRequest,
   ReviewResponse,
+  RocketTemplate,
   SketchReading,
   Stroke,
 } from "@/lib/design";
+import { drawTemplate, TEMPLATES } from "@/lib/templates";
+import TemplatePicker from "@/components/TemplatePicker";
 import { strokesToPng } from "@/lib/napkin";
 import { buildReview } from "@/lib/redpen";
 import { readFromGeometry } from "@/lib/sketch/geometry";
@@ -55,7 +61,7 @@ import { calloutFor, offerFor, pollRoom } from "@/lib/mission-control";
 import { analyze, DESTINATIONS, simulateFlight } from "@/lib/physics";
 import { flyAsRealRocket } from "@/lib/presets";
 import { diagnose, sensitivities } from "@/lib/diagnosis";
-import type { ReviewIssue, Trade } from "@/components/DesignReview";
+import DesignReview, { type ReviewIssue, type Trade } from "@/components/DesignReview";
 
 const DESTINATION_CHIPS: { id: DestinationId; label: string }[] = [
   { id: "leo", label: "Orbit" },
@@ -121,6 +127,17 @@ const LAST_EVENTS: FlightEventKind[] = ["impact", "orbit", "arrival", "breakup",
 
 /** The flow, one step at a time, one primary button per step. */
 const STEPS = ["Pick", "Sketch", "Diagnose", "Build", "Fly", "Debrief"];
+/** Modifying a real rocket has no Build: its steps are 0, 1, 2, 4 and 5 of the flow above. */
+const TEMPLATE_STEPS = ["Pick", "Modify", "Check", "Fly", "Recap"];
+const TEMPLATE_PURPOSES = ["Choose a real rocket", "Stretch, swap, add a stage", "Red pen checks your changes", "Fly your version", "What your changes did"];
+/** Step bar position of a flow step, and back: a template skips Build (3). */
+const toBar = (step: number) => (step > 3 ? step - 1 : step);
+const fromBar = (index: number) => (index >= 3 ? index + 1 : index);
+
+/** A template is read exactly: its drawing's parts, no sketch reading. */
+function templateReading(template: RocketTemplate, design: Design): SketchReading {
+  return { design, parts: drawTemplate(template, design).parts, confidence: 1, problem: null };
+}
 
 /** What a read of the drawing found, in a few words: "2 stages, 9 engines, landing legs". */
 function describeRead(d: Design): string {
@@ -172,6 +189,12 @@ export default function Studio() {
   const [step, setStep] = useState(0);
   // The real flight being diagnosed, or null when drawing your own.
   const [mission, setMission] = useState<HistoricMission | null>(null);
+  // The real rocket being modified (the main mode), or null.
+  const [template, setTemplate] = useState<RocketTemplate | null>(null);
+  // A tank stretch still being dragged on the napkin, for live numbers before it's applied.
+  const [stretch, setStretch] = useState<Stretch | null>(null);
+  // The real stage the trade chart sweeps: the one last touched.
+  const [chartStage, setChartStage] = useState(0);
   // "Fix and try again": the engineer's fix drawn in blue over the lost vehicle, before the comeback flight.
   const [fix, setFix] = useState<{ strokes: Stroke[]; note: string } | null>(null);
   // What one read of the drawing found ("Grok vision identified: …").
@@ -243,11 +266,20 @@ export default function Studio() {
     }
   }, [design, analysis]);
 
+  // A template is drawn from the design, so every edit redraws it.
+  const drawing = useMemo(() => (template && design ? drawTemplate(template, design) : null), [template, design]);
+  const napkinStrokes = drawing ? drawing.strokes : strokes;
+  // The design with the drag in progress, built the same way the drag will be applied.
+  const preview = useMemo(() => {
+    if (!template || !design || !stretch) return null;
+    return stretchFromReal(design, template.design, stretch.stageIndex, stretchOf(design, template.design, stretch.stageIndex) * stretch.factor);
+  }, [template, design, stretch]);
+
   // Latest values for callbacks that outlive a render (voice tool calls, async responses).
-  const latest = useRef({ reading, design, strokes, destination, review, mission });
+  const latest = useRef({ reading, design, strokes, destination, review, mission, template });
   useEffect(() => {
-    latest.current = { reading, design, strokes, destination, review, mission };
-  }, [reading, design, strokes, destination, review, mission]);
+    latest.current = { reading, design, strokes, destination, review, mission, template };
+  }, [reading, design, strokes, destination, review, mission, template]);
   // Mission control: the GO/NO-GO poll before launch, and the spoken offer after a flight.
   const [poll, setPoll] = useState<Poll | null>(null);
   const [revealed, setRevealed] = useState(0);
@@ -391,14 +423,16 @@ export default function Studio() {
     const box = napkinArea.current?.querySelector(".napkin")?.getBoundingClientRect();
     const napkinRect = box ? { left: box.left, top: box.top, width: box.width, height: box.height } : null;
     const flown = latest.current.mission;
+    // A real flight already has its photo, and a real rocket flies its drawing: no outcome render to pay for.
+    const unrendered = Boolean(flown || latest.current.template);
     const trace = flown ? historicTrace(flown) : simulateFlight(current, currentAnalysis);
     prefetchNarration(trace.events.map((e) => calloutFor(e, current, trace)));
-    setFlight({ trace, renderUrl: null, renderState: flown ? "none" : "loading", napkinRect });
+    setFlight({ trace, renderUrl: null, renderState: unrendered ? "none" : "loading", napkinRect });
     setFlightId((n) => n + 1);
     setStep(4);
     setAttempts((prev) => [...prev, { n: prev.length + 1, design: current, analysis: currentAnalysis, maxAltitudeKm: trace.maxAltitudeKm }]);
     setPhase("launch");
-    if (flown) return; // a real flight already has its photo; no outcome render to pay for
+    if (unrendered) return;
     const body: RenderRequest = {
       design: current,
       analysis: currentAnalysis,
@@ -432,16 +466,33 @@ export default function Studio() {
         return;
       }
       setOffer(null);
-      const { design: current, reading: read } = latest.current;
+      const { design: current, reading: read, template: real } = latest.current;
       if (action.type === "set-destination") setDestination(action.destination);
       if (!current || !read) return;
-      const nextDesign = action.type === "review" ? current : applyAction(current, action);
-      const nextReading = { ...read, design: nextDesign };
+      let nextDesign = action.type === "review" ? current : applyAction(current, action);
+      if (real && action.type === "scale-tanks") {
+        // A drag's factor is relative to the tanks as they are; rebuild from the real stage so stretches never compound.
+        const x = stretchOf(current, real.design, action.stageIndex) * action.factor;
+        nextDesign = stretchFromReal(current, real.design, action.stageIndex, x);
+      }
+      if (real && (action.type === "scale-tanks" || action.type === "set-engines")) {
+        const j = realStageIndex(current, real.design, action.stageIndex);
+        if (j >= 0) setChartStage(j);
+      }
+      const nextReading = real ? templateReading(real, nextDesign) : { ...read, design: nextDesign };
       const nextAnalysis = safeAnalyze(nextDesign);
       latest.current = { ...latest.current, reading: nextReading, design: nextDesign };
       setDesign(nextDesign);
       setReading(nextReading);
-      if (nextAnalysis) void requestReview(nextReading, nextAnalysis);
+      if (!nextAnalysis) return;
+      if (!real) void requestReview(nextReading, nextAnalysis);
+      else if (latest.current.review) {
+        // A real rocket is re-marked locally, and only once it's been checked.
+        const next = buildReview(nextReading, nextAnalysis);
+        latest.current = { ...latest.current, review: next };
+        setReview(next);
+        setReviewKey((k) => k + 1);
+      }
     },
     [requestReview],
   );
@@ -531,6 +582,8 @@ export default function Studio() {
     setError(null);
     setIdentified(null);
     setFix(null);
+    setTemplate(null);
+    setStretch(null);
     setPhase("draw");
   }
 
@@ -579,6 +632,65 @@ export default function Studio() {
     clearAll();
     setMission(null);
     setStep(1);
+  }
+
+  /** Start from a real rocket: it's on the napkin as built, ready to modify. */
+  function pickTemplate(t: RocketTemplate) {
+    clearAll();
+    setMission(null);
+    const read = templateReading(t, t.design);
+    latest.current = { ...latest.current, template: t, mission: null, design: t.design, reading: read, review: null, destination: t.design.destination };
+    setTemplate(t);
+    setDestination(t.design.destination);
+    setDesign(t.design);
+    setReading(read);
+    setChartStage(0);
+    setPhase("reviewed");
+    setStep(1);
+  }
+
+  /** Back to the real rocket as built; the destination and payload stay. */
+  function resetTemplate() {
+    const { template: t, design: current } = latest.current;
+    if (!t || !current) return;
+    const nextDesign = { ...t.design, destination: current.destination, payloadMassKg: current.payloadMassKg };
+    const read = templateReading(t, nextDesign);
+    latest.current = { ...latest.current, design: nextDesign, reading: read };
+    setDesign(nextDesign);
+    setReading(read);
+    setReview(null);
+  }
+
+  /** Check a modified rocket: a laser sweep over the drawing, then the red pen on its exact parts. Local, no API. */
+  async function checkTemplate() {
+    const { design: current, reading: read } = latest.current;
+    const currentAnalysis = safeAnalyze(current);
+    if (!current || !read || !currentAnalysis) return;
+    const id = ++runs.current.check;
+    setStretch(null);
+    setStep(2);
+    setError(null);
+    setReview(null);
+    setPhase("reading");
+    await wait(1100);
+    if (id !== runs.current.check) return;
+    // An edit during the sweep (voice, the destination chips) wins: mark the latest design.
+    const final = latest.current.reading ?? read;
+    const finalAnalysis = safeAnalyze(final.design) ?? currentAnalysis;
+    const marks = buildReview(final, finalAnalysis);
+    latest.current = { ...latest.current, review: marks };
+    setReview(marks);
+    setReviewKey((k) => k + 1);
+    setPhase("reviewed");
+    setNarration(marks.summary);
+  }
+
+  /** Pick a point on the trade chart: that stage's tanks become x times the real ones. */
+  function pickStretch(stageIndex: number, x: number) {
+    const { design: current, template: t } = latest.current;
+    if (!current || !t) return;
+    const factor = x / stretchOf(current, t.design, stageIndex);
+    if (Math.abs(factor - 1) > 1e-6) handleAction({ type: "scale-tanks", stageIndex, factor });
   }
 
   function anotherMission() {
@@ -650,6 +762,12 @@ export default function Studio() {
       anotherMission();
       return;
     }
+    if (template) {
+      // Check → Modify drops the markup; after a flight, back is the check of what flew.
+      if (step === 2) backToModify();
+      else void checkTemplate();
+      return;
+    }
     if (step === 2) {
       runs.current.check++; // a diagnosis still in flight lands nowhere
       checking.current = false;
@@ -665,9 +783,18 @@ export default function Studio() {
   }
   useEffect(() => {
     escRef.current = () => {
-      if (step === 1) goBack();
+      // Not while modifying: Esc there cancels a drag on the napkin.
+      if (step === 1 && !template) goBack();
     };
   });
+
+  /** From Check or the recap back to the handles: the red pen comes off until the next check. */
+  function backToModify() {
+    runs.current.check++; // a check still sweeping lands nowhere
+    setReview(null);
+    setPhase("reviewed");
+    setStep(1);
+  }
 
   /** Jump back to a finished step from the step bar: the same moves as Back, as many as it takes. */
   function jumpTo(target: number) {
@@ -679,6 +806,11 @@ export default function Studio() {
     }
     if (target === 4) {
       startLaunch(); // "Fly" from the debrief means fly it again
+      return;
+    }
+    if (template) {
+      if (target === 1) backToModify();
+      else void checkTemplate();
       return;
     }
     if (target === 1) {
@@ -778,11 +910,11 @@ export default function Studio() {
         </button>
         {step > 0 && (
           <span className="border-l border-rule pl-5 font-space text-[12px] font-semibold uppercase tracking-[0.2em] text-haze">
-            {mission ? "Real missions" : "Your design"}
+            {template ? "Modify a real rocket" : mission ? "Real missions" : "Your design"}
           </span>
         )}
         <div className="ml-auto flex items-center gap-2">
-          {!mission && step > 0 && step < 4 && (
+          {!mission && !template && step > 0 && step < 4 && (
             <Dropdown label={`Target: ${DESTINATION_CHIPS.find((c) => c.id === destination)?.label ?? DESTINATIONS[destination].name}`}>
               {(close) =>
                 DESTINATION_CHIPS.map((chip) => (
@@ -803,19 +935,23 @@ export default function Studio() {
           )}
         </div>
       </header>
-      <StepBar
-        steps={STEPS}
-        current={step}
-        onStep={jumpTo}
-        purposes={[
-          "Choose a real rocket",
-          mission ? "The engineer's napkin" : "Draw your spacecraft",
-          !mission ? "Red pen reviews your design" : mission.outcome === "lost" ? "Red pen finds what failed" : "See what made it work",
-          "See it real",
-          mission ? "Relive the flight" : "Fly your design",
-          mission ? (mission.outcome === "lost" ? "What SpaceX learned" : "How it came together") : "How it flew",
-        ]}
-      />
+      {template || (!mission && step === 0) ? (
+        <StepBar steps={TEMPLATE_STEPS} current={toBar(step)} onStep={(i) => jumpTo(fromBar(i))} purposes={TEMPLATE_PURPOSES} />
+      ) : (
+        <StepBar
+          steps={STEPS}
+          current={step}
+          onStep={jumpTo}
+          purposes={[
+            "Choose a real rocket",
+            mission ? "The engineer's napkin" : "Draw your spacecraft",
+            !mission ? "Red pen reviews your design" : mission.outcome === "lost" ? "Red pen finds what failed" : "See what made it work",
+            "See it real",
+            mission ? "Relive the flight" : "Fly your design",
+            mission ? (mission.outcome === "lost" ? "What SpaceX learned" : "How it came together") : "How it flew",
+          ]}
+        />
+      )}
 
       {step === 0 ? (
         // The stage clips (space-stage hides overflow); the list scrolls in its own layer above the backdrop.
@@ -823,8 +959,13 @@ export default function Studio() {
           <SpaceBackdrop />
           <div className="absolute inset-0 overflow-y-auto">
           <div className="mx-auto w-full max-w-[1200px] px-10 py-10">
-            <h2 className="font-space text-[26px] font-semibold uppercase tracking-[0.1em] text-white">Pick a real flight to diagnose</h2>
-            <p className="mb-6 mt-1 text-[15px] text-haze">Each rocket is drawn on a napkin. Find what broke, watch it get built, then fly what actually happened.</p>
+            <h2 className="font-space text-[26px] font-semibold uppercase tracking-[0.1em] text-white">Start from a real rocket</h2>
+            <p className="mb-6 mt-1 text-[15px] text-haze">
+              Stretch its tanks, swap its engines, add a stage. Every number is the real rocket&apos;s, next to what your change does to it.
+            </p>
+            <TemplatePicker templates={TEMPLATES} onPick={pickTemplate} />
+            <h2 className="mt-14 font-space text-[20px] font-semibold uppercase tracking-[0.1em] text-white">Real missions</h2>
+            <p className="mb-6 mt-1 text-[15px] text-haze">Case studies: find what broke on a real flight, then fly what actually happened.</p>
             <MissionPicker missions={FEATURED_MISSIONS} onPick={pickMission} onDrawOwn={drawOwn} />
             {MORE_FLIGHTS.length > 0 && (
               <div className="mt-10 pb-6">
@@ -878,9 +1019,9 @@ export default function Studio() {
             <SpaceBackdrop />
             <div ref={napkinArea} className="flex min-h-0 w-full flex-1 justify-center">
               <NapkinCanvas
-                strokes={strokes}
+                strokes={napkinStrokes}
                 onChange={changeStrokes}
-                disabled={phase === "reading" || Boolean(mission)}
+                disabled={phase === "reading" || Boolean(mission) || Boolean(template)}
                 hint={
                   <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center gap-2 px-6 text-center">
                     <p className="font-space text-[20px] font-semibold uppercase tracking-[0.14em] text-white/85">Draw your spacecraft here</p>
@@ -907,7 +1048,7 @@ export default function Studio() {
                   {/* From Build on, a real flight keeps only the failed part's outline: a red highlight over the photo. */}
                   <div className={`absolute inset-0 transition-opacity duration-300 ${stale ? "opacity-30" : ""} ${highlightOnly ? "failed-highlight" : ""}`}>
                     <RedPenOverlay
-                      parts={reviewed && !highlightOnly ? reading.parts : []}
+                      parts={reviewed && !highlightOnly && (!template || review) ? reading.parts : []}
                       marks={reviewed ? (highlightOnly ? (review?.marks ?? []).filter((m) => m.kind === "outline") : (review?.marks ?? [])) : []}
                       playKey={String(reviewKey)}
                       scanning={phase === "reading"}
@@ -919,8 +1060,11 @@ export default function Studio() {
                     />
                   </div>
                 </NapkinRender>
-                {!mission && <NapkinAssist strokes={strokes} destination={destination} onKeep={changeStrokes} active={phase === "draw"} />}
+                {!mission && !template && <NapkinAssist strokes={strokes} destination={destination} onKeep={changeStrokes} active={phase === "draw"} />}
                 {fix && <FixOverlay strokes={fix.strokes} note={fix.note} />}
+                {template && design && drawing && step === 1 && phase !== "poll" && (
+                  <EditHandles drawing={drawing} design={design} onAction={handleAction} onPreview={setStretch} />
+                )}
               </NapkinCanvas>
             </div>
 
@@ -928,7 +1072,7 @@ export default function Studio() {
               <PollConsole poll={poll} revealed={revealed} onGo={goForLaunch} onScrub={scrub} onFix={fixAndRepoll} />
             ) : (
               <div className="flex w-full items-center justify-center gap-2">
-                {!mission && step <= 3 && (
+                {!mission && !template && step <= 3 && (
                   <>
                     <button
                       type="button"
@@ -957,7 +1101,27 @@ export default function Studio() {
                     ← Back
                   </button>
                 )}
-                {step === 1 && (
+                {template && step === 1 && (
+                  <button type="button" onClick={() => void checkTemplate()} disabled={!analysis || stretch !== null} className="btn-solid h-11 px-8 text-[12px]">
+                    Check it →
+                  </button>
+                )}
+                {template && step === 2 && (
+                  <button type="button" onClick={startLaunch} disabled={phase !== "reviewed" || !analysis} className="btn-solid h-11 px-8 text-[12px]">
+                    {phase === "reading" ? "Checking…" : "Fly it →"}
+                  </button>
+                )}
+                {template && step === 5 && (
+                  <>
+                    <button type="button" onClick={backToModify} className="btn-outline h-11 px-6 text-[12px]">
+                      Modify again
+                    </button>
+                    <button type="button" onClick={anotherMission} className="btn-solid h-11 px-8 text-[12px]">
+                      Try another rocket
+                    </button>
+                  </>
+                )}
+                {!template && step === 1 && (
                   <button
                     type="button"
                     onClick={mission ? diagnoseMission : diagnoseOwn}
@@ -967,7 +1131,7 @@ export default function Studio() {
                     Diagnose →
                   </button>
                 )}
-                {step === 2 && (
+                {!template && step === 2 && (
                   <button
                     type="button"
                     onClick={build}
@@ -977,12 +1141,12 @@ export default function Studio() {
                     {phase === "reading" ? "Diagnosing…" : "Build it →"}
                   </button>
                 )}
-                {step === 3 && (
+                {!template && step === 3 && (
                   <button type="button" onClick={startLaunch} disabled={!reviewed || !analysis || fix !== null} className="btn-solid h-11 px-8 text-[12px]">
                     Fly it →
                   </button>
                 )}
-                {step >= 4 && (
+                {!template && step >= 4 && (
                   <button type="button" onClick={anotherMission} className="btn-solid h-11 px-8 text-[12px]">
                     Try another mission
                   </button>
@@ -990,13 +1154,44 @@ export default function Studio() {
               </div>
             )}
             <p className={`h-5 text-[13px] ${error ? "text-nogo" : "text-haze"}`} aria-live="polite">
-              {error ?? (!mission && reviewed && issues.some((issue) => issue.severity !== "ok") ? "Redraw to fix the numbered issues, then diagnose again." : "")}
+              {error ??
+                (!mission && reviewed && issues.some((issue) => issue.severity !== "ok")
+                  ? template
+                    ? "Go back to Modify to fix the numbered issues, or fly it as it is."
+                    : "Redraw to fix the numbered issues, then diagnose again."
+                  : "")}
             </p>
           </section>
 
           {/* Bottom padding keeps the last row clear of the narrator's mute toggle (fixed bottom-right). */}
           <section className="min-h-0 overflow-y-auto border-l border-rule bg-black pb-14">
-            {mission ? (
+            {template && design ? (
+              <ModifyPanel
+                template={template}
+                design={design}
+                preview={preview}
+                onAction={handleAction}
+                onReset={resetTemplate}
+                chartStage={chartStage}
+                onChartStage={setChartStage}
+                onPickStretch={pickStretch}
+                top={
+                  step === 2 && review ? (
+                    <section className="module">
+                      <header className="module-head">
+                        <h3 className="font-space text-[11px] font-semibold uppercase tracking-[0.22em] text-white/70">Red pen</h3>
+                        <span className={`text-[12px] ${issues.some((i) => i.severity !== "ok") ? "text-nogo" : "text-go-signal"}`}>
+                          {issues.filter((i) => i.severity !== "ok").length || "No"} {issues.filter((i) => i.severity !== "ok").length === 1 ? "issue" : "issues"}
+                        </span>
+                      </header>
+                      <DesignReview issues={issues} trades={trades} selected={selectedIssue} onSelect={selectIssue} />
+                    </section>
+                  ) : step === 5 && attempts.length > 0 ? (
+                    <FlightLog attempts={attempts} recap={flightRecap} />
+                  ) : null
+                }
+              />
+            ) : mission ? (
               step >= 4 ? (
                 <MissionFile mission={mission} onLaunch={startLaunch} canLaunch={Boolean(reviewed && analysis)} />
               ) : (
@@ -1063,7 +1258,7 @@ export default function Studio() {
       {phase === "launch" && flight && reading && design && analysis && (
         <LaunchScene
           key={flightId}
-          strokes={strokes}
+          strokes={napkinStrokes}
           reading={{ ...reading, design }}
           analysis={analysis}
           trace={flight.trace}

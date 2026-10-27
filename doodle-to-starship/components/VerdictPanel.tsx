@@ -294,7 +294,7 @@ const OUTCOME: Record<Verdict, { text: string; tone: string }> = {
 const altitude = (km: number) => (km < 1 ? "0 km" : `${Math.round(km).toLocaleString("en-US")} km`);
 
 /** One row per launch, newest first, with how much better (or worse) each did than the one before. */
-function FlightLog({ attempts, recap }: { attempts: Attempt[]; recap: Recap | null }) {
+export function FlightLog({ attempts, recap }: { attempts: Attempt[]; recap: Recap | null }) {
   const rows = [...attempts].reverse();
   const next = recap?.improvements[0];
   return (
