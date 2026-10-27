@@ -22,6 +22,7 @@ import type {
   Design,
   DesignAction,
   DestinationId,
+  FlightEventKind,
   FlightTrace,
   HistoricMission,
   Recap,
@@ -112,6 +113,12 @@ const FAMILIES = [
   { sketchId: "mars-ship", label: "Starship" },
 ];
 
+/** NapkinRender drops its render when its reset key is an empty array: used below the Build step. */
+const NO_STROKES: Stroke[] = [];
+
+/** Flight events after which only the end card is left: the step bar moves on to Debrief. */
+const LAST_EVENTS: FlightEventKind[] = ["impact", "orbit", "arrival", "breakup", "pad-failure"];
+
 /** The flow, one step at a time, one primary button per step. */
 const STEPS = ["Pick", "Sketch", "Diagnose", "Build", "Fly", "Debrief"];
 
@@ -159,6 +166,8 @@ function priorArtQuery(design: Design): string {
 
 export default function Studio() {
   const [phase, setPhase] = useState<Phase>("draw");
+  // Each launch gets a fresh LaunchScene, so a new flight never inherits the last one's trace.
+  const [flightId, setFlightId] = useState(0);
   // Pick → Sketch → Diagnose → Build → Fly → Debrief.
   const [step, setStep] = useState(0);
   // The real flight being diagnosed, or null when drawing your own.
@@ -385,6 +394,7 @@ export default function Studio() {
     const trace = flown ? historicTrace(flown) : simulateFlight(current, currentAnalysis);
     prefetchNarration(trace.events.map((e) => calloutFor(e, current, trace)));
     setFlight({ trace, renderUrl: null, renderState: flown ? "none" : "loading", napkinRect });
+    setFlightId((n) => n + 1);
     setStep(4);
     setAttempts((prev) => [...prev, { n: prev.length + 1, design: current, analysis: currentAnalysis, maxAltitudeKm: trace.maxAltitudeKm }]);
     setPhase("launch");
@@ -405,6 +415,8 @@ export default function Studio() {
       });
   }, []);
 
+  // The pending "Fix it & fly again" comeback launch; anything that moves the flow on cancels it.
+  const retryTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   // handleAction is memoized; it reaches the latest openPoll (defined below) through this ref.
   const openPollRef = useRef<() => void>(() => {});
   // The Cmd+Z listener is registered once; it reaches the latest undo (defined below) through this ref.
@@ -500,6 +512,7 @@ export default function Studio() {
 
   function clearAll() {
     replay.current?.abort();
+    if (retryTimer.current) clearTimeout(retryTimer.current);
     // Anything still in flight belongs to the old sketch.
     for (const key of Object.keys(runs.current) as (keyof typeof runs.current)[]) runs.current[key]++;
     checking.current = false;
@@ -608,7 +621,6 @@ export default function Studio() {
   }
 
   /** After a lost flight: draw the fix on the same vehicle, then fly the mission where that fix flew. */
-  const retryTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   function fixAndRetry() {
     const lostFlight = latest.current.mission;
     const read = latest.current.reading;
@@ -659,14 +671,17 @@ export default function Studio() {
 
   /** Jump back to a finished step from the step bar: the same moves as Back, as many as it takes. */
   function jumpTo(target: number) {
-    if (target >= step || step === 4) return; // never mid-flight
+    if (target >= step || phase === "launch") return; // never mid-flight
+    if (retryTimer.current) clearTimeout(retryTimer.current);
     if (target === 0) {
-      if (retryTimer.current) clearTimeout(retryTimer.current);
       anotherMission();
       return;
     }
+    if (target === 4) {
+      startLaunch(); // "Fly" from the debrief means fly it again
+      return;
+    }
     if (target === 1) {
-      if (retryTimer.current) clearTimeout(retryTimer.current);
       setFix(null);
       runs.current.check++;
       checking.current = false;
@@ -681,6 +696,13 @@ export default function Studio() {
     setFix(null);
     setStep(target);
   }
+
+  useEffect(
+    () => () => {
+      if (retryTimer.current) clearTimeout(retryTimer.current);
+    },
+    [],
+  );
 
   /** Diagnose your own drawing: the full read and red-pen review. */
   async function diagnoseOwn() {
@@ -870,7 +892,7 @@ export default function Studio() {
                   reading={step >= 3 && reviewed && !unreadable ? reading : null}
                   url={step >= 3 ? concept.url : null}
                   loading={step >= 3 && concept.loading}
-                  resetKey={strokes}
+                  resetKey={step >= 3 ? strokes : NO_STROKES}
                   sticker={
                     !mission && patchUrl ? (
                       // eslint-disable-next-line @next/next/no-img-element
@@ -956,7 +978,7 @@ export default function Studio() {
                   </button>
                 )}
                 {step === 3 && (
-                  <button type="button" onClick={startLaunch} disabled={!reviewed || !analysis} className="btn-solid h-11 px-8 text-[12px]">
+                  <button type="button" onClick={startLaunch} disabled={!reviewed || !analysis || fix !== null} className="btn-solid h-11 px-8 text-[12px]">
                     Fly it →
                   </button>
                 )}
@@ -1040,6 +1062,7 @@ export default function Studio() {
 
       {phase === "launch" && flight && reading && design && analysis && (
         <LaunchScene
+          key={flightId}
           strokes={strokes}
           reading={{ ...reading, design }}
           analysis={analysis}
@@ -1048,7 +1071,10 @@ export default function Studio() {
           renderState={flight.renderState}
           vehicleImageUrl={concept.url}
           napkinRect={flight.napkinRect}
-          onEvent={(event) => setNarration(calloutFor(event, design, flight.trace))}
+          onEvent={(event) => {
+            setNarration(calloutFor(event, design, flight.trace));
+            if (LAST_EVENTS.includes(event.kind)) setStep(5);
+          }}
           onDone={() => {
             setFlight(null);
             setPhase("reviewed");
