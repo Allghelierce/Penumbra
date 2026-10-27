@@ -119,7 +119,7 @@ function curve(segments: number, at: (t: number) => Point): Point[] {
 }
 
 /** Resample a path and add a small pencil wobble, clamped to the napkin. */
-function hand(path: Point[], rand: () => number): Point[] {
+export function hand(path: Point[], rand: () => number): Point[] {
   const out: Point[] = [];
   const phase = rand() * Math.PI * 2;
   let travelled = 0;
@@ -142,7 +142,7 @@ function hand(path: Point[], rand: () => number): Point[] {
   return out;
 }
 
-function seeded(seed: number): () => number {
+export function seeded(seed: number): () => number {
   let a = seed >>> 0;
   return () => {
     a = (a + 0x6d2b79f5) >>> 0;

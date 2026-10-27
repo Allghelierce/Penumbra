@@ -1,0 +1,115 @@
+import { describe, expect, it } from "vitest";
+
+import { applyAction } from "./actions";
+import type { Design, TemplateId } from "./design";
+import { analyze, ENGINES, PROPELLANT_DENSITY_KG_M3 } from "./physics";
+import { TANK_FILL } from "./physics/data";
+import { drawTemplate, TEMPLATES, templateById } from "./templates";
+
+const lb = (pounds: number) => Math.round(pounds * 0.45359237);
+
+/** Published propellant per stage (bottom first), and lift-off mass, from the sources in templates.ts. */
+const PUBLISHED: Record<TemplateId, { propellantKg: number[]; liftoffKg: [number, number] }> = {
+  falcon9: { propellantKg: [395_700, 92_670], liftoffKg: [549_000, 549_000] },
+  "saturn-v": {
+    propellantKg: [lb(4_881_000) - lb(303_000), lb(1_037_000) - lb(95_000), lb(265_600) - lb(33_600)],
+    liftoffKg: [lb(6_221_823), lb(6_537_238)],
+  },
+  electron: { propellantKg: [9_250, 2_050], liftoffKg: [13_000, 13_000] },
+  starship: { propellantKg: [3_400_000, 1_500_000], liftoffKg: [5_000_000, 5_000_000] },
+};
+
+const liftoffKg = (d: Design) =>
+  d.payloadMassKg +
+  d.stages.reduce((sum, s) => sum + (s.dryMassKg ?? 0) + s.tankVolumeM3 * PROPELLANT_DENSITY_KG_M3[s.propellant] * TANK_FILL, 0);
+
+describe("TEMPLATES", () => {
+  it("has the four rockets in order, each a LEO reference design with sources", () => {
+    expect(TEMPLATES.map((t) => t.id)).toEqual(["falcon9", "saturn-v", "electron", "starship"]);
+    for (const t of TEMPLATES) {
+      expect(t.design.destination, t.id).toBe("leo");
+      expect(t.design.payloadMassKg, t.id).toBe(t.realPayloadLeoKg);
+      expect(t.sources.length, t.id).toBeGreaterThan(0);
+      for (const s of t.sources) expect(s.url, t.id).toMatch(/^https:\/\//);
+      expect(templateById(t.id)).toBe(t);
+    }
+  });
+
+  it("holds exactly the published propellant in each stage, with real dry masses and known engines", () => {
+    for (const t of TEMPLATES) {
+      const published = PUBLISHED[t.id].propellantKg;
+      expect(t.design.stages).toHaveLength(published.length);
+      t.design.stages.forEach((s, i) => {
+        const kg = s.tankVolumeM3 * PROPELLANT_DENSITY_KG_M3[s.propellant] * TANK_FILL;
+        expect(Math.abs(kg - published[i]) / published[i], `${t.id} stage ${i}`).toBeLessThan(0.001);
+        expect(s.dryMassKg, `${t.id} stage ${i}`).toBeGreaterThan(0);
+        for (const c of s.engines) expect(ENGINES[c.engine], `${t.id} ${c.engine}`).toBeDefined();
+      });
+    }
+  });
+
+  it("weighs what the real vehicle weighs at lift-off (within 7%) and gets off the pad", () => {
+    for (const t of TEMPLATES) {
+      const [lo, hi] = PUBLISHED[t.id].liftoffKg;
+      const mass = liftoffKg(t.design);
+      expect(mass, t.id).toBeGreaterThan(lo * 0.93);
+      expect(mass, t.id).toBeLessThan(hi * 1.07);
+      expect(analyze(t.design).liftoffTwr, t.id).toBeGreaterThan(1);
+    }
+  });
+});
+
+describe("drawTemplate", () => {
+  const inBounds = (v: number) => v >= 0 && v <= 1;
+
+  it("draws each real rocket inside the napkin, stage bands stacked bottom-up, one tank part per stage", () => {
+    for (const t of TEMPLATES) {
+      const drawing = drawTemplate(t, t.design);
+      expect(drawing.strokes.length, t.id).toBeGreaterThan(8);
+      for (const s of drawing.strokes) for (const [x, y] of s.points) expect(inBounds(x) && inBounds(y), t.id).toBe(true);
+      for (const p of drawing.parts) {
+        const [x, y, w, h] = p.box;
+        expect(inBounds(x) && inBounds(y) && x + w <= 1.0001 && y + h <= 1.0001, `${t.id} ${p.label}`).toBe(true);
+      }
+      expect(drawing.stageBands).toHaveLength(t.design.stages.length);
+      for (let i = 0; i + 1 < drawing.stageBands.length; i++) {
+        expect(drawing.stageBands[i + 1][1], t.id).toBeLessThanOrEqual(drawing.stageBands[i][0] + 1e-9);
+      }
+      t.design.stages.forEach((_, i) => {
+        expect(drawing.parts.some((p) => p.kind === "tank" && p.stageIndex === i), `${t.id} tank ${i}`).toBe(true);
+      });
+      expect(drawTemplate(t, t.design)).toEqual(drawing);
+    }
+  });
+
+  it("lengthens a stretched stage relative to the others", () => {
+    for (const t of TEMPLATES) {
+      const len = (d: Design, i: number) => {
+        const [top, bottom] = drawTemplate(t, d).stageBands[i];
+        return bottom - top;
+      };
+      const stretched = applyAction(t.design, { type: "scale-tanks", stageIndex: 0, factor: 1.5 });
+      const before = len(t.design, 0) / len(t.design, t.design.stages.length - 1);
+      const after = len(stretched, 0) / len(stretched, stretched.stages.length - 1);
+      expect(after / before, t.id).toBeCloseTo(1.5, 1);
+    }
+  });
+
+  it("draws an added booster below and survives removed stages and big edits", () => {
+    for (const t of TEMPLATES) {
+      const added = applyAction(t.design, { type: "add-stage" });
+      const drawing = drawTemplate(t, added);
+      expect(drawing.stageBands).toHaveLength(t.design.stages.length + 1);
+      expect(drawing.stageBands[0][0], t.id).toBeGreaterThanOrEqual(drawing.stageBands[1][1] - 1e-9);
+      for (let i = 0; i < t.design.stages.length; i++) {
+        const fewer = applyAction(t.design, { type: "remove-stage", stageIndex: i });
+        expect(() => drawTemplate(t, fewer)).not.toThrow();
+      }
+      for (const factor of [0.5, 2, 4]) {
+        const d = applyAction(t.design, { type: "scale-tanks", stageIndex: t.design.stages.length - 1, factor });
+        for (const s of drawTemplate(t, d).strokes) for (const [x, y] of s.points) expect(inBounds(x) && inBounds(y)).toBe(true);
+      }
+    }
+    expect(drawTemplate(TEMPLATES[0], { ...TEMPLATES[0].design, stages: [] })).toEqual({ strokes: [], parts: [], stageBands: [] });
+  });
+});
