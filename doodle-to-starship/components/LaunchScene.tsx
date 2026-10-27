@@ -11,6 +11,7 @@ import type {
   Recap,
   SketchReading,
   Stroke,
+  TemplateId,
 } from "@/lib/design";
 import { BOUNDARIES, FAR_MARKS, LAYERS, ladderPos, ladderTop } from "./launch/atmosphere";
 import { PenumbraLockup } from "@/components/PenumbraLogo";
@@ -62,6 +63,13 @@ export interface LaunchSceneProps {
   onImprove?: (fix: DesignAction) => void;
   /** Optional: a real flight from history being replayed; the end card becomes its debrief. */
   mission?: HistoricMission | null;
+  /**
+   * Optional, for real-rocket templates: each stage's exact [top, bottom] on the napkin (bottom
+   * stage first, as in TemplateDrawing.stageBands), so the vehicle separates exactly at its stages.
+   */
+  stageBands?: [number, number][] | null;
+  /** Optional: which real rocket is flying (Starship's booster gets the tower catch). */
+  templateId?: TemplateId | null;
   /** Optional, for lost missions with a comeback: apply the real fix and fly again (primary button). */
   onFixRetry?: () => void;
 }
@@ -208,6 +216,8 @@ interface RunProps extends LaunchSceneProps {
 
 function LaunchRun(props: RunProps) {
   const [input] = useState(() => ({
+    templateId: props.templateId,
+    stageBands: props.stageBands,
     vehicleExpected: !!props.vehicleImageUrl,
     mission: props.mission,
     napkinRect: props.napkinRect,

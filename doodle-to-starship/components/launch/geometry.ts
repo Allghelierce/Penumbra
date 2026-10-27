@@ -53,7 +53,11 @@ const FALLBACK_STROKES: Stroke[] = [
   { points: [[0.57, 0.66], [0.64, 0.8], [0.64, 0.85], [0.57, 0.8]] },
 ];
 
-export function buildDoodle(strokes: Stroke[], parts: Part[], stageCount: number): Doodle {
+/**
+ * `bands` (from a real-rocket template) gives each stage's exact [top, bottom] on the napkin,
+ * bottom stage first; when present, the stages split exactly between them.
+ */
+export function buildDoodle(strokes: Stroke[], parts: Part[], stageCount: number, bands?: [number, number][] | null): Doodle {
   let lines = toNapkinUnits(strokes);
   let b = boxOf(lines);
   if (!b || Math.max(b.maxX - b.minX, b.maxY - b.minY) < 0.02) {
@@ -76,7 +80,7 @@ export function buildDoodle(strokes: Stroke[], parts: Part[], stageCount: number
     },
   }));
 
-  const splits = stageSplits(localParts, stageCount, box);
+  const splits = bands && bands.length >= 2 ? bandSplits(bands, cy, box) : stageSplits(localParts, stageCount, box);
   const edges = [Infinity, ...splits, -Infinity];
   // A stroke drawn along the stage line (the interstage) stays whole and rides with the
   // upper stage, instead of being chopped into dashes on both sides.
@@ -174,6 +178,18 @@ function stageSplits(parts: LocalPart[], stageCount: number, box: Box): number[]
     if (out.length === 0 || out[out.length - 1] - y > 0.06 * h) out.push(y);
   }
   return out;
+}
+
+/** Split lines (local y, bottom first) halfway between each stage band and the one above it. */
+function bandSplits(bands: [number, number][], cy: number, box: Box): number[] {
+  const h = box.maxY - box.minY;
+  const out: number[] = [];
+  for (let k = 1; k < bands.length; k++) {
+    const y = (bands[k - 1][0] + bands[k][1]) / 2 - cy;
+    if (!Number.isFinite(y) || y <= box.minY || y >= box.maxY) continue;
+    if (out.length === 0 || out[out.length - 1] - y > 0.02 * h) out.push(y);
+  }
+  return out.sort((a, b) => b - a);
 }
 
 /** The parts of a polyline with top <= y < bottom, cut exactly at the band edges. */

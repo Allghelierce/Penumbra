@@ -5,6 +5,7 @@ import {
   type FlightTrace,
   type HistoricMission,
   type SketchReading,
+  type TemplateId,
   type Stroke,
 } from "@/lib/design";
 import { ladderPos, ladderTop, layerAt } from "./atmosphere";
@@ -65,6 +66,10 @@ export interface NapkinRect {
 
 export interface LaunchInput {
   strokes: Stroke[];
+  /** Which real rocket this is, when flying a template (Starship's booster is caught by the tower). */
+  templateId?: TemplateId | null;
+  /** A real-rocket template's exact stage bands ([top, bottom] on the napkin, bottom stage first). */
+  stageBands?: [number, number][] | null;
   /** A vehicle picture is on its way: draw nothing (rather than the strokes) while it loads. */
   vehicleExpected?: boolean;
   /** A real flight being replayed; its id picks the scenario effects (crs7, ift1, falcon1-f1). */
@@ -112,7 +117,7 @@ export interface HudRefs {
 /** Doodle and plan for a launch, shared by the engine and the overlay's timeline. */
 export function planFor(input: LaunchInput): Plan {
   const design = input.reading.design;
-  const doodle = buildDoodle(input.strokes, input.reading.parts ?? [], design.stages?.length ?? 1);
+  const doodle = buildDoodle(input.strokes, input.reading.parts ?? [], design.stages?.length ?? 1, input.stageBands);
   return buildPlan(input.trace, input.analysis, design, doodle.pieces.length, input.mission?.id);
 }
 
@@ -233,11 +238,20 @@ export function startLaunch(
   }
 
   const design = input.reading.design;
-  const doodle = buildDoodle(input.strokes, input.reading.parts ?? [], design.stages?.length ?? 1);
+  const doodle = buildDoodle(input.strokes, input.reading.parts ?? [], design.stages?.length ?? 1, input.stageBands);
   const pieces = doodle.pieces;
   const plan = buildPlan(input.trace, input.analysis, design, pieces.length, input.mission?.id);
   /** Historic replay effects, by mission id. */
   const scenario = input.mission?.id ?? null;
+  // Booster recovery, shown picture-in-picture after first-stage separation: when the first stage
+  // is set to recover (a sketch that never says falls back to its landing legs; a template that
+  // doesn't is expendable), or at a mission timeline event that says the booster lands or is caught.
+  const landingCue = plan.cues.find((cue) => /\b(lands|landed|landing|caught|catch)\b/i.test(cue.event.label ?? ""));
+  const catchMode = input.templateId === "starship" || /\b(caught|catch)\b/i.test(landingCue?.event.label ?? "");
+  const recovers = design.stages?.[0]?.recover ?? (!input.templateId && !!design.features?.includes("landing-legs"));
+  const landsByDesign = pieces.length >= 2 && plan.seps.length >= 1 && recovers;
+  const landAt = landingCue ? landingCue.at : landsByDesign ? plan.seps[0] + 1.2 : null;
+  const LAND_DUR = 3.6;
   /** Reduced motion: no camera shake or plasma shimmer. */
   const calm = typeof window !== "undefined" && !!window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
   let simNow = 0;
@@ -250,7 +264,11 @@ export function startLaunch(
   const pal = readPalette();
   const Hn = doodle.height;
   const Wn = doodle.width;
-  const nuPerKm = (Hn / Math.min(400, Math.max(5, design.heightM || 50))) * 1000;
+  const heightM = Math.min(400, Math.max(5, design.heightM || 50));
+  const nuPerKm = (Hn / heightM) * 1000;
+  // Real size on screen: a Falcon 9 (70 m) stands about a third of the screen tall; an Electron
+  // (18 m) about half that; a Saturn V (111 m) or Starship (121 m) towers over both.
+  const sizeK = Math.min(1.35, Math.max(0.45, Math.sqrt(heightM / 70)));
   const orbitish = plan.outcome === "orbit" || plan.outcome === "destination";
   const body = plan.outcome === "destination" ? targetBodyFor(design.destination) : null;
 
@@ -366,7 +384,8 @@ export function startLaunch(
     return {
       dx: dir * 0.04 * Hn * d,
       dy: 0.06 * Hn * d + 0.32 * Hn * d * d,
-      rot: dir * (0.35 * d + 0.18 * d * d),
+      // A booster that's coming home flips around for its boostback instead of tumbling.
+      rot: i === 0 && landAt !== null ? dir * Math.PI * ease(d / 1.8) : dir * (0.35 * d + 0.18 * d * d),
       alpha: 1 - clamp01((d - 1.6) / 1.4),
     };
   };
@@ -617,6 +636,124 @@ export function startLaunch(
     c.restore();
   }
 
+  /** The first stage coming home, in a small panel at the bottom left. k runs 0..1 over the descent. */
+  function drawLanding(k: number, since: number) {
+    const c = ctx!;
+    const p0 = pieces[0];
+    if (!p0) return;
+    const fade = clamp01(since / 0.3) * (1 - clamp01((since - LAND_DUR - 0.6) / 0.6));
+    if (fade <= 0) return;
+    const iw = Math.round(Math.min(190, W * 0.3));
+    const ih = Math.round(iw * 1.2);
+    const s = iw / 190;
+    const ix = 24;
+    const iy = Math.round(H - 150 - ih);
+    /** Label strip at the top; the scene is clipped below it, so the booster drops in from under it. */
+    const head = Math.round(46 * s);
+    const groundY = iy + ih - Math.round(24 * s) + 0.5;
+    const cx = Math.round(ix + iw * (catchMode ? 0.6 : 0.5));
+    const ph = Math.max(0.05, p0.box.maxY - p0.box.minY);
+    const pw = Math.max(0.01, p0.box.maxX - p0.box.minX);
+    const Zi = Math.min((ih * 0.42) / ph, (iw * 0.3) / pw);
+    const hpx = ph * Zi;
+    const touch = 0.86;
+    const landed = k >= touch;
+    // Where it comes to rest: on the pad, or hanging from the tower's arms just below its top.
+    const rest = catchMode ? groundY - 0.22 * hpx : groundY;
+    const armY = Math.round(rest - 0.82 * hpx) + 0.5;
+    c.save();
+    c.globalAlpha = fade;
+    c.fillStyle = "rgba(2,3,6,0.97)";
+    c.fillRect(ix, iy, iw, ih);
+    c.strokeStyle = "rgba(255,255,255,0.35)";
+    c.lineWidth = 1;
+    c.strokeRect(ix + 0.5, iy + 0.5, iw - 1, ih - 1);
+    c.save();
+    c.beginPath();
+    c.rect(ix + 1, iy + head, iw - 2, ih - head - 1);
+    c.clip();
+    c.strokeStyle = rgba(pal.chalk, 0.8);
+    c.beginPath();
+    c.moveTo(ix + 10, groundY);
+    c.lineTo(ix + iw - 10, groundY);
+    c.stroke();
+    if (catchMode) {
+      // The launch tower, a lattice, whose chopstick arms reach out and close on the booster.
+      const tR = Math.round(cx - 0.3 * iw) + 0.5;
+      const tL = tR - Math.round(12 * s);
+      const tTop = Math.round(armY - 0.16 * hpx) + 0.5;
+      const step = Math.round(12 * s);
+      c.beginPath();
+      c.moveTo(tL, groundY);
+      c.lineTo(tL, tTop);
+      c.lineTo(tR, tTop);
+      c.lineTo(tR, groundY);
+      for (let y = groundY, odd = false; y - step > tTop; y -= step, odd = !odd) {
+        c.moveTo(odd ? tL : tR, y);
+        c.lineTo(odd ? tR : tL, y - step);
+      }
+      c.stroke();
+      const reach = (cx + 0.5 * pw * Zi + 5 - tR) * (0.3 + 0.7 * easeOut((k - touch + 0.1) / 0.12));
+      c.lineWidth = 2;
+      c.beginPath();
+      for (const dy of [-2.5, 2.5]) {
+        c.moveTo(tR, armY + dy);
+        c.lineTo(tR + reach, armY + dy);
+      }
+      c.stroke();
+      c.lineWidth = 1;
+    } else {
+      // Landing pad with its X.
+      c.beginPath();
+      c.ellipse(cx, groundY + 4, 28 * s, 5 * s, 0, 0, Math.PI * 2);
+      c.moveTo(cx - 10 * s, groundY + 1);
+      c.lineTo(cx + 10 * s, groundY + 7 * s);
+      c.moveTo(cx + 10 * s, groundY + 1);
+      c.lineTo(cx - 10 * s, groundY + 7 * s);
+      c.stroke();
+    }
+    // The booster drops in, slowing for the landing burn.
+    const bottom = lerp(iy + head - 4, rest, easeOut(k / touch));
+    c.save();
+    c.translate(cx, bottom);
+    c.scale(Zi, Zi);
+    c.translate(-p0.nozzle.x, -p0.box.maxY);
+    if (k > 0.42 && k < touch + 0.02) drawFlame(p0.nozzle, 0.7, 0, 1, Zi, 7);
+    if (vehicle) drawVehiclePiece(0, 1);
+    else strokeDoodle(piecePaths[0], 1, 1, Zi);
+    c.restore();
+    // Touchdown (or the catch): a flash, and dust off the pad.
+    if (landed) {
+      const fl = 1 - clamp01((k - touch) / 0.12);
+      if (fl > 0) {
+        c.globalCompositeOperation = "lighter";
+        c.globalAlpha = fade * fl;
+        c.drawImage(sprites.hot, cx - 45 * s, (catchMode ? armY : groundY) - 45 * s, 90 * s, 90 * s);
+        c.globalCompositeOperation = "source-over";
+      }
+      if (!catchMode) {
+        c.globalAlpha = fade * 0.5 * (1 - clamp01((k - touch) / 0.25));
+        c.drawImage(sprites.puff, cx - 60 * s, groundY - 30 * s, 120 * s, 50 * s);
+      }
+    }
+    c.restore();
+    c.globalAlpha = fade;
+    c.font = `600 ${Math.round(10 * Math.max(0.8, s))}px ${displayFont}`;
+    if ("letterSpacing" in c) (c as CanvasRenderingContext2D & { letterSpacing: string }).letterSpacing = "1.6px";
+    c.textBaseline = "top";
+    c.fillStyle = "rgba(255,255,255,0.6)";
+    c.fillText(catchMode ? "BOOSTER CATCH" : "BOOSTER LANDING", ix + 10, iy + 9 * s);
+    c.font = `600 ${Math.round(18 * s)}px ${displayFont}`;
+    if (landed) {
+      c.fillStyle = "#4cc38a";
+      c.fillText(catchMode ? "CAUGHT ✓" : "LANDED ✓", ix + 10, iy + 22 * s);
+    } else if (k > 0.42) {
+      c.fillStyle = rgba(pal.flameHot, 1);
+      c.fillText("LANDING BURN", ix + 10, iy + 22 * s);
+    }
+    c.restore();
+  }
+
   /** Plasma on the leading nose, streaming back along the body (rocket-local units). */
   function drawReentry(k: number, nose: Vec, Z: number) {
     const c = ctx!;
@@ -745,7 +882,7 @@ export function startLaunch(
       : (W - boxH * NAPKIN_ASPECT) / 2 + doodle.origin[0] * boxH;
     const ny = (rect ? rect.top : (H - boxH) / 2) + doodle.origin[1] * boxH;
     const e = ease((t - T_CAM_FROM) / (T_FRAMED - T_CAM_FROM));
-    const Zl = Math.min(1.8 * fit, Math.max(0.12 * fit, Math.min((0.36 * H) / Hn, (0.42 * W) / Wn)));
+    const Zl = Math.min(1.8 * fit, Math.max(0.12 * fit, Math.min((0.36 * H * sizeK) / Hn, (0.42 * W) / Wn)));
     const Z = lerp(boxH, Zl, e) * boost;
     const rsx = lerp(nx, W / 2, e);
     const rsy = lerp(ny, H * 0.8 - (Hn / 2) * Zl, e);
@@ -1070,6 +1207,34 @@ export function startLaunch(
       c.lineJoin = "round";
       c.stroke(padPath);
       c.restore();
+
+      // A metre ruler beside the pad, so the vehicle's real size reads at a glance.
+      const span = [10, 20, 25, 50, 100, 150, 200].filter((m) => m <= heightM).pop() ?? 10;
+      const rx = Math.round(SX(doodle.box.maxX + 0.3 * Hn)) + 0.5;
+      const y0 = SY(0);
+      const y1 = SY((span * nuPerKm) / 1000);
+      c.save();
+      c.globalAlpha = 0.75 * padK;
+      c.strokeStyle = rgba(pal.chalk, 1);
+      c.fillStyle = rgba(pal.chalk, 1);
+      c.lineWidth = 1;
+      c.beginPath();
+      c.moveTo(rx, y0);
+      c.lineTo(rx, y1);
+      for (let k = 0; k <= 5; k++) {
+        const yy = Math.round(y0 + (y1 - y0) * (k / 5)) + 0.5;
+        const w = k % 5 === 0 ? 7 : 4;
+        c.moveTo(rx - w, yy);
+        c.lineTo(rx + w, yy);
+      }
+      c.stroke();
+      c.font = `600 11px ${displayFont}`;
+      if ("letterSpacing" in c) (c as CanvasRenderingContext2D & { letterSpacing: string }).letterSpacing = "1.4px";
+      c.textBaseline = "middle";
+      c.fillText(`${span} M`, rx + 11, y1);
+      c.globalAlpha = 0.5 * padK;
+      c.fillText(`${Math.round(heightM)} M TALL`, rx + 11, SY(Hn));
+      c.restore();
     }
 
     if (!exploded) {
@@ -1214,6 +1379,8 @@ export function startLaunch(
       c.fillRect(0, 0, W, H);
       c.globalCompositeOperation = "source-over";
     }
+
+    if (landAt !== null && t >= landAt && t <= landAt + LAND_DUR + 1.3) drawLanding((t - landAt) / LAND_DUR, t - landAt);
 
     // A vignette that tightens around Max-Q.
     const maxQPulse = maxQAt !== null && flying ? Math.exp(-(((t - maxQAt) / 1.1) ** 2)) : 0;
