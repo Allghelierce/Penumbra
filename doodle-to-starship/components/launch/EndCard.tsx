@@ -4,6 +4,7 @@ import { useCallback, useState } from "react";
 import { createPortal } from "react-dom";
 import MissionReport from "@/components/MissionReport";
 import { MISSION_PHOTOS } from "@/lib/mission-photos";
+import { comebackSource, historicTrace } from "@/lib/history";
 import { MISSION_REPORTS } from "@/lib/mission-reports";
 import {
   NAPKIN_ASPECT,
@@ -368,7 +369,8 @@ function Debrief({ mission, renderUrl, renderPending, strokes, design, video, on
   };
   const [showReport, setShowReport] = useState(false);
   const closeReport = useCallback(() => setShowReport(false), [setShowReport]);
-  const reportMission = mission;
+  // A comeback's debrief offers the report on the flight it came back from.
+  const reportMission = comebackSource(mission) ?? mission;
   const report = MISSION_REPORTS[reportMission.id];
   // Photos from the real flight (Wikimedia Commons), when there are any.
   const photos = (MISSION_PHOTOS[mission.id] ?? []).slice(0, 2);
@@ -515,7 +517,7 @@ function Debrief({ mission, renderUrl, renderPending, strokes, design, video, on
               <MissionReport
                 mission={reportMission}
                 report={report}
-                trace={trace}
+                trace={reportMission === mission ? trace : historicTrace(reportMission)}
                 photos={MISSION_PHOTOS[reportMission.id]}
                 onClose={closeReport}
               />,
