@@ -42,7 +42,7 @@ describe("diagnose", () => {
     expect(liftoff.why).toMatch(/9 × Merlin 1D make [\d,]+ t-force of thrust against [\d,]+ t on the pad, so thrust-to-weight is \d\.\d\d/);
     const dv = list.find((i) => i.title === "Enough delta-v")!;
     expect(dv.why).toMatch(/Booster: mass ratio \d+\.\d, it burns [\d,]+ t of [\d,]+ t, \d+ s × 9\.81 × ln \d+\.\d = \d+\.\d km\/s\./);
-    expect(dv.why).toMatch(/Total \d+\.\d km\/s\. You need 9\.4 km\/s to reach orbit\.$/);
+    expect(dv.why).toMatch(/Total \d+\.\d km\/s\. You need \d+\.\d km\/s to reach orbit, \d+\.\d of it lost to gravity and drag at thrust-to-weight \d\.\d\d\.$/);
     expect(dv.effect).toMatch(/^\d+\.\d km\/s to spare$/);
   });
 
@@ -60,7 +60,7 @@ describe("diagnose", () => {
     const list = issues(hopper);
     const dv = list.find((i) => /short of orbit/.test(i.title))!;
     expect(dv.severity).toBe("no-go");
-    expect(dv.why).toMatch(/Hopper: mass ratio \d+\.\d, .* = \d+\.\d km\/s\. You need 9\.4 km\/s to reach orbit\.$/);
+    expect(dv.why).toMatch(/Hopper: mass ratio \d+\.\d, .* = \d+\.\d km\/s\. You need \d+\.\d km\/s to reach orbit, \d+\.\d of it lost to gravity and drag/);
     expect(dv.effect).toMatch(/→ \+\d+\.\d km\/s → makes orbit$/);
     const after = analyze(applyAction(hopper, dv.fix!));
     expect(after.marginMps).toBeGreaterThanOrEqual(0);

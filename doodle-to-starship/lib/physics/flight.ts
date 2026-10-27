@@ -2,10 +2,10 @@
 // speed is reached; nothing in the trace flies faster than that.
 
 import type { Analysis, Design, DestinationId, FlightEvent, FlightEventKind, FlightPoint, FlightTrace, Verdict } from "../design";
+import { ascentLossesMps, ROTATION_MPS } from "./analyze";
 import { km } from "./format";
 
 const G0 = 9.80665;
-const LOSS_BUDGET_MPS = 1500;
 const ORBITAL_SPEED_MPS = 7800;
 const ORBIT_ALTITUDE_KM = 200;
 const POINT_COUNT = 300;
@@ -40,7 +40,9 @@ export function simulateFlight(design: Design, analysis: Analysis): FlightTrace 
 
   const burnTimes = analysis.stages.map((stage) => Math.max(0, stage.burnTimeS));
   const totalBurnS = burnTimes.reduce((sum, burn) => sum + burn, 0);
-  const losses = burnTimes.map((burn) => (totalBurnS > 0 ? (LOSS_BUDGET_MPS * burn) / totalBurnS : 0));
+  // The same gravity and drag losses analyze() charges, with Earth's spin credited against the
+  // first stage, so the trace reaches orbital speed exactly when the verdict says it does.
+  const losses = ascentLossesMps(design, analysis.stages).map((loss, i) => (i === 0 ? Math.max(0, loss - ROTATION_MPS) : loss));
   const missionCap = targetSpeedMps(design.destination);
   const cutoff = findCutoff(analysis, burnTimes, losses, missionCap);
   const suborbital = analysis.verdict === "suborbital";

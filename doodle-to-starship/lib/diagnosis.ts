@@ -4,7 +4,7 @@
 
 import { applyAction } from "./actions";
 import type { Analysis, Design, DesignAction, RedPenMark, SketchReading } from "./design";
-import { analyze, DESTINATIONS, ENGINES, km, kmShort, kmSpare } from "./physics";
+import { analyze, ascentLossesMps, DESTINATIONS, ENGINES, km, kmShort, kmSpare } from "./physics";
 import { buildReview, DESTINATION_NAMES, isIssueMark, SAFE_TWR } from "./redpen";
 
 export interface Issue {
@@ -120,7 +120,10 @@ function deltaVIssue(design: Design, flyable: Design, marks: RedPenMark[], markF
   const goal = design.destination === "leo" ? "orbit" : dest;
   const total = stageSum(a);
   const prefix = flyable === design ? "" : "With the engine fix, ";
-  const why = `${prefix}${rocketEquation(flyable, a)} You need ${km(a.requiredDeltaVMps)} km/s to reach ${goal}.`;
+  const lossMps = ascentLossesMps(flyable, a.stages).reduce((sum, loss) => sum + loss, 0);
+  const why =
+    `${prefix}${rocketEquation(flyable, a)} You need ${km(a.requiredDeltaVMps)} km/s to reach ${goal}, ` +
+    `${km(lossMps)} of it lost to gravity and drag at thrust-to-weight ${a.liftoffTwr.toFixed(2)}.`;
 
   if (a.marginMps >= 0) {
     return {
@@ -249,7 +252,8 @@ export function sensitivities(design: Design): Sensitivity[] {
   // Dry mass hurts most at the top of the stack, where every stage below carries it.
   const top = design.stages.length - 1;
   for (const i of top > 0 ? [top, 0] : [0]) {
-    const dry = base.stages[i]?.dryMassKg ?? 0;
+    // The stated dry mass, not the analysis's (which adds recovery hardware on a recovered stage).
+    const dry = design.stages[i].dryMassKg ?? base.stages[i]?.dryMassKg ?? 0;
     const heavier = design.stages.map((s, j) => (j === i ? { ...s, dryMassKg: dry + 1000 } : s));
     out.push({ label: `${design.stages[i].label} dry mass`, value: `+1 t → ${signedMps(dDv({ ...design, stages: heavier }))}` });
   }

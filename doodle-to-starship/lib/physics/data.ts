@@ -24,8 +24,9 @@ export const ENGINES: Record<EngineId, EngineSpec> = {
     name: "Raptor 3",
     vehicle: "Starship Super Heavy booster",
     propellant: "methalox",
-    thrustSeaLevelN: 2_746_000,
-    thrustVacuumN: 2_980_000,
+    // 250 tf at sea level and 275 tf in vacuum (current infobox; the old entry had the 280 tf target).
+    thrustSeaLevelN: 2_452_000,
+    thrustVacuumN: 2_697_000,
     ispSeaLevelS: 327,
     ispVacuumS: 350,
     massKg: 1_525,

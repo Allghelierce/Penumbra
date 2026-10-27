@@ -7,6 +7,31 @@ import { km, kmShort, kmSpare } from "./format";
 const G0 = 9.80665;
 const USABLE_FRACTION = 0.95;
 
+/** Circular orbital speed at 200 km. */
+const ORBITAL_SPEED_MPS = 7_800;
+/** Earth's rotation gives an eastward launch from about 28.5° N this much for free. */
+export const ROTATION_MPS = 400;
+/**
+ * How fast the climb turns horizontal: the share of gravity a stage fights is
+ * (1 − speed / orbital speed)^GRAVITY_TURN, from straight up at liftoff to nothing in orbit.
+ */
+const GRAVITY_TURN = 2;
+/**
+ * The share of g a stage fights at a given fraction of orbital speed: sin(flight-path angle),
+ * which falls as the climb turns horizontal, times the centrifugal relief (1 − u²) that makes
+ * orbital speed weightless.
+ */
+function gravityShare(u: number): number {
+  const v = Math.min(1, Math.max(0, u));
+  return Math.pow(1 - v, GRAVITY_TURN) * (1 - v * v);
+}
+
+/** Drag loss per unit of frontal area over lift-off mass (m/s per m²/kg). Small, by design. */
+const DRAG_COEFFICIENT = 3e6;
+const MAX_DRAG_MPS = 400;
+/** Steps per stage when integrating the climb. */
+const STEPS = 48;
+
 /** Structure as a fraction of propellant mass, only when a stage omits dryMassKg. */
 const STRUCTURAL_FACTOR: Record<PropellantId, number> = {
   methalox: 0.06,
@@ -17,7 +42,7 @@ const STRUCTURAL_FACTOR: Record<PropellantId, number> = {
 };
 
 export function analyze(design: Design): Analysis {
-  const built = design.stages.map((stage, index) => stageMasses(stage, index));
+  const built = design.stages.map((stage, index) => stageMasses(stage, index, design.stages.length));
   const stages: StageAnalysis[] = built.map((stage, index) => {
     const payloadAbove =
       design.payloadMassKg + built.slice(index + 1).reduce((sum, upper) => sum + upper.wetMassKg, 0);
@@ -27,11 +52,15 @@ export function analyze(design: Design): Analysis {
   const liftoffMassKg = stages.reduce((sum, stage) => sum + stage.wetMassKg, 0) + design.payloadMassKg;
   const liftoffTwr =
     stages.length === 0 || liftoffMassKg <= 0 ? 0 : stages[0].thrustN / (liftoffMassKg * G0);
-  const requiredDeltaVMps = DESTINATIONS[design.destination].deltaVFromSurfaceMps;
-  const leoMps = DESTINATIONS.leo.deltaVFromSurfaceMps;
   const stuck = liftoffTwr < 1;
   const summedDeltaVMps = stages.reduce((sum, stage) => sum + stage.deltaVMps, 0);
   const totalDeltaVMps = stuck ? 0 : summedDeltaVMps;
+
+  // Reaching orbit takes orbital speed, less Earth's spin, plus what this design loses to
+  // gravity and drag on the way up. Destinations past LEO add their legs from the delta-v map.
+  const lossMps = stuck ? 0 : ascentLossesMps(design, stages).reduce((sum, loss) => sum + loss, 0);
+  const leoMps = stuck ? DESTINATIONS.leo.deltaVFromSurfaceMps : ORBITAL_SPEED_MPS - ROTATION_MPS + lossMps;
+  const requiredDeltaVMps = leoMps + legMps(design.destination);
 
   let verdict: Verdict;
   let furthestReachable: DestinationId | null = null;
@@ -41,10 +70,10 @@ export function analyze(design: Design): Analysis {
     verdict = "suborbital";
   } else if (totalDeltaVMps < requiredDeltaVMps) {
     verdict = "orbit";
-    furthestReachable = furthestWithin(totalDeltaVMps);
+    furthestReachable = furthestWithin(totalDeltaVMps - leoMps);
   } else {
     verdict = "destination";
-    furthestReachable = furthestWithin(totalDeltaVMps);
+    furthestReachable = furthestWithin(totalDeltaVMps - leoMps);
   }
 
   const analysis: Analysis = {
@@ -58,8 +87,52 @@ export function analyze(design: Design): Analysis {
     furthestReachable,
     findings: [],
   };
-  analysis.findings = findings(design, analysis);
+  analysis.findings = findings(design, analysis, lossMps);
   return analysis;
+}
+
+/** Delta-v past low Earth orbit to the destination, from the standard delta-v map. */
+function legMps(destination: DestinationId): number {
+  return DESTINATIONS[destination].deltaVFromSurfaceMps - DESTINATIONS.leo.deltaVFromSurfaceMps;
+}
+
+/**
+ * Gravity and drag losses per stage on the way to orbit, by integrating the climb: each stage's
+ * thrust against the share of gravity it still fights at its speed. A low thrust-to-weight
+ * means a long burn at low speed, so more delta-v goes to fighting gravity. Drag, small, comes
+ * out of the first stage.
+ */
+export function ascentLossesMps(design: Design, stages: StageAnalysis[]): number[] {
+  const liftoffMassKg = stages.reduce((sum, stage) => sum + stage.wetMassKg, 0) + design.payloadMassKg;
+  const losses: number[] = [];
+  let speed = ROTATION_MPS;
+  stages.forEach((stage, index) => {
+    const above = design.payloadMassKg + stages.slice(index + 1).reduce((sum, upper) => sum + upper.wetMassKg, 0);
+    if (stage.thrustN <= 0 || stage.ispS <= 0 || stage.propellantMassKg <= 0 || stage.burnTimeS <= 0) {
+      losses.push(0);
+      return;
+    }
+    const exhaust = stage.ispS * G0;
+    const flow = stage.propellantMassKg / stage.burnTimeS;
+    const dt = stage.burnTimeS / STEPS;
+    let mass = stage.wetMassKg + above;
+    let lost = 0;
+    for (let k = 0; k < STEPS; k++) {
+      const thrustAccel = (exhaust * flow) / (mass - (flow * dt) / 2);
+      const gravity = G0 * gravityShare(speed / ORBITAL_SPEED_MPS);
+      speed = Math.max(0, speed + (thrustAccel - gravity) * dt);
+      lost += gravity * dt;
+      mass -= flow * dt;
+    }
+    if (index === 0) {
+      const area = Math.PI * (design.diameterM / 2) ** 2;
+      const drag = liftoffMassKg > 0 ? Math.min(MAX_DRAG_MPS, (DRAG_COEFFICIENT * area) / liftoffMassKg) : 0;
+      lost += drag;
+      speed = Math.max(0, speed - drag);
+    }
+    losses.push(lost);
+  });
+  return losses;
 }
 
 interface StageMasses {
@@ -71,19 +144,38 @@ interface StageMasses {
   thrustN: number;
 }
 
-function stageMasses(stage: Stage, stageIndex: number): StageMasses {
-  const propellantMassKg = stage.tankVolumeM3 * PROPELLANT_DENSITY_KG_M3[stage.propellant] * USABLE_FRACTION;
+/**
+ * A stage that flies back keeps part of its propellant for the boostback, entry and landing
+ * burns, so it never burns it on the way up, and carries recovery hardware: legs and grid fins
+ * on a booster, a heat shield and flaps on an orbital stage.
+ */
+type RecoveryRole = "booster" | "orbital";
+/**
+ * Booster: 8% of its load, about 32 t on a Falcon 9, which lands it on a drone ship at the
+ * published 17.5 t (calibrated). Orbital stage: 3%, about 45 t on a Starship Ship for the
+ * deorbit and landing burns (physically estimated; see lib/trade.test.ts for the Starship gap).
+ */
+const RECOVERY_RESERVE: Record<RecoveryRole, number> = { booster: 0.08, orbital: 0.03 };
+/** Legs and grid fins on a booster; heat shield and flaps on an orbital stage, as a share of dry mass. */
+const RECOVERY_HARDWARE: Record<RecoveryRole, number> = { booster: 0.06, orbital: 0.1 };
+
+function stageMasses(stage: Stage, stageIndex: number, stageCount: number): StageMasses {
+  const loadedKg = stage.tankVolumeM3 * PROPELLANT_DENSITY_KG_M3[stage.propellant] * USABLE_FRACTION;
+  // The top stage is the one that reaches orbit; everything under it is a booster.
+  const role: RecoveryRole = stageIndex === stageCount - 1 ? "orbital" : "booster";
+  const reserveKg = stage.recover ? loadedKg * RECOVERY_RESERVE[role] : 0;
+  const propellantMassKg = loadedKg - reserveKg;
   const engineMassKg = stage.engines.reduce((sum, cluster) => {
     return sum + cluster.count * ENGINES[cluster.engine].massKg;
   }, 0);
-  const dryMassKg =
-    typeof stage.dryMassKg === "number"
-      ? stage.dryMassKg
-      : propellantMassKg * STRUCTURAL_FACTOR[stage.propellant] + engineMassKg;
+  const statedDryKg =
+    typeof stage.dryMassKg === "number" ? stage.dryMassKg : loadedKg * STRUCTURAL_FACTOR[stage.propellant] + engineMassKg;
+  const dryMassKg = statedDryKg * (stage.recover ? 1 + RECOVERY_HARDWARE[role] : 1);
   const { thrustN, ispS } = thrustAndIsp(stage, stageIndex);
   return {
     label: stage.label,
-    wetMassKg: dryMassKg + propellantMassKg,
+    // The landing reserve rides up as dead weight: in the wet mass, never burned.
+    wetMassKg: dryMassKg + loadedKg,
     dryMassKg,
     propellantMassKg,
     ispS,
@@ -126,21 +218,21 @@ function finishStage(stage: StageMasses, payloadAbove: number): StageAnalysis {
   };
 }
 
-/** Hardest destination whose published requirement is still within the budget. */
-function furthestWithin(totalDeltaVMps: number): DestinationId | null {
+/** Hardest destination whose leg past LEO still fits in the delta-v left over after reaching orbit. */
+function furthestWithin(pastLeoMps: number): DestinationId | null {
   let best: DestinationId | null = null;
-  let bestDv = -Infinity;
+  let bestLeg = -Infinity;
   for (const id of Object.keys(DESTINATIONS) as DestinationId[]) {
-    const dv = DESTINATIONS[id].deltaVFromSurfaceMps;
-    if (dv <= totalDeltaVMps && dv > bestDv) {
+    const leg = legMps(id);
+    if (leg <= pastLeoMps && leg > bestLeg) {
       best = id;
-      bestDv = dv;
+      bestLeg = leg;
     }
   }
   return best;
 }
 
-function findings(design: Design, analysis: Analysis): string[] {
+function findings(design: Design, analysis: Analysis, lossMps: number): string[] {
   const destination = DESTINATIONS[design.destination];
   const twr = formatTwr(analysis.liftoffTwr);
   const total = km(analysis.totalDeltaVMps);
@@ -159,6 +251,7 @@ function findings(design: Design, analysis: Analysis): string[] {
 
   lines.push(`Liftoff thrust-to-weight is ${twr} at ${massT} t.`);
   lines.push(`Total delta-v is ${total} km/s against ${required} km/s for ${destination.name}.`);
+  lines.push(`Gravity and drag take ${km(lossMps)} km/s of that on the way up; a stronger liftoff loses less.`);
 
   if (analysis.verdict === "destination") {
     lines.push(
@@ -171,7 +264,7 @@ function findings(design: Design, analysis: Analysis): string[] {
     );
     lines.push(`The furthest it can reach is ${reach}.`);
   } else {
-    const leo = DESTINATIONS.leo.deltaVFromSurfaceMps;
+    const leo = analysis.requiredDeltaVMps - legMps(design.destination);
     lines.push(
       `That is ${kmShort(analysis.totalDeltaVMps, leo)} km/s short of low Earth orbit, so the flight is suborbital.`,
     );
