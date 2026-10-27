@@ -378,8 +378,10 @@ export interface RocketTemplate {
   blurb: string;
   /** The real vehicle as a Design: real stage propellant volumes, dry masses and engines; payloadMassKg = its LEO reference payload. */
   design: Design;
-  /** Published payload to low Earth orbit, in kg (the calibration target for the physics model). */
+  /** Published payload to low Earth orbit, in kg, for the configuration in `design` (the calibration target). */
   realPayloadLeoKg: number;
+  /** Published LEO payload with the recoverable stages landing, when that differs from realPayloadLeoKg. */
+  realPayloadLeoReusableKg?: number;
   sources: { title: string; url: string }[];
 }
 
