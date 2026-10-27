@@ -10,7 +10,7 @@ Rocket-design intuition is hard to build. A real launch vehicle is tuned for one
 
 Start from a rocket that flew, and change one thing at a time:
 
-- **Modify a real rocket.** Drag a stage to stretch or shrink its tanks, add or remove a stage, change the engine count, or switch booster recovery on and off. Every figure is shown as the real rocket's value next to yours.
+- **Modify a real rocket.** Drag a tank edge to stretch or shrink a stage, tap an engine chip to change the engine count, add a booster stage, or switch ♻ Recover on for a stage. Set the destination and payload in the side panel. Every figure is shown as the real rocket's value next to yours, and Cmd+Z undoes any change.
 - **See the trade-off.** A payload curve sweeps tank size or engine count from the real design, and marks both the real rocket and the best point. A one-line caption says why the best point is where it is (usually thrust-to-weight). Recovery shows its price directly: in the model, landing Falcon 9's booster costs 5.7 t of payload to low Earth orbit.
 - **Check it and fly it.** The red pen marks what fails and what fixes it. Then the design flies: the launch scene splits the vehicle at its real stage bands and shows a recovered booster's landing or tower catch.
 
@@ -63,6 +63,8 @@ npm run dev          # http://localhost:3000
 npm test             # vitest
 npx tsc --noEmit     # type check
 ```
+
+The flow runs Pick → Modify → Check → Fly → Recap. To open a real rocket straight in Modify, use `/?rocket=falcon9` (or `saturn-v`, `electron`, `starship`). Check uses the local red pen and needs no API.
 
 An xAI key is optional: put `XAI_API_KEY=...` in `.env.local` to enable the Grok features. `proxy.ts` rate-limits the routes that spend xAI credits in production.
 
