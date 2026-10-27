@@ -4,6 +4,7 @@ import type { DestinationId, EngineId, PartKind, PropellantId } from "../design"
 // The Exhaustive checks below fail to compile if design.ts gains an id these lists miss.
 
 export const ENGINE_IDS = [
+  "raptor-2",
   "raptor-3",
   "raptor-vacuum",
   "merlin-1d",

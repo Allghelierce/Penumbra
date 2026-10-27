@@ -8,7 +8,7 @@ const DESTINATIONS: Record<DestinationId, true> = {
   "mars-transfer": true, "mars-surface": true, europa: true,
 };
 const ENGINES: Record<EngineId, true> = {
-  "raptor-3": true, "raptor-vacuum": true, "merlin-1d": true, "merlin-vacuum": true,
+  "raptor-2": true, "raptor-3": true, "raptor-vacuum": true, "merlin-1d": true, "merlin-vacuum": true,
   "rs-25": true, rl10c: true, "f-1": true, "j-2": true, "be-4": true, "rd-180": true,
   rutherford: true,
   "rutherford-vacuum": true, "generic-solid": true,

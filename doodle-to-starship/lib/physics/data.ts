@@ -6,6 +6,19 @@ export const G0 = 9.80665;
 
 /** Vacuum-only engines can't run at sea level, so their sea-level thrust and Isp are 0. */
 export const ENGINES: Record<EngineId, EngineSpec> = {
+  "raptor-2": {
+    id: "raptor-2",
+    name: "Raptor 2",
+    vehicle: "Starship Block 2 (Super Heavy and Ship)",
+    propellant: "methalox",
+    thrustSeaLevelN: 2_255_530,
+    // Not published for the sea-level engine; scaled from 230 tf by the Isp ratio 350/327.
+    thrustVacuumN: 2_414_000,
+    ispSeaLevelS: 327,
+    ispVacuumS: 350,
+    massKg: 1_630,
+    source: "https://en.wikipedia.org/wiki/SpaceX_Raptor",
+  },
   "raptor-3": {
     id: "raptor-3",
     name: "Raptor 3",

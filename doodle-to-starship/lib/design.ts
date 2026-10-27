@@ -5,6 +5,7 @@
 export type PropellantId = "methalox" | "kerolox" | "hydrolox" | "solid" | "hypergolic";
 
 export type EngineId =
+  | "raptor-2"
   | "raptor-3"
   | "raptor-vacuum"
   | "merlin-1d"

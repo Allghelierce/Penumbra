@@ -3,6 +3,7 @@ import type { Analysis, Design, DestinationId, EngineId, RenderRequest, Verdict 
 // Turns a design and its verdict into a photoreal Grok Imagine prompt.
 
 const ENGINE_NAMES: Record<EngineId, string> = {
+  "raptor-2": "Raptor 2",
   "raptor-3": "Raptor 3",
   "raptor-vacuum": "Raptor Vacuum",
   "merlin-1d": "Merlin 1D",
