@@ -35,6 +35,18 @@ describe("TEMPLATES", () => {
     }
   });
 
+  it("sets each baseline's recovery to match its published payload", () => {
+    const recovers = (id: TemplateId) => templateById(id).design.stages.map((s) => s.recover === true);
+    expect(recovers("falcon9")).toEqual([false, false]);
+    expect(recovers("saturn-v")).toEqual([false, false, false]);
+    expect(recovers("electron")).toEqual([false, false]);
+    expect(recovers("starship")).toEqual([true, true]);
+    const f9 = templateById("falcon9");
+    expect(f9.realPayloadLeoReusableKg).toBe(17_400);
+    expect(f9.realPayloadLeoReusableKg!).toBeLessThan(f9.realPayloadLeoKg);
+    for (const id of ["saturn-v", "electron", "starship"] as const) expect(templateById(id).realPayloadLeoReusableKg).toBeUndefined();
+  });
+
   it("holds exactly the published propellant in each stage, with real dry masses and known engines", () => {
     for (const t of TEMPLATES) {
       const published = PUBLISHED[t.id].propellantKg;

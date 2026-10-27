@@ -48,11 +48,16 @@ export const TEMPLATES: RocketTemplate[] = [
       heightM: 69.8,
       diameterM: 3.7,
     },
-    // Expendable, to LEO from Cape Canaveral (Falcon 9 Full Thrust infobox; 18,500 kg when the booster is recovered).
+    // The baseline is the expendable vehicle: 22,800 kg to LEO from Cape Canaveral (Full Thrust infobox).
     realPayloadLeoKg: 22_800,
+    // With the booster landing on a drone ship: the heaviest payload SpaceX has explicitly confirmed
+    // (56 Starlink satellites, "more than 17.4 metric tons"; Falcon 9 payload table, "≥ 17,400 reusable").
+    // The Full Thrust infobox quotes 18,500 kg from a press estimate; we use the confirmed figure.
+    realPayloadLeoReusableKg: 17_400,
     sources: [
       { title: "Falcon 9: stage specifications (empty and propellant mass), height 69.8 m, fairing 13 m × 5.2 m", url: wiki("Falcon_9") },
       { title: "Falcon 9 Full Thrust: 22,800 kg to LEO expendable", url: wiki("Falcon_9_Full_Thrust") },
+      { title: "Falcon 9 payload table: ≥ 17,400 kg to LEO with the booster recovered (heaviest confirmed)", url: wiki("Falcon_9") },
     ],
   },
   {
@@ -154,6 +159,8 @@ export const TEMPLATES: RocketTemplate[] = [
           propellant: "methalox",
           tankVolumeM3: tankFor(3_400_000, "methalox"),
           dryMassKg: 275_000,
+          // The published 35 t assumes both stages fly back.
+          recover: true,
         },
         // Ship Block 2: 52.1 m, propellant 1,500 t, gross 1,585 t (so ~85 t dry), 3 Raptor + 3 Raptor Vacuum.
         {
@@ -165,6 +172,7 @@ export const TEMPLATES: RocketTemplate[] = [
           propellant: "methalox",
           tankVolumeM3: tankFor(1_500_000, "methalox"),
           dryMassKg: 85_000,
+          recover: true,
         },
       ],
       payloadMassKg: 35_000,
@@ -173,7 +181,8 @@ export const TEMPLATES: RocketTemplate[] = [
       heightM: 123.1,
       diameterM: 9,
     },
-    // Block 2 payload to LEO per the Starship infobox (Block 1: 15 t, Block 3: 100 t).
+    // Block 2 payload to LEO per the Starship infobox (Block 1: 15 t, Block 3: 100 t). It is already the
+    // reusable figure (both stages recover), so there is no separate realPayloadLeoReusableKg.
     realPayloadLeoKg: 35_000,
     sources: [
       { title: "SpaceX Starship: Block 2 stack 123.1 m, 35 t to LEO", url: wiki("SpaceX_Starship") },
