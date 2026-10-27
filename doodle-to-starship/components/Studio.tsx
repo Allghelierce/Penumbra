@@ -194,6 +194,8 @@ export default function Studio() {
   const [stretch, setStretch] = useState<Stretch | null>(null);
   // The real stage the trade chart sweeps: the one last touched.
   const [chartStage, setChartStage] = useState(0);
+  // Earlier versions of the real rocket being modified, oldest first, for Undo.
+  const [edits, setEdits] = useState<Design[]>([]);
   // "Fix and try again": the engineer's fix drawn in blue over the lost vehicle, before the comeback flight.
   const [fix, setFix] = useState<{ strokes: Stroke[]; note: string } | null>(null);
   // What one read of the drawing found ("Grok vision identified: …").
@@ -457,6 +459,24 @@ export default function Studio() {
   // Esc on the Sketch step goes back to Pick; the listener reaches the latest goBack through this ref.
   const escRef = useRef<() => void>(() => {});
 
+  /** A new version of the real rocket: redraw it, re-mark it if it's been checked, and keep the old one for Undo. */
+  const showTemplateDesign = useCallback((t: RocketTemplate, nextDesign: Design, remember: boolean) => {
+    const current = latest.current.design;
+    if (remember && current && current !== nextDesign) setEdits((h) => [...h.slice(-49), current]);
+    const nextReading = templateReading(t, nextDesign);
+    latest.current = { ...latest.current, reading: nextReading, design: nextDesign };
+    setDesign(nextDesign);
+    setReading(nextReading);
+    const nextAnalysis = safeAnalyze(nextDesign);
+    // Checked already: the red pen re-marks it locally.
+    if (nextAnalysis && latest.current.review) {
+      const next = buildReview(nextReading, nextAnalysis);
+      latest.current = { ...latest.current, review: next };
+      setReview(next);
+      setReviewKey((k) => k + 1);
+    }
+  }, []);
+
   /** Voice commands and destination chips both edit the design, then the red pen re-checks it. */
   const handleAction = useCallback(
     (action: DesignAction) => {
@@ -475,26 +495,22 @@ export default function Studio() {
           : real && action.type === "scale-tanks"
             ? applyStretch(current, real.design, action.stageIndex, action.factor)
             : applyAction(current, action);
-      if (real && (action.type === "scale-tanks" || action.type === "set-engines")) {
-        const j = realIndex(current, real.design, action.stageIndex);
-        if (j >= 0) setChartStage(j);
+      if (real) {
+        if (action.type === "scale-tanks" || action.type === "set-engines") {
+          const j = realIndex(current, real.design, action.stageIndex);
+          if (j >= 0) setChartStage(j);
+        }
+        showTemplateDesign(real, nextDesign, action.type !== "review");
+        return;
       }
-      const nextReading = real ? templateReading(real, nextDesign) : { ...read, design: nextDesign };
+      const nextReading = { ...read, design: nextDesign };
       const nextAnalysis = safeAnalyze(nextDesign);
       latest.current = { ...latest.current, reading: nextReading, design: nextDesign };
       setDesign(nextDesign);
       setReading(nextReading);
-      if (!nextAnalysis) return;
-      if (!real) void requestReview(nextReading, nextAnalysis);
-      else if (latest.current.review) {
-        // A real rocket is re-marked locally, and only once it's been checked.
-        const next = buildReview(nextReading, nextAnalysis);
-        latest.current = { ...latest.current, review: next };
-        setReview(next);
-        setReviewKey((k) => k + 1);
-      }
+      if (nextAnalysis) void requestReview(nextReading, nextAnalysis);
     },
-    [requestReview],
+    [requestReview, showTemplateDesign],
   );
 
   /** Launch goes through mission control: every controller reports GO or NO-GO first. */
@@ -584,11 +600,21 @@ export default function Studio() {
     setFix(null);
     setTemplate(null);
     setStretch(null);
+    setEdits([]);
     setPhase("draw");
   }
 
   /** Undo the last stroke; like any edit, it marks an existing review as out of date. */
   function undo() {
+    const t = latest.current.template;
+    if (t) {
+      // A real rocket undoes its last edit.
+      const previous = edits.at(-1);
+      if (!previous) return;
+      setEdits((h) => h.slice(0, -1));
+      showTemplateDesign(t, previous, false);
+      return;
+    }
     const drawn = latest.current.strokes;
     if (drawn.length > 0) changeStrokes(drawn.slice(0, -1));
   }
@@ -653,12 +679,7 @@ export default function Studio() {
   function resetTemplate() {
     const { template: t, design: current } = latest.current;
     if (!t || !current) return;
-    const nextDesign = { ...t.design, destination: current.destination, payloadMassKg: current.payloadMassKg };
-    const read = templateReading(t, nextDesign);
-    latest.current = { ...latest.current, design: nextDesign, reading: read };
-    setDesign(nextDesign);
-    setReading(read);
-    setReview(null);
+    showTemplateDesign(t, { ...t.design, destination: current.destination, payloadMassKg: current.payloadMassKg }, true);
   }
 
   /** Check a modified rocket: a laser sweep over the drawing, then the red pen on its exact parts. Local, no API. */
@@ -879,7 +900,9 @@ export default function Studio() {
 
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
-      if ((e.metaKey || e.ctrlKey) && e.key === "z") {
+      // A text field (the payload, a typed command) keeps its own undo.
+      const typing = e.target instanceof HTMLElement && (e.target.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(e.target.tagName));
+      if ((e.metaKey || e.ctrlKey) && e.key === "z" && !typing) {
         e.preventDefault();
         undoRef.current();
       } else if (e.key === "Escape") {
@@ -1083,6 +1106,16 @@ export default function Studio() {
                       Clear
                     </button>
                   </>
+                )}
+                {template && step === 1 && (
+                  <button
+                    type="button"
+                    onClick={undo}
+                    disabled={edits.length === 0}
+                    className="h-11 px-2 text-[11px] uppercase tracking-[0.18em] text-haze transition-colors hover:text-white disabled:opacity-40"
+                  >
+                    Undo
+                  </button>
                 )}
                 {step >= 1 && step !== 4 && (
                   <button
