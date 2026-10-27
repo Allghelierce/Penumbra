@@ -9,19 +9,26 @@ import {
   type Point,
   type HistoricMission,
   type Recap,
+  type RocketTemplate,
   type SketchReading,
   type Stroke,
+  type TemplateId,
   type Verdict,
 } from "@/lib/design";
 import { DEMO_SKETCHES } from "@/lib/demo-sketches";
 import { analyze, simulateFlight } from "@/lib/physics";
 import { readFromGeometry } from "@/lib/sketch/geometry";
+import { applyAction } from "@/lib/actions";
+import { drawTemplate, templateById, TEMPLATES } from "@/lib/templates";
 
 // Launch fixtures: the demo sketches run through the real geometry reader and physics,
 // plus hand-made traces that pin down each outcome.
 
 export interface LaunchFixture {
   id: string;
+  /** Real-rocket templates: exact stage bands and the template id. */
+  stageBands?: [number, number][];
+  templateId?: TemplateId;
   title: string;
   note: string;
   strokes: Stroke[];
@@ -337,3 +344,37 @@ export const SAMPLE_MISSION: HistoricMission = {
   ],
   sources: [{ title: "SpaceX Falcon 1 Flight 1 summary", url: "https://www.spacex.com" }],
 };
+
+// --- Real-rocket templates: clean outlines with exact stage bands ---
+
+function templateFixture(t: RocketTemplate, design: Design, id: string, title: string): LaunchFixture {
+  const drawing = drawTemplate(t, design);
+  const result = analyze(design);
+  return {
+    id,
+    title,
+    note: `${design.heightM} m · ${design.stages.length} stages · ${result.verdict}`,
+    strokes: drawing.strokes,
+    reading: { design, parts: drawing.parts },
+    analysis: result,
+    trace: simulateFlight(design, result),
+    stageBands: drawing.stageBands,
+    templateId: t.id,
+  };
+}
+
+const falcon9 = templateById("falcon9");
+
+export const TEMPLATE_FIXTURES: LaunchFixture[] = [
+  ...TEMPLATES.map((t) => templateFixture(t, t.design, `template-${t.id}`, t.name)),
+  // The booster flies back (and the payload drops to the published reusable figure).
+  templateFixture(
+    falcon9,
+    {
+      ...applyAction(falcon9.design, { type: "set-recover", stageIndex: 0, recover: true }),
+      payloadMassKg: falcon9.realPayloadLeoReusableKg ?? falcon9.design.payloadMassKg,
+    },
+    "template-falcon9-recovered",
+    `${falcon9.name}, booster recovered`,
+  ),
+];

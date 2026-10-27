@@ -2,7 +2,16 @@
 
 import { useEffect, useRef, useState } from "react";
 import LaunchScene from "@/components/LaunchScene";
-import { FIXTURES, FIXTURE_RENDER, REAL_FIXTURES, SAMPLE_MISSION, SAMPLE_RECAP, VEHICLE_FIXTURE, type LaunchFixture } from "./fixtures";
+import {
+  FIXTURES,
+  FIXTURE_RENDER,
+  REAL_FIXTURES,
+  SAMPLE_MISSION,
+  SAMPLE_RECAP,
+  TEMPLATE_FIXTURES,
+  VEHICLE_FIXTURE,
+  type LaunchFixture,
+} from "./fixtures";
 
 type RenderMode = "late" | "now" | "none";
 
@@ -28,7 +37,7 @@ export default function LaunchDevPage() {
   // ?play=<fixture id> starts a launch on load (handy for screenshots).
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
-    const fixture = [...REAL_FIXTURES, ...FIXTURES].find((f) => f.id === params.get("play"));
+    const fixture = [...TEMPLATE_FIXTURES, ...REAL_FIXTURES, ...FIXTURES].find((f) => f.id === params.get("play"));
     if (!fixture) return;
     // ?rect=left,top,width,height pretends the napkin sat there on screen.
     const [left, top, width, height] = (params.get("rect") ?? "").split(",").map(Number);
@@ -63,6 +72,7 @@ export default function LaunchDevPage() {
       </p>
 
       {[
+        { title: "Real rockets: templates", list: TEMPLATE_FIXTURES },
         { title: "Real physics: demo sketches", list: REAL_FIXTURES },
         { title: "Hand-made traces", list: FIXTURES },
       ].map((group) => (
@@ -111,6 +121,8 @@ export default function LaunchDevPage() {
           reading={active.fixture.reading}
           analysis={active.fixture.analysis}
           trace={active.fixture.trace}
+          stageBands={active.fixture.stageBands}
+          templateId={active.fixture.templateId}
           renderUrl={renderUrl}
           renderState={mode === "none" ? "none" : renderUrl ? "done" : "loading"}
           napkinRect={napkinRect}
