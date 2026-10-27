@@ -6,6 +6,7 @@
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent, type PointerEvent } from "react";
 import type { TradeCurve, TradePoint } from "@/lib/design";
 import { km } from "@/lib/physics/format";
+import { explainCurve } from "@/lib/trade";
 
 type MarkKey = "real" | "best" | "you";
 
@@ -43,19 +44,49 @@ export function monotoneTangents(xs: number[], ys: number[]): number[] {
   return m;
 }
 
-/** The curve's value at x (clamped to the sweep), on the same spline that's drawn. */
-export function splineAt(xs: number[], ys: number[], m: number[], x: number): number {
+type Cmd = ["M" | "L", number, number] | ["C", number, number, number, number, number, number];
+
+/**
+ * The curve as drawn, in data units. Each run of points that reach the destination is a monotone spline; where
+ * the payload hits zero (the stack can't lift off, or can't get there) it's a straight drop between the two
+ * measured points, never smoothed into a slide. `at` reads the same shape anywhere along the sweep.
+ */
+export function curveModel(xs: number[], ys: number[]) {
   const n = xs.length;
-  if (n === 0) return 0;
-  if (n === 1 || x <= xs[0]) return ys[0];
-  if (x >= xs[n - 1]) return ys[n - 1];
-  let i = 0;
-  while (x > xs[i + 1]) i++;
-  const h = xs[i + 1] - xs[i];
-  const t = (x - xs[i]) / h;
-  const t2 = t * t;
-  const t3 = t2 * t;
-  return (2 * t3 - 3 * t2 + 1) * ys[i] + (t3 - 2 * t2 + t) * h * m[i] + (-2 * t3 + 3 * t2) * ys[i + 1] + (t3 - t2) * h * m[i + 1];
+  const m = new Array<number>(n).fill(0);
+  for (let i = 0; i < n; ) {
+    let j = i;
+    if (ys[i] > 0) {
+      while (j + 1 < n && ys[j + 1] > 0) j++;
+      monotoneTangents(xs.slice(i, j + 1), ys.slice(i, j + 1)).forEach((v, k) => (m[i + k] = v));
+    }
+    i = j + 1;
+  }
+  const smooth = (i: number) => ys[i] > 0 && ys[i + 1] > 0;
+  const at = (x: number): number => {
+    if (n === 0) return 0;
+    if (n === 1 || x <= xs[0]) return ys[0];
+    if (x >= xs[n - 1]) return ys[n - 1];
+    let i = 0;
+    while (x > xs[i + 1]) i++;
+    const h = xs[i + 1] - xs[i];
+    const t = (x - xs[i]) / h;
+    if (!smooth(i)) return ys[i] + (ys[i + 1] - ys[i]) * t;
+    const t2 = t * t;
+    const t3 = t2 * t;
+    const y = (2 * t3 - 3 * t2 + 1) * ys[i] + (t3 - 2 * t2 + t) * h * m[i] + (-2 * t3 + 3 * t2) * ys[i + 1] + (t3 - t2) * h * m[i + 1];
+    return Math.max(0, y);
+  };
+  const cmds: Cmd[] = n ? [["M", xs[0], ys[0]]] : [];
+  for (let i = 0; i < n - 1; i++) {
+    const h = xs[i + 1] - xs[i];
+    cmds.push(
+      smooth(i)
+        ? ["C", xs[i] + h / 3, ys[i] + (m[i] * h) / 3, xs[i + 1] - h / 3, ys[i + 1] - (m[i + 1] * h) / 3, xs[i + 1], ys[i + 1]]
+        : ["L", xs[i + 1], ys[i + 1]],
+    );
+  }
+  return { at, cmds };
 }
 
 function niceStep(span: number, count: number) {
@@ -74,40 +105,27 @@ function ticks(lo: number, hi: number, step: number) {
 const trim = (v: number) => String(Number(v.toFixed(2)));
 const fmtX = (x: number, unit: string) => (unit === "×" ? `${trim(x)}×` : `${trim(x)} ${unit}`);
 
-/** Tonnes for big rockets, kilograms when the whole curve is under 2 t (Electron). */
+/** Tonnes for big rockets, kilograms when the whole curve is under 2 t (Electron). Rounded like explainCurve's caption, so they agree. */
 export function payloadText(kg: number, tonnes: boolean) {
   const v = Math.max(0, kg);
   if (!tonnes) return `${Math.round(v).toLocaleString("en-US")} kg`;
-  const t = v / 1000;
-  return `${t >= 100 ? Math.round(t) : t.toFixed(1)} t`;
+  if (v <= 0) return "0 t";
+  return v >= 10_000 ? `${Math.round(v / 1000).toLocaleString("en-US")} t` : `${(v / 1000).toFixed(1)} t`;
 }
 
 const pct = (a: number, b: number) => Math.round((a / b - 1) * 100);
 const signedPct = (p: number) => `${p > 0 ? "+" : "−"}${Math.abs(p)}%`;
 
-/** Plain-language read of the curve, until a better one is passed in as `caption`. */
-function describe(curve: TradeCurve, currentX: number, at: (x: number) => number, tonnes: boolean) {
-  const what = curve.label.toLowerCase();
-  const pay = (kg: number) => payloadText(kg, tonnes);
-  const fx = (x: number) => fmtX(x, curve.unit);
+/** One sentence on the user's change against the real rocket; empty while it's unchanged. */
+function yoursLine(curve: TradeCurve, currentX: number, at: (x: number) => number, tonnes: boolean) {
+  if (Math.abs(currentX - curve.realX) < 1e-6) return "";
+  const fx = fmtX(currentX, curve.unit);
   const real = at(curve.realX);
-  const best = at(curve.bestX);
   const you = at(currentX);
-  const out = [real > 0 ? `As built (${fx(curve.realX)}) it carries ${pay(real)}.` : `As built (${fx(curve.realX)}) it can't reach this destination.`];
-  if (best > 0 && Math.abs(curve.bestX - curve.realX) > 1e-6 && best > real * 1.005) {
-    out.push(`The best ${what} is ${fx(curve.bestX)}, for ${pay(best)}${real > 0 ? ` (${signedPct(pct(best, real))})` : ""}.`);
-  } else if (real > 0) {
-    out.push(`That's already the best ${what}: going either way costs payload.`);
-  }
-  if (Math.abs(currentX - curve.realX) > 1e-6) {
-    if (you <= 0) out.push(`At ${fx(currentX)} it can't reach this destination at all.`);
-    else if (real <= 0) out.push(`Yours, ${fx(currentX)}, carries ${pay(you)}.`);
-    else {
-      const p = pct(you, real);
-      out.push(`Yours, ${fx(currentX)}, carries ${pay(you)}: ${p === 0 ? "about the same as" : `${Math.abs(p)}% ${p > 0 ? "more" : "less"} than`} the real rocket.`);
-    }
-  }
-  return out.join(" ");
+  if (you <= 0) return `Yours, at ${fx}, can't get there at all.`;
+  if (real <= 0) return `Yours, at ${fx}, carries ${payloadText(you, tonnes)}.`;
+  const p = pct(you, real);
+  return `Yours, at ${fx}, carries ${payloadText(you, tonnes)}: ${p === 0 ? "about the same as" : `${Math.abs(p)}% ${p > 0 ? "more" : "less"} than`} the real rocket.`;
 }
 
 type Placed = { left: number; right: number; lane: number; flip: boolean };
@@ -169,13 +187,15 @@ interface Props {
   currentX: number;
   /** Called with the swept value of the point the user clicked. */
   onPick?: (x: number) => void;
-  /** Plain-language reading shown under the chart: a built-in one when left out, none when null. */
+  /** Plain-language reading shown under the chart: explainCurve plus a line on your change when left out, none when null. */
   caption?: string | null;
+  /** Passed to explainCurve for the default caption, which then adds what landing the boosters costs. */
+  context?: Parameters<typeof explainCurve>[1];
   /** Height of the plot itself, without the label lanes, axis and caption (about 56px more). */
   plotHeight?: number;
 }
 
-export default function TradeChart({ curve, currentX, onPick, caption, plotHeight = 190 }: Props) {
+export default function TradeChart({ curve, currentX, onPick, caption, context, plotHeight = 190 }: Props) {
   const wrapRef = useRef<HTMLDivElement>(null);
   const svgRef = useRef<SVGSVGElement>(null);
   const [width, setWidth] = useState(560);
@@ -196,8 +216,7 @@ export default function TradeChart({ curve, currentX, onPick, caption, plotHeigh
       .filter((p, i, arr) => i === 0 || p.x !== arr[i - 1].x);
     const xs = pts.map((p) => p.x);
     const ys = pts.map((p) => Math.max(0, p.payloadKg));
-    const m = monotoneTangents(xs, ys);
-    const at = (x: number) => Math.max(0, splineAt(xs, ys, m, x));
+    const { at, cmds } = curveModel(xs, ys);
     const nearest = (x: number) => xs.reduce((b, v, i) => (Math.abs(v - x) < Math.abs(xs[b] - x) ? i : b), 0);
 
     const maxKg = Math.max(0, ...ys);
@@ -228,8 +247,8 @@ export default function TradeChart({ curve, currentX, onPick, caption, plotHeigh
       .map((key) => {
         const x = key === "real" ? curve.realX : key === "best" ? curve.bestX : currentX;
         const kg = at(x);
-        let value = allZero ? "" : payloadText(kg, tonnes);
-        if (key === "you" && !allZero && realKg > 0 && Math.abs(currentX - curve.realX) > 1e-6) {
+        let value = allZero ? "" : kg > 0 ? payloadText(kg, tonnes) : "can't reach";
+        if (key === "you" && kg > 0 && realKg > 0 && Math.abs(currentX - curve.realX) > 1e-6) {
           const p = pct(kg, realKg);
           if (p !== 0) value += ` ${signedPct(p)}`;
         }
@@ -245,11 +264,13 @@ export default function TradeChart({ curve, currentX, onPick, caption, plotHeigh
     const bottom = top + plotHeight;
     const sy = (kg: number) => bottom - (kg / div / yTop) * plotHeight;
     const f = (v: number) => v.toFixed(1);
-    let line = pts.length ? `M${f(sx(xs[0]))},${f(sy(ys[0]))}` : "";
-    for (let i = 0; i < pts.length - 1; i++) {
-      const h = xs[i + 1] - xs[i];
-      line += `C${f(sx(xs[i] + h / 3))},${f(sy(ys[i] + (m[i] * h) / 3))} ${f(sx(xs[i + 1] - h / 3))},${f(sy(ys[i + 1] - (m[i + 1] * h) / 3))} ${f(sx(xs[i + 1]))},${f(sy(ys[i + 1]))}`;
-    }
+    const line = cmds
+      .map(([c, ...v]) => {
+        const pairs: string[] = [];
+        for (let k = 0; k < v.length; k += 2) pairs.push(`${f(sx(v[k]))},${f(sy(v[k + 1]))}`);
+        return c + pairs.join(" ");
+      })
+      .join("");
     const area = pts.length > 1 ? `${line}L${f(sx(xs[xs.length - 1]))},${bottom}L${f(sx(xs[0]))},${bottom}Z` : "";
     const maxDv = Math.max(0, ...pts.map((p) => p.totalDeltaVMps));
 
@@ -259,8 +280,8 @@ export default function TradeChart({ curve, currentX, onPick, caption, plotHeigh
   const n = g.pts.length;
   const hp = cursor != null && cursor < n ? g.pts[cursor] : null;
   const fx = (x: number) => fmtX(x, curve.unit);
-  const what = curve.label.toLowerCase();
-  const text = caption === undefined ? describe(curve, currentX, g.at, g.tonnes) : caption;
+  const text =
+    caption === undefined ? [explainCurve(curve, context), yoursLine(curve, currentX, g.at, g.tonnes)].filter(Boolean).join(" ") : caption;
 
   const pointToIndex = (clientX: number) => {
     const r = svgRef.current?.getBoundingClientRect();
@@ -293,8 +314,8 @@ export default function TradeChart({ curve, currentX, onPick, caption, plotHeigh
   return (
     <section className="module">
       <header className="module-head">
-        <h3 className="truncate font-space text-[11px] font-semibold uppercase tracking-[0.22em] text-white/70">Payload vs {what}</h3>
-        {onPick && !g.allZero && width >= 420 && <span className="shrink-0 text-[11px] text-haze">Click the curve to try a point</span>}
+        <h3 className="truncate font-space text-[11px] font-semibold uppercase tracking-[0.22em] text-white/70">Payload vs {curve.label}</h3>
+        {onPick && !g.allZero && width >= 480 && <span className="shrink-0 text-[11px] text-haze">Click the curve to try a point</span>}
       </header>
 
       <div ref={wrapRef} className="relative">
@@ -304,7 +325,7 @@ export default function TradeChart({ curve, currentX, onPick, caption, plotHeigh
           height={g.height}
           className="block touch-none font-mono outline-none focus-visible:outline-1 focus-visible:outline-white/40"
           tabIndex={n ? 0 : -1}
-          aria-label={`Payload against ${what}. ${text ?? ""} Arrow keys read each point${onPick ? "; Enter picks it" : ""}.`}
+          aria-label={`Payload against ${curve.label}. ${text ?? ""} Arrow keys read each point${onPick ? "; Enter picks it" : ""}.`}
           onKeyDown={onKey}
           onFocus={() => setCursor((c) => c ?? g.nearest(currentX))}
           onBlur={() => setCursor(null)}
@@ -333,6 +354,10 @@ export default function TradeChart({ curve, currentX, onPick, caption, plotHeigh
 
           {g.area && !g.allZero && <path d={g.area} fill="#fff" fillOpacity={0.06} />}
           <path d={g.line} fill="none" stroke={g.allZero ? "#555" : "#d9d9d9"} strokeWidth={2} strokeLinejoin="round" strokeLinecap="round" />
+          {/* Engine counts are whole numbers: a dot on each one says the line only joins them up. */}
+          {curve.unit !== "×" &&
+            !g.allZero &&
+            g.pts.map((p) => <circle key={p.x} cx={g.sx(p.x)} cy={g.sy(Math.max(0, p.payloadKg))} r={2} fill="#d9d9d9" />)}
 
           {g.marks.map((mk, i) => (
             <line key={mk.key} x1={mk.px} x2={mk.px} y1={g.top - 16 - g.placed[i].lane * LANE_H} y2={g.sy(mk.kg)} stroke={COLOR[mk.key]} strokeOpacity={0.55} />
@@ -341,7 +366,7 @@ export default function TradeChart({ curve, currentX, onPick, caption, plotHeigh
           {g.allZero && (
             <g textAnchor="middle" className="font-space" stroke="#000" strokeWidth={6} strokeLinejoin="round" paintOrder="stroke">
               <text x={g.padL + g.plotW / 2} y={g.top + plotHeight / 2 - 6} fontSize={15} fill="#fff" fontWeight={600}>
-                Can&apos;t reach this destination at any {what}
+                Can&apos;t reach this destination {curve.unit === "×" ? "at any stretch" : `with any number of ${curve.unit}`}
               </text>
               <text x={g.padL + g.plotW / 2} y={g.top + plotHeight / 2 + 16} fontSize={13} fill="var(--haze)">
                 Most Δv anywhere on this sweep: {km(g.maxDv)} km/s
