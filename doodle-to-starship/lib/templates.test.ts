@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { applyAction } from "./actions";
-import type { Design, TemplateId } from "./design";
+import { NAPKIN_ASPECT, type Design, type TemplateId } from "./design";
 import { analyze, ENGINES, PROPELLANT_DENSITY_KG_M3 } from "./physics";
 import { TANK_FILL } from "./physics/data";
 import { drawTemplate, TEMPLATES, templateById } from "./templates";
@@ -80,6 +80,25 @@ describe("drawTemplate", () => {
       });
       expect(drawTemplate(t, t.design)).toEqual(drawing);
     }
+  });
+
+  it("scales widths and heights the same way, with the widest tank at design.diameterM", () => {
+    for (const t of TEMPLATES) {
+      const { parts } = drawTemplate(t, t.design);
+      const tanks = parts.filter((p) => p.kind === "tank");
+      // In napkin-height units a box's width is w × NAPKIN_ASPECT (the napkin is 3:4).
+      const widest = Math.max(...tanks.map((p) => p.box[2] * NAPKIN_ASPECT));
+      const metresPerUnit = t.design.diameterM / widest;
+      // The nose-to-bells drawing spans the real height within a few percent at that same scale.
+      const top = Math.min(...parts.map((p) => p.box[1]));
+      const bottom = Math.max(...parts.map((p) => p.box[1] + p.box[3]));
+      expect(((bottom - top) * metresPerUnit) / t.design.heightM, t.id).toBeGreaterThan(0.9);
+      expect(((bottom - top) * metresPerUnit) / t.design.heightM, t.id).toBeLessThan(1.12);
+    }
+    // Saturn V's S-IVB (6.6 m) and S-IC (10.1 m) keep their real width ratio.
+    const sat = drawTemplate(TEMPLATES[1], TEMPLATES[1].design).parts.filter((p) => p.kind === "tank");
+    const width = (i: number) => sat.find((p) => p.stageIndex === i)!.box[2];
+    expect(width(2) / width(0)).toBeCloseTo(6.6 / 10.1, 2);
   });
 
   it("lengthens a stretched stage relative to the others", () => {
