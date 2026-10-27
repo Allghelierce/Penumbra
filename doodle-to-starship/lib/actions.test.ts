@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { applyAction } from "./actions";
+import { applyAction, structureScale } from "./actions";
 import type { Design } from "./design";
 import { analyze } from "./physics";
 
@@ -40,11 +40,23 @@ function falconLike(): Design {
 }
 
 describe("scale-tanks", () => {
-  it("multiplies tank volume, and dry mass when it's set", () => {
+  it("grows a stated dry mass with the tanks, but only its structure, not the engines", () => {
     const next = applyAction(falconLike(), { type: "scale-tanks", stageIndex: 0, factor: 1.5 });
     expect(next.stages[0].tankVolumeM3).toBe(600);
-    expect(next.stages[0].dryMassKg).toBe(37_500);
+    const engines = 9 * 470;
+    expect(next.stages[0].dryMassKg).toBeCloseTo(engines + (25_000 - engines) * structureScale(1.5), 6);
     expect(next.stages[1]).toEqual(falconLike().stages[1]);
+  });
+
+  it("makes structure grow with volume, with a fixed share and a growing penalty past 1.4x", () => {
+    expect(structureScale(1)).toBeCloseTo(1, 12);
+    // Shrinking keeps the fixed share (thrust structure, avionics).
+    expect(structureScale(0.5)).toBeCloseTo(0.575, 12);
+    // Up to 1.4x it's proportional; past it, each extra 10% costs more than the last.
+    expect(structureScale(1.4)).toBeCloseTo(0.15 + 0.85 * 1.4, 12);
+    const step = (f: number) => structureScale(f + 0.1) - structureScale(f);
+    expect(step(1.6)).toBeGreaterThan(step(1.4));
+    expect(step(1.9)).toBeGreaterThan(step(1.6));
   });
 
   it("leaves an unset dry mass for the physics engine to estimate", () => {
@@ -132,5 +144,57 @@ describe("payload, destination, launch and review", () => {
     const design = falconLike();
     expect(applyAction(design, { type: "launch" })).toBe(design);
     expect(applyAction(design, { type: "review" })).toBe(design);
+  });
+});
+
+describe("set-engines on one cluster", () => {
+  // Starship's Ship: 3 sea-level Raptors and 3 vacuum Raptors.
+  const ship: Design = {
+    ...falconLike(),
+    stages: [
+      {
+        label: "Ship",
+        engines: [
+          { engine: "raptor-2", count: 3 },
+          { engine: "raptor-vacuum", count: 3 },
+        ],
+        propellant: "methalox",
+        tankVolumeM3: 1_900,
+        dryMassKg: 120_000,
+      },
+    ],
+  };
+
+  it("replaces only that cluster and trades the engines' mass", () => {
+    const next = applyAction(ship, { type: "set-engines", stageIndex: 0, clusterIndex: 1, engine: "raptor-vacuum", count: 6 });
+    expect(next.stages[0].engines).toEqual([
+      { engine: "raptor-2", count: 3 },
+      { engine: "raptor-vacuum", count: 6 },
+    ]);
+    expect(next.stages[0].dryMassKg).toBe(120_000 + 3 * 1_600);
+  });
+
+  it("removes a cluster at count 0, but never the stage's last one", () => {
+    const fewer = applyAction(ship, { type: "set-engines", stageIndex: 0, clusterIndex: 0, engine: "raptor-2", count: 0 });
+    expect(fewer.stages[0].engines).toEqual([{ engine: "raptor-vacuum", count: 3 }]);
+    expect(fewer.stages[0].dryMassKg).toBe(120_000 - 3 * 1_630);
+    const last = applyAction(fewer, { type: "set-engines", stageIndex: 0, clusterIndex: 0, engine: "raptor-vacuum", count: 0 });
+    expect(last.stages[0].engines).toEqual([{ engine: "raptor-vacuum", count: 1 }]);
+  });
+
+  it("ignores a cluster that isn't there, and still replaces every cluster without an index", () => {
+    expect(applyAction(ship, { type: "set-engines", stageIndex: 0, clusterIndex: 5, engine: "raptor-2", count: 4 })).toEqual(ship);
+    const all = applyAction(ship, { type: "set-engines", stageIndex: 0, engine: "raptor-2", count: 6 });
+    expect(all.stages[0].engines).toEqual([{ engine: "raptor-2", count: 6 }]);
+  });
+});
+
+describe("set-recover", () => {
+  it("marks one stage to fly back, and back again", () => {
+    const landed = applyAction(falconLike(), { type: "set-recover", stageIndex: 0, recover: true });
+    expect(landed.stages[0].recover).toBe(true);
+    expect(landed.stages[1].recover).toBeUndefined();
+    expect(applyAction(landed, { type: "set-recover", stageIndex: 0, recover: false }).stages[0].recover).toBe(false);
+    expect(applyAction(landed, { type: "set-recover", stageIndex: 7, recover: true })).toBe(landed);
   });
 });

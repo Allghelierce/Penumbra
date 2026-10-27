@@ -16,8 +16,8 @@ const ADDED_STAGE_MAX_ENGINES = 40;
 const FIXED_STRUCTURE = 0.15;
 /** Past this stretch, longer tanks need disproportionately heavier walls and stiffening... */
 const STRETCH_PENALTY_FROM = 1.4;
-/** ...growing with the square of the extra stretch. */
-const STRETCH_PENALTY = 1.5;
+/** ...growing with the square of the extra stretch (bending loads grow roughly with length squared). */
+const STRETCH_PENALTY = 4;
 
 export function applyAction(design: Design, action: DesignAction): Design {
   switch (action.type) {
@@ -36,16 +36,12 @@ export function applyAction(design: Design, action: DesignAction): Design {
     case "set-engines":
       return updateStage(design, action.stageIndex, (stage) => setEngines(stage, action));
 
+    case "set-recover":
+      return updateStage(design, action.stageIndex, (stage) => ({ ...stage, recover: action.recover }));
+
     case "set-payload":
       if (!(action.payloadMassKg >= 0)) return design;
       return { ...design, payloadMassKg: action.payloadMassKg };
-
-    case "set-recover":
-      if (!design.stages[action.stageIndex]) return design;
-      return {
-        ...design,
-        stages: design.stages.map((stage, i) => (i === action.stageIndex ? { ...stage, recover: action.recover } : stage)),
-      };
 
     case "set-destination":
       return { ...design, destination: action.destination };
