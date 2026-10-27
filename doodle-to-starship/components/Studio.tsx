@@ -872,13 +872,18 @@ export default function Studio() {
   const autoLaunch = useRef(false);
   const [attract, setAttract] = useState(false);
 
-  // URL switches for rehearsals and screenshots: ?demo=<id> loads a demo sketch, &check=1 reads
-  // it, &launch=1 then launches it. ?attract=1 is booth mode: after 45 s idle the napkin draws,
-  // checks and launches itself.
+  // URL switches for rehearsals and screenshots: ?rocket=<template id> opens a real rocket to modify.
+  // ?demo=<id> loads a demo sketch, &check=1 reads it, &launch=1 then launches it. ?attract=1 is
+  // booth mode: after 45 s idle the napkin draws, checks and launches itself.
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     /* eslint-disable react-hooks/set-state-in-effect -- one-time sync from the URL after hydration */
     setAttract(params.get("attract") === "1");
+    const rocket = TEMPLATES.find((t) => t.id === params.get("rocket"));
+    if (rocket) {
+      pickTemplate(rocket);
+      return;
+    }
     const sketch = DEMO_SKETCHES.find((s) => s.id === params.get("demo"));
     if (!sketch) return;
     setStep(1);
@@ -887,6 +892,8 @@ export default function Studio() {
     if (params.get("check") === "1") setCheckRequest((n) => n + 1);
     /* eslint-enable react-hooks/set-state-in-effect */
     autoLaunch.current = params.get("launch") === "1";
+    // Once, on load: later picks go through the buttons.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   useEffect(() => {
