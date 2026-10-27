@@ -4,8 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import AttractMode from "@/components/AttractMode";
 import EditHandles, { type Stretch } from "@/components/EditHandles";
 import LaunchScene, { unlockLaunchAudio } from "@/components/LaunchScene";
-import ModifyPanel from "@/components/ModifyPanel";
-import { realStageIndex, stretchFromReal, stretchOf } from "@/components/modify/trade";
+import ModifyPanel, { applyStretch, realIndex } from "@/components/ModifyPanel";
 import NapkinCanvas from "@/components/NapkinCanvas";
 import NapkinAssist from "@/components/NapkinAssist";
 import NapkinRender from "@/components/NapkinRender";
@@ -270,10 +269,10 @@ export default function Studio() {
   const drawing = useMemo(() => (template && design ? drawTemplate(template, design) : null), [template, design]);
   const napkinStrokes = drawing ? drawing.strokes : strokes;
   // The design with the drag in progress, built the same way the drag will be applied.
-  const preview = useMemo(() => {
-    if (!template || !design || !stretch) return null;
-    return stretchFromReal(design, template.design, stretch.stageIndex, stretchOf(design, template.design, stretch.stageIndex) * stretch.factor);
-  }, [template, design, stretch]);
+  const preview = useMemo(
+    () => (template && design && stretch ? applyStretch(design, template.design, stretch.stageIndex, stretch.factor) : null),
+    [template, design, stretch],
+  );
 
   // Latest values for callbacks that outlive a render (voice tool calls, async responses).
   const latest = useRef({ reading, design, strokes, destination, review, mission, template });
@@ -469,14 +468,15 @@ export default function Studio() {
       const { design: current, reading: read, template: real } = latest.current;
       if (action.type === "set-destination") setDestination(action.destination);
       if (!current || !read) return;
-      let nextDesign = action.type === "review" ? current : applyAction(current, action);
-      if (real && action.type === "scale-tanks") {
-        // A drag's factor is relative to the tanks as they are; rebuild from the real stage so stretches never compound.
-        const x = stretchOf(current, real.design, action.stageIndex) * action.factor;
-        nextDesign = stretchFromReal(current, real.design, action.stageIndex, x);
-      }
+      // On a real rocket, a stretch is rebuilt from the real stage so drags never compound.
+      const nextDesign =
+        action.type === "review"
+          ? current
+          : real && action.type === "scale-tanks"
+            ? applyStretch(current, real.design, action.stageIndex, action.factor)
+            : applyAction(current, action);
       if (real && (action.type === "scale-tanks" || action.type === "set-engines")) {
-        const j = realStageIndex(current, real.design, action.stageIndex);
+        const j = realIndex(current, real.design, action.stageIndex);
         if (j >= 0) setChartStage(j);
       }
       const nextReading = real ? templateReading(real, nextDesign) : { ...read, design: nextDesign };
@@ -683,14 +683,6 @@ export default function Studio() {
     setReviewKey((k) => k + 1);
     setPhase("reviewed");
     setNarration(marks.summary);
-  }
-
-  /** Pick a point on the trade chart: that stage's tanks become x times the real ones. */
-  function pickStretch(stageIndex: number, x: number) {
-    const { design: current, template: t } = latest.current;
-    if (!current || !t) return;
-    const factor = x / stretchOf(current, t.design, stageIndex);
-    if (Math.abs(factor - 1) > 1e-6) handleAction({ type: "scale-tanks", stageIndex, factor });
   }
 
   function anotherMission() {
@@ -1174,7 +1166,6 @@ export default function Studio() {
                 onReset={resetTemplate}
                 chartStage={chartStage}
                 onChartStage={setChartStage}
-                onPickStretch={pickStretch}
                 top={
                   step === 2 && review ? (
                     <section className="module">
@@ -1259,6 +1250,8 @@ export default function Studio() {
         <LaunchScene
           key={flightId}
           strokes={napkinStrokes}
+          stageBands={drawing?.stageBands}
+          templateId={template?.id}
           reading={{ ...reading, design }}
           analysis={analysis}
           trace={flight.trace}

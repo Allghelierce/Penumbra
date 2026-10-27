@@ -4,10 +4,33 @@ import { useMemo, useState, type ReactNode } from "react";
 import TradeChart from "@/components/TradeChart";
 import { payloadText } from "@/components/TemplatePicker";
 import { PLACE_NAMES } from "@/components/VerdictPanel";
-import { maxPayloadKg, realStageIndex, stretchOf, tradeCurve } from "@/components/modify/trade";
-import type { Analysis, Design, DesignAction, DestinationId, RocketTemplate, Stage } from "@/lib/design";
+import { applyAction } from "@/lib/actions";
+import type { Analysis, Design, DesignAction, DestinationId, EngineCluster, RocketTemplate, Stage } from "@/lib/design";
 import { analyze, DESTINATIONS, ENGINES } from "@/lib/physics";
 import { km } from "@/lib/physics/format";
+import { maxPayloadKg, MIN_LIFTOFF_TWR, realStageFor, recoveryCostKg, stretchFromReal, tradeCurve, type TradeSweep } from "@/lib/trade";
+
+/** Index of the real stage your stage i was made from, or -1 for a stage you added. */
+export function realIndex(yours: Design, real: Design, i: number): number {
+  const stage = realStageFor(yours, real, i);
+  return stage ? real.stages.indexOf(stage) : -1;
+}
+
+/** How far your stage i's tanks are stretched from the real stage's (1 = as built, and for a stage you added). */
+export function stretchOf(yours: Design, real: Design, i: number): number {
+  const base = realStageFor(yours, real, i);
+  const mine = yours.stages[i];
+  return base && mine ? mine.tankVolumeM3 / base.tankVolumeM3 : 1;
+}
+
+/**
+ * A drag's stretch (a factor on the tanks as they are) applied the way the trade chart builds it: from the
+ * real stage, so stretches never compound. A stage you added has no real one and stretches from where it is.
+ */
+export function applyStretch(yours: Design, real: Design, i: number, factor: number): Design {
+  if (!realStageFor(yours, real, i)) return applyAction(yours, { type: "scale-tanks", stageIndex: i, factor });
+  return stretchFromReal(yours, real, i, stretchOf(yours, real, i) * factor);
+}
 
 interface ModifyPanelProps {
   template: RocketTemplate;
@@ -21,8 +44,6 @@ interface ModifyPanelProps {
   /** The real stage the trade chart sweeps: an index into template.design.stages. */
   chartStage: number;
   onChartStage: (realIndex: number) => void;
-  /** A point picked on the chart: set your stage's tanks to x times the real ones. */
-  onPickStretch: (stageIndex: number, x: number) => void;
   /** Above everything else: the red pen's findings on Check, the flight log after a flight. */
   top?: ReactNode;
 }
@@ -43,14 +64,31 @@ function safeAnalyze(design: Design): Analysis | null {
   }
 }
 
+/** What a published payload figure counts that the model's doesn't. */
+const PUBLISHED_NOTE: Partial<Record<RocketTemplate["id"], string>> = {
+  "saturn-v": ", counting the S-IVB stage itself",
+};
+
+/** "Falcon 9 Block 5" → "Falcon 9": the name people use in a sentence. */
+const shortName = (name: string) => name.replace(/\s+Block\s+\d+$/i, "");
+
 const engineText = (stage: Stage) => stage.engines.map((c) => `${c.count}× ${ENGINES[c.engine]?.name ?? c.engine}`).join(" + ");
+
+/** "the Booster", "the Super Heavy and the Ship". */
+function theStages(labels: string[]): string {
+  const named = labels.map((l) => `the ${l}`);
+  return named.length > 1 ? `${named.slice(0, -1).join(", ")} and ${named.at(-1)}` : (named[0] ?? "");
+}
+
+/** The cluster an engine-count sweep changes: the stage's biggest. */
+const mainCluster = (engines: EngineCluster[]) => engines.reduce((best, c, i, all) => (c.count > all[best].count ? i : best), 0);
 
 /** What you changed on the real rocket, one line per change. */
 function changesOf(real: Design, yours: Design): string[] {
   const lines: string[] = [];
   const kept = new Set<number>();
   yours.stages.forEach((stage, i) => {
-    const j = realStageIndex(yours, real, i);
+    const j = realIndex(yours, real, i);
     if (j < 0) {
       lines.push(`Added ${stage.label}: ${engineText(stage)}`);
       return;
@@ -60,6 +98,7 @@ function changesOf(real: Design, yours: Design): string[] {
     const stretch = stage.tankVolumeM3 / was.tankVolumeM3;
     if (Math.abs(stretch - 1) > 0.004) lines.push(`${stage.label} tanks ×${stretch.toFixed(2)}`);
     if (engineText(stage) !== engineText(was)) lines.push(`${stage.label}: ${engineText(stage)}, was ${engineText(was)}`);
+    if (Boolean(stage.recover) !== Boolean(was.recover)) lines.push(stage.recover ? `${stage.label} lands to fly again` : `${stage.label} is thrown away`);
   });
   real.stages.forEach((stage, j) => {
     if (!kept.has(j)) lines.push(`Removed ${stage.label}`);
@@ -67,16 +106,10 @@ function changesOf(real: Design, yours: Design): string[] {
   return lines;
 }
 
-/** "Falcon 9 Block 5" → "Falcon 9": the name people use in a sentence. */
-const shortName = (name: string) => name.replace(/\s+Block\s+\d+$/i, "");
-
 /** The plain-language answer: what yours carries there, against what the real rocket does. */
-function verdictLine(name: string, destination: DestinationId, yoursMax: number, realMax: number, yours: Analysis | null, emptyShortMps: number): { text: string; good: boolean } {
+function verdictLine(name: string, destination: DestinationId, yoursMax: number, realMax: number, empty: Analysis | null): { text: string; good: boolean } {
   const place = PLACE_NAMES[destination];
   const real = realMax > 0 ? `The real ${name} carries ${payloadText(realMax)} there.` : `The real ${name} can't get there either.`;
-  if (yours && yours.liftoffTwr < 1) {
-    return { text: `Too heavy to lift off: its engines push only ${yours.liftoffTwr.toFixed(2)}× its weight. ${real}`, good: false };
-  }
   if (yoursMax > 0 && realMax === 0) return { text: `Reaches ${place} with ${payloadText(yoursMax)}. The real ${name} can't.`, good: true };
   if (yoursMax > 0) {
     const diff = yoursMax - realMax;
@@ -86,45 +119,67 @@ function verdictLine(name: string, destination: DestinationId, yoursMax: number,
       good: diff > 0,
     };
   }
-  return { text: `Can't reach ${place}, even empty: ${km(emptyShortMps)} km/s short. ${real}`, good: false };
+  if (!empty || empty.liftoffTwr < MIN_LIFTOFF_TWR) {
+    const twr = empty ? empty.liftoffTwr.toFixed(2) : "0";
+    return { text: `Too heavy to leave the pad safely, even empty: thrust is ${twr}× its weight, and real rockets lift off at ${MIN_LIFTOFF_TWR} or more. ${real}`, good: false };
+  }
+  return { text: `Can't reach ${place}, even empty: ${km(Math.max(0, -empty.marginMps))} km/s short. ${real}`, good: false };
 }
 
 const signed = (d: number, text: string) => `${d > 0 ? "+" : "−"}${text}`;
 
 /**
- * Modify a real rocket: the mission you're flying it on, then the real rocket against yours (payload to
- * the destination, delta-v, thrust-to-weight, mass) with a one-line verdict, the trade-off chart for one
- * stage, and the list of what you've changed.
+ * Modify a real rocket: what you've changed, the mission you're flying it on, then the real rocket against
+ * yours (payload to the destination, delta-v, thrust-to-weight, mass) with a one-line verdict and what
+ * landing costs, and the trade-off chart for one stage.
  */
-export default function ModifyPanel({ template, design, preview, onAction, onReset, chartStage, onChartStage, onPickStretch, top }: ModifyPanelProps) {
+export default function ModifyPanel({ template, design, preview, onAction, onReset, chartStage, onChartStage, top }: ModifyPanelProps) {
+  const [sweep, setSweep] = useState<TradeSweep["kind"]>("tank-stretch");
   const shown = preview ?? design;
   const { destination, payloadMassKg } = shown;
+  const name = shortName(template.name);
   const real = useMemo(() => ({ ...template.design, destination, payloadMassKg }), [template, destination, payloadMassKg]);
   const realA = useMemo(() => safeAnalyze(real), [real]);
   const yoursA = useMemo(() => safeAnalyze(shown), [shown]);
   const realMax = useMemo(() => maxPayloadKg(template.design, destination), [template, destination]);
   const yoursMax = useMemo(() => maxPayloadKg(shown, destination), [shown, destination]);
   const modelLeo = useMemo(() => maxPayloadKg(template.design, "leo"), [template]);
-  const emptyShort = useMemo(() => {
-    const empty = safeAnalyze({ ...shown, payloadMassKg: 0 });
-    return empty ? Math.max(0, empty.requiredDeltaVMps - empty.totalDeltaVMps) : 0;
-  }, [shown]);
+  const empty = useMemo(() => safeAnalyze({ ...shown, payloadMassKg: 0 }), [shown]);
+  const landing = useMemo(() => {
+    const labels = shown.stages.filter((s) => s.recover).map((s) => s.label);
+    return labels.length > 0 ? { labels, costKg: recoveryCostKg(shown, destination) } : null;
+  }, [shown, destination]);
   const changes = useMemo(() => changesOf(template.design, design), [template, design]);
-  const verdict = verdictLine(shortName(template.name), destination, yoursMax, realMax, yoursA, emptyShort);
+  const verdict = verdictLine(name, destination, yoursMax, realMax, empty);
 
   // The chart sweeps one real stage; find it in your rocket (stages you add have no real one to compare).
   const stageTabs = useMemo(
     () =>
       template.design.stages
-        .map((stage, j) => ({ j, label: stage.label, i: design.stages.findIndex((_, i) => realStageIndex(design, template.design, i) === j) }))
+        .map((stage, j) => ({ j, label: stage.label, i: design.stages.findIndex((_, i) => realIndex(design, template.design, i) === j) }))
         .filter((tab) => tab.i >= 0),
     [template, design],
   );
   const tab = stageTabs.find((t) => t.j === chartStage) ?? stageTabs[0];
-  const curve = useMemo(
-    () => (tab ? tradeCurve(design, { kind: "tank-stretch", stageIndex: tab.i }, { real: template.design, destination: design.destination }) : null),
-    [design, tab, template],
-  );
+  const chart = useMemo(() => {
+    if (!tab) return null;
+    const stage = design.stages[tab.i];
+    const clusterIndex = mainCluster(stage.engines);
+    const curve = tradeCurve(design, { kind: sweep, stageIndex: tab.i, clusterIndex }, { real: template.design, destination: design.destination });
+    return { curve, clusterIndex };
+  }, [design, tab, sweep, template]);
+
+  function pick(x: number) {
+    if (!tab || !chart) return;
+    if (sweep === "tank-stretch") {
+      const factor = x / stretchOf(design, template.design, tab.i);
+      if (Math.abs(factor - 1) > 1e-6) onAction({ type: "scale-tanks", stageIndex: tab.i, factor });
+      return;
+    }
+    const cluster = design.stages[tab.i].engines[chart.clusterIndex];
+    if (cluster && cluster.count !== x) onAction({ type: "set-engines", stageIndex: tab.i, clusterIndex: chart.clusterIndex, engine: cluster.engine, count: x });
+  }
+  const currentX = !tab || !chart ? 1 : sweep === "tank-stretch" ? stretchOf(shown, template.design, tab.i) : (shown.stages[tab.i]?.engines[chart.clusterIndex]?.count ?? 1);
 
   const rows: { label: string; sub?: string; real: string; yours: string; delta: string | null; tone: string }[] = [];
   const payloadDelta = yoursMax - realMax;
@@ -149,11 +204,11 @@ export default function ModifyPanel({ template, design, preview, onAction, onRes
     const twr = yoursA.liftoffTwr - realA.liftoffTwr;
     rows.push({
       label: "Liftoff thrust / weight",
-      sub: "over 1 to leave the pad",
+      sub: `${MIN_LIFTOFF_TWR} or more to leave the pad safely`,
       real: realA.liftoffTwr.toFixed(2),
       yours: yoursA.liftoffTwr.toFixed(2),
       delta: Math.abs(twr) < 0.005 ? null : signed(twr, Math.abs(twr).toFixed(2)),
-      tone: yoursA.liftoffTwr < 1 ? "text-nogo" : "text-haze",
+      tone: yoursA.liftoffTwr < MIN_LIFTOFF_TWR ? "text-nogo" : "text-haze",
     });
     const mass = yoursA.liftoffMassKg - realA.liftoffMassKg;
     rows.push({
@@ -164,6 +219,13 @@ export default function ModifyPanel({ template, design, preview, onAction, onRes
       tone: "text-haze",
     });
   }
+
+  // The published figure, with what it assumes about landing.
+  const realLanding = template.design.stages.filter((s) => s.recover).map((s) => s.label);
+  const published =
+    template.realPayloadLeoReusableKg !== undefined
+      ? `${payloadText(template.realPayloadLeoKg)} to low Earth orbit thrown away, ${payloadText(template.realPayloadLeoReusableKg)} with the booster landing`
+      : `${payloadText(template.realPayloadLeoKg)} to low Earth orbit${realLanding.length > 0 ? `, with ${theStages(realLanding)} landing` : ""}${PUBLISHED_NOTE[template.id] ?? ""}`;
 
   return (
     <aside className="flex flex-col gap-3 p-3">
@@ -185,7 +247,7 @@ export default function ModifyPanel({ template, design, preview, onAction, onRes
           <p className="font-space text-[22px] font-semibold uppercase leading-tight tracking-[0.06em] text-white">{template.name}</p>
           {changes.length === 0 ? (
             <p className="mt-1 text-[13px] leading-snug text-haze">
-              Drag the top edge of a tank to stretch it, change engines with the chips, or add a booster. Every number below updates as you go.
+              Drag the top edge of a tank to stretch it, change engines with the chips, land a stage, or add a booster. Every number below updates as you go.
             </p>
           ) : (
             <ul className="mt-2 space-y-0.5 text-[13px] leading-snug text-white/90">
@@ -267,6 +329,23 @@ export default function ModifyPanel({ template, design, preview, onAction, onRes
             ))}
           </tbody>
         </table>
+        <p className="border-t border-rule px-4 py-2.5 text-[13px] leading-snug">
+          {landing ? (
+            <span className="text-white/90">
+              <span aria-hidden className="mr-1.5 text-go-signal">
+                ♻
+              </span>
+              Landing {theStages(landing.labels)} costs {payloadText(landing.costKg)} of payload to {PLACE_NAMES[destination]}, against throwing {landing.labels.length > 1 ? "them" : "it"} away.
+            </span>
+          ) : (
+            <span className="text-haze">
+              <span aria-hidden className="mr-1.5">
+                ♻
+              </span>
+              Every stage is thrown away. Turn on Recover on a stage to see what landing it costs.
+            </span>
+          )}
+        </p>
         <p className="border-t border-rule px-4 py-2 text-[12px] leading-snug text-haze">
           {template.sources[0] ? (
             <a href={template.sources[0].url} target="_blank" rel="noreferrer" className="underline decoration-white/30 underline-offset-2 hover:text-white">
@@ -275,13 +354,13 @@ export default function ModifyPanel({ template, design, preview, onAction, onRes
           ) : (
             "Published"
           )}
-          : {payloadText(template.realPayloadLeoKg)} to low Earth orbit. This model gives the real {shortName(template.name)} {payloadText(modelLeo)}.
+          : {published}. This model gives the real {name} {payloadText(modelLeo)}.
         </p>
       </Module>
 
-      {curve && tab && (
+      {chart && tab && (
         <div className="flex flex-col gap-1.5">
-          {stageTabs.length > 1 && (
+          <div className="flex flex-wrap items-center gap-1">
             <div role="tablist" aria-label="Stage to sweep" className="flex gap-1">
               {stageTabs.map((t) => (
                 <button
@@ -298,8 +377,23 @@ export default function ModifyPanel({ template, design, preview, onAction, onRes
                 </button>
               ))}
             </div>
-          )}
-          <TradeChart curve={curve} currentX={stretchOf(shown, template.design, tab.i)} onPick={(x) => onPickStretch(tab.i, x)} plotHeight={96} />
+            <div role="radiogroup" aria-label="What to sweep" className="ml-auto flex">
+              {(["tank-stretch", "engine-count"] as const).map((kind) => (
+                <button
+                  key={kind}
+                  type="button"
+                  role="radio"
+                  aria-checked={sweep === kind}
+                  onClick={() => setSweep(kind)}
+                  className={`h-7 px-2 text-[10px] font-semibold uppercase tracking-[0.16em] transition-colors ${sweep === kind ? "text-white underline underline-offset-4" : "text-haze hover:text-white"}`}
+                >
+                  {kind === "tank-stretch" ? "Tanks" : "Engines"}
+                </button>
+              ))}
+            </div>
+          </div>
+          {/* Its own caption reads the curve and your point on it; what landing costs is already said above. */}
+          <TradeChart curve={chart.curve} currentX={currentX} onPick={pick} plotHeight={96} />
         </div>
       )}
     </aside>
@@ -317,7 +411,7 @@ function PayloadField({ payloadKg, maxKg, small, onSet }: { payloadKg: number; m
     else setDraft(shown);
   };
   const tooHeavy = payloadKg > maxKg;
-  // Rounded down, so "use the most" always still reaches.
+  // Rounded down, so "the most it can carry" always still reaches.
   const most = small ? Math.floor(maxKg / 10) * 10 : Math.floor(maxKg / 100) * 100;
   return (
     <div className="flex items-center gap-3">
@@ -344,7 +438,7 @@ function PayloadField({ payloadKg, maxKg, small, onSet }: { payloadKg: number; m
           type="button"
           onClick={() => onSet(most)}
           disabled={most === payloadKg}
-          className={`text-[12px] transition-colors disabled:cursor-default ${tooHeavy ? "text-nogo hover:text-white" : "text-haze hover:text-white disabled:hover:text-haze"}`}
+          className={`text-left text-[12px] leading-snug transition-colors disabled:cursor-default ${tooHeavy ? "text-nogo hover:text-white" : "text-haze hover:text-white disabled:hover:text-haze"}`}
         >
           {tooHeavy ? "Too heavy. " : ""}Most it can carry: {payloadText(most)}
         </button>
