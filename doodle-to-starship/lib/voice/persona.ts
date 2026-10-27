@@ -95,6 +95,8 @@ export function ackLine(action: DesignAction, design: Design | null): string {
       return `${action.count} ${action.count === 1 ? "engine" : "engines"}, got it.`;
     case "set-payload":
       return `Payload's ${fmt(action.payloadMassKg / 1000)} tons.`;
+    case "set-recover":
+      return action.recover ? "Bringing that stage home. It'll cost you payload." : "Throwing that stage away. More payload, no reuse.";
     case "launch":
       return pick(["Copy. Lighting the candle.", "Clear the pad.", "Okay, your funeral. Launching."], Date.now() / 1000);
     case "review":

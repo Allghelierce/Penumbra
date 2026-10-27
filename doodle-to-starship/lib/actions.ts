@@ -1,8 +1,8 @@
 // Pure edits to a Design, used by the voice reviewer, the UI and the red pen's
 // what-if checks. Every function returns a new Design and never mutates its input.
 
-import type { Design, DesignAction, Stage } from "./design";
-import { analyze } from "./physics";
+import type { Design, DesignAction, EngineCluster, Stage } from "./design";
+import { analyze, ENGINES } from "./physics";
 
 /** A new bottom stage holds this many times the current bottom stage's propellant. */
 const ADDED_STAGE_SCALE = 2.5;
@@ -11,6 +11,13 @@ const ADDED_STAGE_MIN_ENGINES = 3;
 const ADDED_STAGE_TWR = 1.3;
 /** ...but no more than this many (Super Heavy flies 33), unless the old 2.5× rule already gave more. */
 const ADDED_STAGE_MAX_ENGINES = 40;
+
+/** Share of a stage's structure that doesn't grow with its tanks: thrust structure, avionics, interstage. */
+const FIXED_STRUCTURE = 0.15;
+/** Past this stretch, longer tanks need disproportionately heavier walls and stiffening... */
+const STRETCH_PENALTY_FROM = 1.4;
+/** ...growing with the square of the extra stretch. */
+const STRETCH_PENALTY = 1.5;
 
 export function applyAction(design: Design, action: DesignAction): Design {
   switch (action.type) {
@@ -27,14 +34,18 @@ export function applyAction(design: Design, action: DesignAction): Design {
       return { ...design, stages: design.stages.filter((_, i) => i !== action.stageIndex) };
 
     case "set-engines":
-      return updateStage(design, action.stageIndex, (stage) => ({
-        ...stage,
-        engines: [{ engine: action.engine, count: Math.max(1, Math.round(action.count)) }],
-      }));
+      return updateStage(design, action.stageIndex, (stage) => setEngines(stage, action));
 
     case "set-payload":
       if (!(action.payloadMassKg >= 0)) return design;
       return { ...design, payloadMassKg: action.payloadMassKg };
+
+    case "set-recover":
+      if (!design.stages[action.stageIndex]) return design;
+      return {
+        ...design,
+        stages: design.stages.map((stage, i) => (i === action.stageIndex ? { ...stage, recover: action.recover } : stage)),
+      };
 
     case "set-destination":
       return { ...design, destination: action.destination };
@@ -54,12 +65,52 @@ function updateStage(design: Design, index: number, update: (stage: Stage) => St
   return { ...design, stages: design.stages.map((stage, i) => (i === index ? update(stage) : stage)) };
 }
 
+/**
+ * Stretches (or shrinks) a stage's tanks. A stated dry mass grows with them, but only its
+ * structure does (the engines stay the same), and past 1.4× the walls get disproportionately
+ * heavier. Without a stated dry mass the physics estimates structure from the propellant.
+ * Apply stretches to the as-built design, not on top of each other, so the penalty is right.
+ */
 function scaleTanks(stage: Stage, factor: number): Stage {
-  return {
-    ...stage,
-    tankVolumeM3: stage.tankVolumeM3 * factor,
-    ...(stage.dryMassKg !== undefined && { dryMassKg: stage.dryMassKg * factor }),
-  };
+  if (stage.dryMassKg === undefined) return { ...stage, tankVolumeM3: stage.tankVolumeM3 * factor };
+  const engines = engineMassKg(stage.engines);
+  const structure = Math.max(0, stage.dryMassKg - engines);
+  return { ...stage, tankVolumeM3: stage.tankVolumeM3 * factor, dryMassKg: engines + structure * structureScale(factor) };
+}
+
+/** How a stage's structural mass scales when its tanks are stretched by `factor`. */
+export function structureScale(factor: number): number {
+  const proportional = FIXED_STRUCTURE + (1 - FIXED_STRUCTURE) * factor;
+  const over = Math.max(0, factor - STRETCH_PENALTY_FROM);
+  return proportional * (1 + STRETCH_PENALTY * over * over);
+}
+
+/**
+ * Replaces a stage's engines: all of them, or with `clusterIndex` just that cluster (count 0
+ * removes it, but never the stage's last). A stated dry mass trades the old engines' mass for
+ * the new ones'.
+ */
+function setEngines(stage: Stage, action: Extract<DesignAction, { type: "set-engines" }>): Stage {
+  const count = Math.max(0, Math.round(action.count));
+  let engines: EngineCluster[];
+  if (action.clusterIndex === undefined) {
+    engines = [{ engine: action.engine, count: Math.max(1, count) }];
+  } else {
+    const i = action.clusterIndex;
+    if (!Number.isInteger(i) || i < 0 || i >= stage.engines.length) return stage;
+    const last = stage.engines.length === 1;
+    engines =
+      count === 0 && !last
+        ? stage.engines.filter((_, j) => j !== i)
+        : stage.engines.map((c, j) => (j === i ? { engine: action.engine, count: Math.max(1, count) } : c));
+  }
+  if (stage.dryMassKg === undefined) return { ...stage, engines };
+  const dryMassKg = Math.max(1, stage.dryMassKg - engineMassKg(stage.engines) + engineMassKg(engines));
+  return { ...stage, engines, dryMassKg };
+}
+
+function engineMassKg(engines: EngineCluster[]): number {
+  return engines.reduce((sum, c) => sum + ENGINES[c.engine].massKg * c.count, 0);
 }
 
 /**

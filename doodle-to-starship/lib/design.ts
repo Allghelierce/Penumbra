@@ -232,6 +232,7 @@ export type DesignAction =
   /** With clusterIndex, only that engine cluster of the stage changes; without it the stage gets this single cluster. */
   | { type: "set-engines"; stageIndex: number; engine: EngineId; count: number; clusterIndex?: number }
   | { type: "set-payload"; payloadMassKg: number }
+  | { type: "set-recover"; stageIndex: number; recover: boolean }
   | { type: "launch" }
   | { type: "review" };
 
