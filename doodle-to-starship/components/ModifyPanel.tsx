@@ -64,11 +64,6 @@ function safeAnalyze(design: Design): Analysis | null {
   }
 }
 
-/** What a published payload figure counts that the model's doesn't. */
-const PUBLISHED_NOTE: Partial<Record<RocketTemplate["id"], string>> = {
-  "saturn-v": ", counting the S-IVB stage itself",
-};
-
 /** "Falcon 9 Block 5" → "Falcon 9": the name people use in a sentence. */
 const shortName = (name: string) => name.replace(/\s+Block\s+\d+$/i, "");
 
@@ -78,6 +73,31 @@ const engineText = (stage: Stage) => stage.engines.map((c) => `${c.count}× ${EN
 function theStages(labels: string[]): string {
   const named = labels.map((l) => `the ${l}`);
   return named.length > 1 ? `${named.slice(0, -1).join(", ")} and ${named.at(-1)}` : (named[0] ?? "");
+}
+
+/**
+ * The published payload next to the model's, with what each one counts: a rating is the builder's number,
+ * with its own margins and assumptions; the model's comes from the published masses alone.
+ */
+function publishedNote(t: RocketTemplate, modelLeoKg: number): string {
+  const published = payloadText(t.realPayloadLeoKg);
+  const model = payloadText(modelLeoKg);
+  switch (t.id) {
+    case "saturn-v": {
+      const topStage = t.design.stages.at(-1)?.dryMassKg ?? 0;
+      return `${published} to low Earth orbit, counting the S-IVB stage and its leftover propellant. This model gives ${model} above the S-IVB, or ${payloadText(modelLeoKg + topStage)} with the empty S-IVB counted in.`;
+    }
+    case "starship":
+      return `${published}, SpaceX's early Block 2 rating with both stages landing. From the published masses, this model gets ${model}. Real ratings also carry margins it doesn't model: dry-mass growth, leftover propellant, boil-off and caution on a new vehicle.`;
+    case "electron":
+      return `${published} to low Earth orbit, with room left for the Curie kick stage, which this model doesn't carry. This model gives ${model}.`;
+  }
+  const landing = t.design.stages.filter((s) => s.recover).map((s) => s.label);
+  const figure =
+    t.realPayloadLeoReusableKg !== undefined
+      ? `${published} to low Earth orbit thrown away, ${payloadText(t.realPayloadLeoReusableKg)} with the booster landing`
+      : `${published} to low Earth orbit${landing.length > 0 ? `, with ${theStages(landing)} landing` : ""}`;
+  return `${figure}. This model gives the real ${shortName(t.name)} ${model}.`;
 }
 
 /** The cluster an engine-count sweep changes: the stage's biggest. */
@@ -220,13 +240,6 @@ export default function ModifyPanel({ template, design, preview, onAction, onRes
     });
   }
 
-  // The published figure, with what it assumes about landing.
-  const realLanding = template.design.stages.filter((s) => s.recover).map((s) => s.label);
-  const published =
-    template.realPayloadLeoReusableKg !== undefined
-      ? `${payloadText(template.realPayloadLeoKg)} to low Earth orbit thrown away, ${payloadText(template.realPayloadLeoReusableKg)} with the booster landing`
-      : `${payloadText(template.realPayloadLeoKg)} to low Earth orbit${realLanding.length > 0 ? `, with ${theStages(realLanding)} landing` : ""}${PUBLISHED_NOTE[template.id] ?? ""}`;
-
   return (
     <aside className="flex flex-col gap-3 p-3">
       {top}
@@ -354,7 +367,7 @@ export default function ModifyPanel({ template, design, preview, onAction, onRes
           ) : (
             "Published"
           )}
-          : {published}. This model gives the real {name} {payloadText(modelLeo)}.
+          : {publishedNote(template, modelLeo)}
         </p>
       </Module>
 
