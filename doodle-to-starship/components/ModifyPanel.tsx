@@ -127,8 +127,13 @@ function changesOf(real: Design, yours: Design): string[] {
 }
 
 /** The plain-language answer: what yours carries there, against what the real rocket does. */
-function verdictLine(name: string, destination: DestinationId, yoursMax: number, realMax: number, empty: Analysis | null): { text: string; good: boolean } {
+function verdictLine(name: string, destination: DestinationId, yoursMax: number, realMax: number, empty: Analysis | null, changed: boolean): { text: string; good: boolean } {
   const place = PLACE_NAMES[destination];
+  if (!changed) {
+    return realMax > 0
+      ? { text: `This is the real ${name}: it carries ${payloadText(realMax)} to ${place}. Change something to see what it does.`, good: true }
+      : { text: `This is the real ${name}, and it can't get to ${place}. Change something to see what would.`, good: false };
+  }
   const real = realMax > 0 ? `The real ${name} carries ${payloadText(realMax)} there.` : `The real ${name} can't get there either.`;
   if (yoursMax > 0 && realMax === 0) return { text: `Reaches ${place} with ${payloadText(yoursMax)}. The real ${name} can't.`, good: true };
   if (yoursMax > 0) {
@@ -170,7 +175,7 @@ export default function ModifyPanel({ template, design, preview, onAction, onRes
     return labels.length > 0 ? { labels, costKg: recoveryCostKg(shown, destination) } : null;
   }, [shown, destination]);
   const changes = useMemo(() => changesOf(template.design, design), [template, design]);
-  const verdict = verdictLine(name, destination, yoursMax, realMax, empty);
+  const verdict = verdictLine(name, destination, yoursMax, realMax, empty, changes.length > 0 || preview !== null);
 
   // The chart sweeps one real stage; find it in your rocket (stages you add have no real one to compare).
   const stageTabs = useMemo(
