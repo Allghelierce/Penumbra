@@ -67,6 +67,8 @@ export interface Stage {
   tankVolumeM3: number;
   /** Everything that isn't propellant. Omit to let the physics engine estimate it. */
   dryMassKg?: number;
+  /** The stage flies back and lands, so it keeps a landing propellant reserve and carries recovery hardware. */
+  recover?: boolean;
 }
 
 export interface Design {
