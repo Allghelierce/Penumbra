@@ -226,7 +226,8 @@ export type DesignAction =
   | { type: "scale-tanks"; stageIndex: number; factor: number }
   | { type: "add-stage" }
   | { type: "remove-stage"; stageIndex: number }
-  | { type: "set-engines"; stageIndex: number; engine: EngineId; count: number }
+  /** With clusterIndex, only that engine cluster of the stage changes; without it the stage gets this single cluster. */
+  | { type: "set-engines"; stageIndex: number; engine: EngineId; count: number; clusterIndex?: number }
   | { type: "set-payload"; payloadMassKg: number }
   | { type: "launch" }
   | { type: "review" };
