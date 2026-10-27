@@ -16,6 +16,7 @@ export type EngineId =
   | "be-4"
   | "rd-180"
   | "rutherford"
+  | "rutherford-vacuum"
   | "generic-solid";
 
 /** Ordered from easiest to hardest to reach. */

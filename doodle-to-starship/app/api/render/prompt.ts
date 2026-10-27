@@ -14,6 +14,7 @@ const ENGINE_NAMES: Record<EngineId, string> = {
   "be-4": "BE-4",
   "rd-180": "RD-180",
   rutherford: "Rutherford",
+  "rutherford-vacuum": "Rutherford Vacuum",
   "generic-solid": "solid rocket motor",
 };
 

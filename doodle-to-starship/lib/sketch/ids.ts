@@ -15,6 +15,7 @@ export const ENGINE_IDS = [
   "be-4",
   "rd-180",
   "rutherford",
+  "rutherford-vacuum",
   "generic-solid",
 ] as const satisfies readonly EngineId[];
 

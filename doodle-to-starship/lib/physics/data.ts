@@ -138,6 +138,19 @@ export const ENGINES: Record<EngineId, EngineSpec> = {
     massKg: 35,
     source: "https://en.wikipedia.org/wiki/Rutherford_(rocket_engine)",
   },
+  "rutherford-vacuum": {
+    id: "rutherford-vacuum",
+    name: "Rutherford Vacuum",
+    vehicle: "Electron second stage",
+    propellant: "kerolox",
+    // A vacuum nozzle; it is never lit at sea level.
+    thrustSeaLevelN: 0,
+    thrustVacuumN: 25_800,
+    ispSeaLevelS: 0,
+    ispVacuumS: 343,
+    massKg: 35,
+    source: "https://en.wikipedia.org/wiki/Rutherford_(rocket_engine)",
+  },
   "generic-solid": {
     id: "generic-solid",
     name: "Solid rocket motor",
