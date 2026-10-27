@@ -86,7 +86,8 @@ const signedMetres = (m: number) => `${m < 0 ? "−" : "+"}${Math.abs(m).toFixed
 /**
  * Drag-to-modify controls over a real rocket on the napkin: a handle on the top edge of each stage's
  * tanks stretches or shrinks them (5% steps, 0.5× to 2×; arrow keys nudge the focused handle), each engine
- * cluster gets a chip (count and type), each stage a remove button, and a button under the rocket adds a booster.
+ * cluster gets a chip (count and type), each stage a recovery toggle and a remove button, and a button under the
+ * rocket adds a booster.
  */
 export default function EditHandles({ drawing, design, onAction, onPreview }: EditHandlesProps) {
   const root = useRef<HTMLDivElement>(null);
@@ -181,7 +182,7 @@ export default function EditHandles({ drawing, design, onAction, onPreview }: Ed
 
   // Engine chips to the right of the rocket, stage names and remove buttons to its left, each beside its band.
   const chipTops = stack(
-    bands.map((b) => ({ y: ((b.top + b.bottom) / 2) * H, h: Math.max(1, b.stage.engines.length) * (ROW + 1) + 1 })),
+    bands.map((b) => ({ y: ((b.top + b.bottom) / 2) * H, h: (Math.max(1, b.stage.engines.length) + 1) * (ROW + 1) + 1 })),
     H,
   );
   // "+ Booster stage" goes under the rocket when there's room, otherwise at the foot of the stage-name column.
@@ -257,12 +258,12 @@ export default function EditHandles({ drawing, design, onAction, onPreview }: Ed
       })}
 
       {bands.map((band, i) => {
-        const { engines, label, propellant } = band.stage;
+        const { engines, label, propellant, recover = false } = band.stage;
         return (
           <div
             key={band.index}
             role="group"
-            aria-label={`${label} engines`}
+            aria-label={`${label} engines and recovery`}
             className="napkin-overlay pointer-events-auto absolute divide-y divide-white/15 border border-white/25 bg-black shadow-[0_2px_10px_rgba(0,0,0,0.4)]"
             style={{ left: chipLeft, top: chipTops[i] }}
           >
@@ -316,6 +317,16 @@ export default function EditHandles({ drawing, design, onAction, onPreview }: Ed
                 </div>
               );
             })}
+            <button
+              type="button"
+              aria-pressed={recover}
+              title={recover ? `${label} flies back and lands: it keeps a landing reserve and carries legs` : `${label} is thrown away after staging`}
+              onClick={() => onAction({ type: "set-recover", stageIndex: band.index, recover: !recover })}
+              className="flex h-8 w-full items-center justify-between gap-2 px-2.5 text-[10px] font-semibold uppercase tracking-[0.18em] transition-colors hover:bg-white/10"
+            >
+              <span className={recover ? "text-white" : "text-haze"}>♻ Recover</span>
+              <span className={`font-mono text-[10px] tracking-[0.1em] ${recover ? "text-go-signal" : "text-white/35"}`}>{recover ? "On" : "Off"}</span>
+            </button>
           </div>
         );
       })}

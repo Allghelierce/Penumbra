@@ -79,6 +79,7 @@ export default function EditDevPage() {
           {design.stages.map((s, i) => (
             <li key={i}>
               {s.label}: {Math.round(s.tankVolumeM3)} m³, {s.engines.map((c) => `${c.count}× ${c.engine}`).join(" + ")}
+              {s.recover ? " · recover" : ""}
             </li>
           ))}
         </ul>
