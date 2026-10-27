@@ -2,7 +2,19 @@ import { describe, expect, it } from "vitest";
 
 import type { HistoricMission, RedPenMark } from "./design";
 import { DEMO_SKETCHES } from "./demo-sketches";
-import { comebackFor, COMEBACK, defectStrokes, fixNote, fixStrokes, historicReading, historicReview, historicTrace } from "./history";
+import {
+  comebackFor,
+  COMEBACK,
+  comebackSource,
+  defectStrokes,
+  fixNote,
+  fixStrokes,
+  historicReading,
+  historicReview,
+  historicTrace,
+  realSize,
+} from "./history";
+import { ALL_MISSIONS } from "./mission-catalog";
 import { readFromGeometry } from "./sketch/geometry";
 import { HISTORIC_MISSIONS } from "./missions";
 
@@ -245,5 +257,35 @@ describe("the flaw drawn into the sketch", () => {
   it("draws nothing for a flight that worked", () => {
     const ok = HISTORIC_MISSIONS.find((m) => m.outcome === "success");
     if (ok) expect(defectStrokes(ok, historicReading(ok))).toEqual([]);
+  });
+});
+
+describe("review fixes", () => {
+  it("labels the real vehicle's size, leaving the sketch's own scale alone", () => {
+    const crs7 = HISTORIC_MISSIONS.find((m) => m.id === "crs7")!;
+    const reading = historicReading(crs7);
+    const dims = historicReview(crs7, reading).marks.filter((m) => m.kind === "dimension").map((m) => m.note);
+    expect(dims).toEqual(["63 m", "3.7 m"]);
+    expect(realSize(crs7)).toEqual({ heightM: 63.4, diameterM: 3.7 });
+    // The reading the launch uses keeps the sketch's guessed size.
+    expect(historicReading(crs7).design.heightM).toBe(reading.design.heightM);
+    for (const m of ALL_MISSIONS) expect(realSize(m), m.id).not.toBeNull();
+  });
+
+  it("fits each featured fix note beside its fix on the 300-unit napkin", () => {
+    for (const lost of HISTORIC_MISSIONS.filter((m) => COMEBACK[m.id])) {
+      const xs = fixStrokes(lost, historicReading(lost)).flatMap((s) => s.points.map((p) => p[0]));
+      const maxX = Math.max(...xs);
+      // FixOverlay writes the note from the fix's right edge when there's room there.
+      if (maxX < 0.72) expect(maxX * 300 + 8 + fixNote(lost).length * 4.6, lost.id).toBeLessThanOrEqual(300);
+    }
+  });
+
+  it("finds the loss each comeback came back from", () => {
+    for (const [lostId, comebackId] of Object.entries(COMEBACK)) {
+      const comeback = ALL_MISSIONS.find((m) => m.id === comebackId)!;
+      expect(comebackSource(comeback)?.id).toBe(lostId);
+    }
+    expect(comebackSource(HISTORIC_MISSIONS[0])).toBeNull();
   });
 });

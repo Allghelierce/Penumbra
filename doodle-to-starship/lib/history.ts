@@ -13,6 +13,33 @@ const TRACE_POINTS = 300;
 /** Speed at which a climb has turned fully horizontal, for the downrange estimate. */
 const ORBITAL_SPEED_MPS = 7_800;
 
+type Size = { heightM: number; diameterM: number };
+
+/**
+ * Real vehicle sizes as flown, from the Wikipedia infoboxes (height with that flight's
+ * payload or Dragon; Falcon Heavy's width includes its side boosters).
+ */
+const MISSION_SIZE: Record<string, Size> = {
+  "falcon1-f1": { heightM: 21, diameterM: 1.7 },
+  "falcon1-f4": { heightM: 21, diameterM: 1.7 },
+  crs1: { heightM: 47.8, diameterM: 3.7 }, // Falcon 9 v1.0 with Dragon
+  crs7: { heightM: 63.4, diameterM: 3.7 }, // Falcon 9 v1.1 with Dragon
+  og2: { heightM: 69.8, diameterM: 3.7 }, // Falcon 9 Full Thrust with fairing
+  demo2: { heightM: 65.7, diameterM: 3.7 }, // Falcon 9 Full Thrust with Crew Dragon
+  "fh-demo": { heightM: 70, diameterM: 12.2 },
+};
+const VEHICLE_SIZE: Record<string, Size> = {
+  "Falcon 1": { heightM: 21, diameterM: 1.7 },
+  "Falcon 9": { heightM: 69.8, diameterM: 3.7 },
+  "Falcon Heavy": { heightM: 70, diameterM: 12.2 },
+  Starship: { heightM: 121.3, diameterM: 9 }, // Block 1 stack, Integrated Flight Tests 1-5
+};
+
+/** The real vehicle's height and diameter for this flight, if known. */
+export function realSize(m: HistoricMission): Size | null {
+  return MISSION_SIZE[m.id] ?? VEHICLE_SIZE[m.vehicle] ?? null;
+}
+
 /** The mission's stand-in sketch, read locally, named for the real vehicle. */
 export function historicReading(m: HistoricMission): SketchReading {
   const sketch = DEMO_SKETCHES.find((s) => s.id === m.sketchId) ?? DEMO_SKETCHES[0];
@@ -29,7 +56,10 @@ export function historicReview(
   const summary = m.failure
     ? `${m.vehicle}, ${m.mission}: ${m.failure.label}. ${m.failure.detail}`
     : `${m.vehicle}, ${m.mission}: flew as planned.`;
-  return { marks: historicMarks(reading, analysis, m.failure), summary };
+  // Dimension labels show the real vehicle; the reading (and the launch's scale) stays the sketch's.
+  const size = realSize(m);
+  const labelled = size ? { ...reading, design: { ...reading.design, ...size } } : reading;
+  return { marks: historicMarks(labelled, analysis, m.failure), summary };
 }
 
 /** The real timeline, interpolated to about 300 points, with its recorded events and quotes. */
@@ -95,12 +125,19 @@ export function comebackFor(m: HistoricMission): HistoricMission | null {
   return (id && ALL_MISSIONS.find((x) => x.id === id)) || null;
 }
 
+/** For a comeback flight, the loss it came back from (the inverse of COMEBACK). */
+export function comebackSource(m: HistoricMission): HistoricMission | null {
+  const lostId = Object.keys(COMEBACK).find((id) => COMEBACK[id] === m.id);
+  return (lostId && ALL_MISSIONS.find((x) => x.id === lostId)) || null;
+}
+
 /** The red pen's label for the fix. */
 export function fixNote(m: HistoricMission): string {
   const notes: Record<string, string> = {
     "falcon1-f1": "FIX: steel fittings",
     crs7: "FIX: stronger struts",
-    ift1: "FIX: deflector + hot staging",
+    // The pad had no flame deflector; this is the change that let Starship fly again.
+    ift1: "FIX: flame deflector",
   };
   return notes[m.id] ?? "FIX: redesign";
 }
