@@ -593,6 +593,9 @@ function drawLandmarkIcon(ctx: CanvasRenderingContext2D, icon: LandmarkIcon, x: 
 /** Screen y of something that sits at `km`, with the same mapping the layer boundaries use. */
 const featureY = (alt: number, km: number, centerY: number, H: number) => centerY + (alt - km) * ((H * 2.6) / km);
 
+/** 0 under the header and the crossing log at the top, 1 below them: for text drawn on the sky. */
+const belowHeader = (y: number, H: number) => clamp01((y - H * 0.1) / (H * 0.07));
+
 /** A small flock near the pad at liftoff, sinking out of view as the rocket climbs. */
 function drawBirds(ctx: CanvasRenderingContext2D, W: number, H: number, alt: number) {
   const k = clamp01(1 - alt / 3);
@@ -990,15 +993,16 @@ function drawSoundingRocket(ctx: CanvasRenderingContext2D, W: number, H: number,
   ctx.fill();
   ctx.restore();
   // Its label, in the balloons' style, with the reason it's here.
+  const shown = belowHeader(y, H);
   ctx.save();
-  ctx.globalAlpha = base;
+  ctx.globalAlpha = base * shown;
   ctx.font = `700 10px ${displayFont()}`;
   if ("letterSpacing" in ctx) (ctx as CanvasRenderingContext2D & { letterSpacing: string }).letterSpacing = "1.4px";
   ctx.fillStyle = "#ffffff";
   ctx.textAlign = "left";
   ctx.textBaseline = "middle";
   ctx.fillText("SOUNDING ROCKET · 66 KM", x + 14, y - 6);
-  ctx.globalAlpha = base * 0.7;
+  ctx.globalAlpha = base * 0.7 * shown;
   ctx.font = `500 11px ${displayFont()}`;
   if ("letterSpacing" in ctx) (ctx as CanvasRenderingContext2D & { letterSpacing: string }).letterSpacing = "0.3px";
   ctx.fillText("Too high for balloons, too low for satellites", x + 14, y + 8);
@@ -1119,7 +1123,7 @@ function drawScienceBalloon(ctx: CanvasRenderingContext2D, W: number, H: number,
   ctx.fillRect(x - 3, y - ry - 1.5, 6, 3);
   ctx.fillRect(x - 2.5, y + ry - 1.5, 5, 3.5);
   // Its label, in the weather balloon's style.
-  ctx.globalAlpha = base;
+  ctx.globalAlpha = base * belowHeader(y, H);
   ctx.font = `700 10px ${displayFont()}`;
   if ("letterSpacing" in ctx) (ctx as CanvasRenderingContext2D & { letterSpacing: string }).letterSpacing = "1.4px";
   ctx.fillStyle = "#ffffff";
