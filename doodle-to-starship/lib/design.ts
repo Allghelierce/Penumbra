@@ -327,8 +327,12 @@ export interface PriorArtResult {
 export interface HistoricMission {
   /** e.g. "falcon1-f1". */
   id: string;
-  /** DEMO_SKETCHES id whose drawing and pinned photo stand in for the vehicle. */
-  sketchId: string;
+  /** A stand-in napkin drawing (DEMO_SKETCHES id) for a vehicle with no rocket of its own here, like Falcon 1. Without one, the flight replays on `rocket`'s drawing. */
+  sketchId?: string;
+  /** The real rocket this flight is listed under. */
+  rocket: TemplateId;
+  /** What the flight shows that the numbers don't (or, for an engine-out, what they do), in one sentence. */
+  lesson: string;
   /** e.g. "Falcon 1". */
   vehicle: string;
   /** e.g. "Flight 1 · FalconSAT-2". */

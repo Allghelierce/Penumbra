@@ -21,6 +21,8 @@ import { HISTORIC_MISSIONS } from "./missions";
 const crs7: HistoricMission = {
   id: "crs7",
   sketchId: "two-stage-orbiter",
+  rocket: "falcon9",
+  lesson: "The numbers had margin to spare; one strut was enough to lose the rocket.",
   vehicle: "Falcon 9",
   mission: "CRS-7",
   date: "2015-06-28",

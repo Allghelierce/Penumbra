@@ -8,6 +8,7 @@ export const HISTORIC_MISSIONS: HistoricMission[] = [
     id: "falcon1-f1",
     sketchId: "napkin-hopper",
     vehicle: "Falcon 1",
+    rocket: "falcon9",
     mission: "Flight 1 · FalconSAT-2",
     date: "2006-03-24",
     site: "Omelek Island, Kwajalein Atoll",
@@ -47,6 +48,7 @@ export const HISTORIC_MISSIONS: HistoricMission[] = [
         },
       },
     ],
+    lesson: "On paper it could reach orbit; a corroded aluminum fuel fitting started the fire that ended it.",
     rootCause:
       "An aluminum fitting on the engine's fuel line corroded in the salty island air, leaked kerosene, and the fire cut off the engine's pneumatic pressure.",
     whatChanged: "SpaceX switched to stainless steel fittings and tightened inspection of every line.",
@@ -68,6 +70,7 @@ export const HISTORIC_MISSIONS: HistoricMission[] = [
     id: "crs7",
     sketchId: "two-stage-orbiter",
     vehicle: "Falcon 9",
+    rocket: "falcon9",
     mission: "CRS-7 · Dragon to the ISS",
     date: "2015-06-28",
     site: "Cape Canaveral SLC-40",
@@ -95,6 +98,7 @@ export const HISTORIC_MISSIONS: HistoricMission[] = [
         },
       },
     ],
+    lesson: "The numbers had margin to spare; one steel strut failing far below its rated load was enough to lose the rocket.",
     rootCause:
       "A steel strut holding a helium bottle inside the second-stage oxygen tank failed far below its rated load. The bottle broke free and helium overpressurized the tank.",
     whatChanged: "SpaceX replaced the struts with a stronger design and began testing every strut individually.",
@@ -116,6 +120,7 @@ export const HISTORIC_MISSIONS: HistoricMission[] = [
     id: "ift1",
     sketchId: "mars-ship",
     vehicle: "Starship",
+    rocket: "starship",
     mission: "Integrated Flight Test 1",
     date: "2023-04-20",
     site: "Starbase, Boca Chica, Texas",
@@ -144,6 +149,7 @@ export const HISTORIC_MISSIONS: HistoricMission[] = [
         },
       },
     ],
+    lesson: "Thirty-three engines leave room for a few to fail, but leaks, fires and lost steering ended the flight before staging.",
     rootCause:
       "Propellant leaks started fires in the booster's engine section, several Raptors failed, steering control was lost and the ship never separated.",
     whatChanged:

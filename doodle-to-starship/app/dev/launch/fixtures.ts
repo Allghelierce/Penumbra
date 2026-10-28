@@ -312,6 +312,8 @@ export const SAMPLE_RECAP: Recap = {
 export const SAMPLE_MISSION: HistoricMission = {
   id: "falcon1-f1",
   sketchId: "napkin-hopper",
+  rocket: "falcon9",
+  lesson: "On paper it could reach orbit; a corroded fuel fitting started the fire that ended it.",
   vehicle: "Falcon 1",
   mission: "Flight 1 · FalconSAT-2",
   date: "2006-03-24",
