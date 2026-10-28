@@ -1,5 +1,6 @@
 import { NAPKIN_ASPECT } from "./design";
 import type { Design, EngineId, Part, Point, PropellantId, RocketTemplate, Stage, Stroke, TemplateDrawing, TemplateId } from "./design";
+import { baseFor, enginesThatFit, NOZZLE_EXIT_DIAMETER_M } from "./physics";
 import { PROPELLANT_DENSITY_KG_M3, TANK_FILL } from "./physics/data";
 import { hand, seeded } from "./sketch/detail";
 
@@ -256,28 +257,29 @@ const LOOKS: Record<TemplateId, Look> = {
   },
 };
 
-/**
- * Each engine's nozzle as drawn: how far the bell hangs below the tank and its exit diameter, in
- * metres, roughly to scale. Only the outline uses these; the physics never reads them.
- */
-const BELLS: Record<EngineId, { lengthM: number; exitM: number }> = {
-  "raptor-2": { lengthM: 2.6, exitM: 1.3 },
-  "raptor-3": { lengthM: 2.6, exitM: 1.3 },
-  "raptor-vacuum": { lengthM: 2.6, exitM: 2.3 },
-  "merlin-1d": { lengthM: 2, exitM: 1.1 },
-  "merlin-vacuum": { lengthM: 3, exitM: 3 },
-  "rs-25": { lengthM: 4.3, exitM: 2.4 },
-  rl10c: { lengthM: 2.2, exitM: 1.45 },
-  "f-1": { lengthM: 5.8, exitM: 3.7 },
-  "j-2": { lengthM: 3.4, exitM: 2 },
-  "be-4": { lengthM: 4.5, exitM: 1.8 },
-  "rd-180": { lengthM: 3.6, exitM: 1.45 },
-  rutherford: { lengthM: 0.6, exitM: 0.35 },
-  "rutherford-vacuum": { lengthM: 0.9, exitM: 0.7 },
-  "generic-solid": { lengthM: 1.5, exitM: 1.2 },
+/** How far each engine's nozzle hangs below its tank, in metres, roughly to scale. Drawing only. */
+const BELL_LENGTH_M: Record<EngineId, number> = {
+  "raptor-2": 2.6,
+  "raptor-3": 2.6,
+  "raptor-vacuum": 2.6,
+  "merlin-1d": 2,
+  "merlin-vacuum": 3,
+  "rs-25": 4.3,
+  rl10c: 2.2,
+  "f-1": 5.8,
+  "j-2": 3.4,
+  "be-4": 4.5,
+  "rd-180": 3.6,
+  rutherford: 0.6,
+  "rutherford-vacuum": 0.9,
+  "generic-solid": 1.5,
 };
-/** Room each bell takes in the row: its exit plus a small gap. */
-const bellSlotM = (engine: EngineId) => 1.05 * BELLS[engine].exitM;
+/** Rutherford Vacuum's nozzle isn't published: drawn at this guess, and never flagged as not fitting. */
+const UNPUBLISHED_EXIT_M: Partial<Record<EngineId, number>> = { "rutherford-vacuum": 0.7 };
+/** A bell's exit diameter: the published nozzle the physics packs engines with. */
+const exitM = (engine: EngineId) => NOZZLE_EXIT_DIAMETER_M[engine] ?? UNPUBLISHED_EXIT_M[engine] ?? 1;
+/** Room a bell takes in the row: its exit plus a small gap. */
+const bellSlotM = (engine: EngineId) => 1.05 * exitM(engine);
 
 /** Napkin margins (normalized) left around the scaled-to-fit rocket. */
 const MARGIN_Y = 0.05;
@@ -317,15 +319,12 @@ export function drawTemplate(t: RocketTemplate, design: Design): TemplateDrawing
   }
   const bottomLook = looks[0];
 
-  // Engine bells under the bottom stage, from its engines. When the real stage's own row is wider
-  // than its base (Saturn V's F-1s), every bell narrows by the same factor so the real rocket fits;
-  // a row that is still wider than the stage hangs out past it.
+  // Engine bells under the bottom stage, from its engines; the row hangs past the stage exactly
+  // when they don't fit on it.
   const bottomReal = t.design.stages[bottomLook.templateIndex ?? 0];
-  const row = bellRow(design.stages[0], bottomLook, bottomReal);
-  const realRowM = bellRow(bottomReal, bottomLook, bottomReal).reduce((sum, e) => sum + bellSlotM(e), 0);
-  const squeeze = Math.min(1, (0.95 * bottomLook.diameterM) / realRowM);
-  const rowM = squeeze * row.reduce((sum, e) => sum + bellSlotM(e), 0);
-  const bellsM = Math.max(0, ...row.map((e) => BELLS[e].lengthM));
+  const { row, widthM: rowM } = bellLayout(design.stages[0], bottomLook, bottomReal, bottomLook.diameterM);
+  const naturalRowM = row.reduce((sum, e) => sum + bellSlotM(e), 0);
+  const bellsM = Math.max(0, ...row.map((e) => BELL_LENGTH_M[e]));
   const totalM = cursor + bellsM;
 
   // Widest point: fins, legs, flaps, the fairing or the engines.
@@ -420,12 +419,14 @@ export function drawTemplate(t: RocketTemplate, design: Design): TemplateDrawing
   }
   let left = -rowM / 2;
   for (const engine of row) {
-    const c = left + (squeeze * bellSlotM(engine)) / 2;
-    left += squeeze * bellSlotM(engine);
-    const half = (BELLS[engine].exitM * Math.min(1, 1.05 * squeeze)) / 2;
+    // Each bell's share of the row: bells narrow only when the row is squeezed onto the base.
+    const slotM = (rowM * bellSlotM(engine)) / naturalRowM;
+    const c = left + slotM / 2;
+    left += slotM;
+    const half = Math.min(exitM(engine), slotM / 1.05) / 2;
     const throat = half * 0.35;
     const y = b.tankBottom;
-    const yEnd = y + BELLS[engine].lengthM;
+    const yEnd = y + BELL_LENGTH_M[engine];
     const flare = (side: 1 | -1): [number, number][] =>
       Array.from({ length: 9 }, (_, n) => {
         const u = n / 8;
@@ -450,24 +451,34 @@ export function drawTemplate(t: RocketTemplate, design: Design): TemplateDrawing
 const engineCount = (stage: Stage) => stage.engines.reduce((sum, c) => sum + Math.max(0, c.count), 0);
 
 /**
- * The bells a side view shows of `stage`'s engines, left to right, widest outside. A cluster's
- * width grows with the square root of its engine count, so the row does too, scaled from what
- * the drawing shows for the real stage (`look.bells` bells for `real`'s engines).
+ * The bells a side view shows of `stage`'s engines on a base `baseM` across, left to right with the
+ * widest outside, and how wide the row is drawn. The count grows with the square root of the engine
+ * count, from what the drawing shows for the real stage (`look.bells` for `real`'s engines). Engines
+ * that fit (lib/physics packing, the rule the trade captions and red pen use) sit on the base;
+ * engines that don't spread over the narrowest base that would seat them, at least half a bell
+ * past each side, so the row hangs past the stage exactly when they don't fit.
  */
-function bellRow(stage: Stage, look: StageLook, real: Stage): EngineId[] {
-  const n = engineCount(stage);
-  if (n === 0) return [];
-  const across = Math.round(look.bells * Math.sqrt(n / Math.max(1, engineCount(real))));
-  const k = Math.min(n, Math.max(Math.min(n, 2), across));
+function bellLayout(stage: Stage, look: StageLook, real: Stage, baseM: number): { row: EngineId[]; widthM: number } {
+  const clusters = stage.engines.filter((c) => c.count > 0);
+  const n = clusters.reduce((sum, c) => sum + c.count, 0);
+  if (n === 0) return { row: [], widthM: 0 };
+  const others = (i: number) => clusters.filter((_, j) => j !== i);
+  const fits = clusters.every((c, i) => c.count <= (enginesThatFit(c.engine, baseM, others(i)) ?? Infinity));
+  const neededM = fits ? 0 : Math.max(...clusters.map((c, i) => baseFor(c.engine, c.count, others(i)) ?? 0));
+  const spreadM = Math.max(neededM, baseM + Math.max(...clusters.map((c) => exitM(c.engine))));
+  const meanSlotM = clusters.reduce((sum, c) => sum + c.count * bellSlotM(c.engine), 0) / n;
+  const scaled = Math.round(look.bells * Math.sqrt(n / Math.max(1, engineCount(real))));
+  // A row hanging past the base stays crowded: as many bells as its width holds.
+  const k = Math.min(n, Math.max(Math.min(n, 2), scaled, fits ? 0 : Math.round(spreadM / meanSlotM)));
   // Each cluster gets its share of the row, at least one bell.
-  const bells = stage.engines
-    .filter((c) => c.count > 0)
+  const bells = clusters
     .flatMap((c) => Array.from({ length: Math.max(1, Math.round((k * c.count) / n)) }, () => c.engine))
-    .sort((a, b) => BELLS[b].exitM - BELLS[a].exitM);
+    .sort((a, b) => exitM(b) - exitM(a));
   // Alternate the widest to the left and right ends, working inwards.
   const row: EngineId[] = [];
   bells.forEach((e, i) => (row[i % 2 === 0 ? i / 2 : bells.length - 1 - (i - 1) / 2] = e));
-  return row;
+  const naturalM = row.reduce((sum, e) => sum + bellSlotM(e), 0);
+  return { row, widthM: fits ? Math.min(naturalM, 0.95 * baseM) : Math.max(naturalM, spreadM) };
 }
 
 /** Pairs each design stage with the template stage it came from: by label, then by position from the top. */

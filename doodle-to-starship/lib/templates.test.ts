@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import { applyAction } from "./actions";
 import { NAPKIN_ASPECT, type Design, type EngineId, type TemplateId } from "./design";
-import { analyze, ENGINES, PROPELLANT_DENSITY_KG_M3 } from "./physics";
+import { analyze, ENGINES, enginesThatFit, PROPELLANT_DENSITY_KG_M3 } from "./physics";
 import { TANK_FILL } from "./physics/data";
 import { drawTemplate, TEMPLATES, templateById } from "./templates";
 
@@ -183,6 +183,20 @@ describe("drawTemplate", () => {
     const vacuum = row(withEngines("merlin-vacuum", 8));
     expect(vacuum.widthM).toBeGreaterThan(2 * real.widthM);
     expect(vacuum.lengthM).toBeGreaterThan(real.lengthM);
+    // The row hangs past the 3.7 m tank exactly when the physics says the Merlins don't fit.
+    const fit = enginesThatFit("merlin-1d", f9.design.diameterM)!;
+    for (let count = 1; count <= 20; count++) {
+      expect(row(withEngines("merlin-1d", count)).widthM > f9.design.diameterM, `${count} Merlins`).toBe(count > fit);
+    }
+    // So does each real rocket's, at its real engine count.
+    for (const t of TEMPLATES) {
+      const { parts } = drawTemplate(t, t.design);
+      const tank = parts.find((p) => p.kind === "tank" && p.stageIndex === 0)!;
+      const engines = parts.find((p) => p.kind === "engine")!;
+      const [{ engine, count }] = t.design.stages[0].engines;
+      const base = t.design.stages[0].diameterM ?? t.design.diameterM;
+      expect(engines.box[2] > tank.box[2], t.id).toBe(count > (enginesThatFit(engine, base) ?? Infinity));
+    }
     // Even absurd swaps stay on the napkin.
     for (const t of TEMPLATES) {
       for (const [engine, count] of [["f-1", 40], ["rutherford", 1]] as const) {
