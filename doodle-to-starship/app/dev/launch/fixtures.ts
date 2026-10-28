@@ -8,7 +8,6 @@ import {
   type Part,
   type Point,
   type HistoricMission,
-  type Recap,
   type RocketTemplate,
   type SketchReading,
   type Stroke,
@@ -296,17 +295,6 @@ export const REAL_FIXTURES: LaunchFixture[] = [
     stages: d.stages.map((s) => ({ ...s, tankVolumeM3: s.tankVolumeM3 * 0.25 })),
   })),
 ].filter((f): f is LaunchFixture => f !== null);
-
-/** What the studio would pass after a third attempt. */
-export const SAMPLE_RECAP: Recap = {
-  headline: "Attempt 3: suborbital, 1.3 km/s better than last time",
-  delta: "+1.3 km/s since attempt 2 (tanks +12%)",
-  improvements: [
-    { text: "Stretch the ship's tanks 40% to make orbit", fix: { type: "scale-tanks", stageIndex: 1, factor: 1.4 } },
-    { text: "Swap to 3 Raptor Vacuum on the ship", fix: { type: "set-engines", stageIndex: 1, engine: "raptor-vacuum", count: 3 } },
-    { text: "Fins add drag above Max-Q; the real Falcon 9 uses grid fins only for landing" },
-  ],
-};
 
 /** A stand-in historic mission for the debrief card. */
 export const SAMPLE_MISSION: HistoricMission = {

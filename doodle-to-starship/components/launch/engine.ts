@@ -45,6 +45,7 @@ import {
   drawStars,
   drawTargetBody,
   glowSprite,
+  ISS_LANE,
   makeCityLights,
   makeDecks,
   makePad,
@@ -244,7 +245,8 @@ export function startLaunch(
   // is set to recover (a sketch that never says falls back to its landing legs; a template that
   // doesn't is expendable), or at a mission timeline event that says the booster lands or is caught.
   const landingCue = plan.cues.find((cue) => /\b(lands|landed|landing|caught|catch)\b/i.test(cue.event.label ?? ""));
-  const catchMode = input.templateId === "starship" || /\b(caught|catch)\b/i.test(landingCue?.event.label ?? "");
+  // A real flight from history says for itself how its booster came home (a catch, or a splashdown).
+  const catchMode = (input.templateId === "starship" && !input.mission) || /\b(caught|catch)\b/i.test(landingCue?.event.label ?? "");
   const recovers = design.stages?.[0]?.recover ?? (!input.templateId && !!design.features?.includes("landing-legs"));
   const landsByDesign = pieces.length >= 2 && plan.seps.length >= 1 && recovers;
   const landAt = landingCue ? landingCue.at : landsByDesign ? plan.seps[0] + 1.2 : null;
@@ -1104,7 +1106,7 @@ export function startLaunch(
     }
     // The ISS and other satellites are low-orbit traffic: gone well before the Moon.
     const issK = clamp01((altKm - 120) / 30) * clamp01((1_200 - altKm) / 400) * (1 - limbRise);
-    if (issK > 0) drawISS(c, ((t * 55) % (W + 300)) - 150, H * 0.3, 1.3, issK, displayFont);
+    if (issK > 0) drawISS(c, ((t * 55) % (W + 300)) - 150, H * ISS_LANE, 1.3, issK, displayFont);
     const deckAlpha = night * (flying ? 1 : 0);
     // Decks the rocket isn't inside are scenery behind it; the one it's punching through is drawn again in front.
     const crossing = decks.filter((d) => Math.abs(deckY(d, altKm, layerCenter, H) - layerCenter) < d.thick * 0.55);
@@ -1115,7 +1117,7 @@ export function startLaunch(
       if (planeY > -40 && planeY < H + 40) drawPlane(c, W, planeY, t, night);
       const balloonY = layerCenter + (altKm - 30) * ((H * 2.6) / 30);
       if (balloonY > -120 && balloonY < H + 40) drawBalloon(c, W * 0.72 + Math.sin(t * 0.4) * 8, balloonY, night, displayFont);
-      if (issK > 0) drawSatellite(c, W + 200 - ((t * 38) % (W + 400)), H * 0.3, t, issK);
+      if (issK > 0) drawSatellite(c, W + 200 - ((t * 38) % (W + 400)), H * ISS_LANE, t, issK);
     }
 
     // Speed lines while it's fast and the air is thick enough to show it.
@@ -1329,6 +1331,16 @@ export function startLaunch(
       c.globalAlpha = 1;
       c.globalCompositeOperation = "source-over";
       c.fillStyle = v;
+      c.fillRect(0, 0, W, H);
+    }
+
+    // The scene goes dark just before the end card comes up, so nothing bright (the vehicle's
+    // outline above all) shows through the card while it fades in. Skipping lands here at once.
+    const dusk = clamp01((t - plan.endAt + 0.8) / 0.8);
+    if (dusk > 0) {
+      c.globalAlpha = 1;
+      c.globalCompositeOperation = "source-over";
+      c.fillStyle = `rgba(0,0,0,${dusk})`;
       c.fillRect(0, 0, W, H);
     }
 

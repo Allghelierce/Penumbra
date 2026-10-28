@@ -29,7 +29,7 @@ interface EndCardProps {
   maxAltKm: number;
   maxSpeedMps: number;
   strokes: Stroke[];
-  /** Caption on the sketch: "Napkin sketch", or the rocket's name for a real-rocket template. */
+  /** Caption on the sketch: "Napkin sketch", "Your Falcon 9 Block 5", or a historic flight's vehicle. */
   sketchLabel: string;
   onDone: () => void;
   onReplay: () => void;
@@ -340,6 +340,12 @@ function Debrief({ mission, strokes, sketchLabel, design, onDone, onFixRetry, tr
             </h2>
           </div>
         </div>
+        {mission.lesson && (
+          <section className="border-t border-rule px-5 py-4 sm:px-7">
+            <div className={label}>What the numbers don&apos;t show</div>
+            <p className="mt-1.5 font-display text-xl font-semibold leading-snug text-starlight sm:text-2xl">{mission.lesson}</p>
+          </section>
+        )}
         {(mission.failure || mission.rootCause) && (
           <section className={section}>
             <div className={label}>{lost ? "What failed" : "What went right"}</div>

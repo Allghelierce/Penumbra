@@ -466,7 +466,13 @@ function LaunchRun(props: RunProps) {
           maxAltKm={stats.maxAltKm}
           maxSpeedMps={stats.maxSpeedMps}
           strokes={input.strokes}
-          sketchLabel={input.templateId ? `Your ${templateById(input.templateId).name}` : "Napkin sketch"}
+          sketchLabel={
+            input.mission
+              ? input.mission.vehicle
+              : input.templateId
+                ? `Your ${templateById(input.templateId).name}`
+                : "Napkin sketch"
+          }
           onDone={props.onDone}
           onReplay={props.onReplay}
           recap={props.recap}

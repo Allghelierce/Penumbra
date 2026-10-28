@@ -2,7 +2,17 @@
 
 import { useEffect, useRef, useState } from "react";
 import LaunchScene from "@/components/LaunchScene";
-import { FIXTURES, REAL_FIXTURES, SAMPLE_MISSION, SAMPLE_RECAP, TEMPLATE_FIXTURES, type LaunchFixture } from "./fixtures";
+import { recap } from "@/lib/recap";
+import { FIXTURES, REAL_FIXTURES, SAMPLE_MISSION, TEMPLATE_FIXTURES, type LaunchFixture } from "./fixtures";
+
+/** The recap the studio would show after this fixture as a first attempt. */
+function recapFor(f: LaunchFixture) {
+  try {
+    return recap([{ n: 1, design: f.reading.design, analysis: f.analysis, maxAltitudeKm: f.trace.maxAltitudeKm ?? 0 }]);
+  } catch {
+    return null;
+  }
+}
 
 export default function LaunchDevPage() {
   const [active, setActive] = useState<{ fixture: LaunchFixture; run: number } | null>(null);
@@ -84,7 +94,7 @@ export default function LaunchDevPage() {
           templateId={active.fixture.templateId}
           napkinRect={napkinRect}
           mission={missionMode ? SAMPLE_MISSION : null}
-          recap={SAMPLE_RECAP}
+          recap={recapFor(active.fixture)}
           onImprove={(fix) => {
             setLog((l) => [...l, `onImprove ${JSON.stringify(fix)}`]);
             setActive(null);
