@@ -4,7 +4,8 @@ import type { ReactNode } from "react";
 import { PenumbraLockup, PenumbraWordmark } from "@/components/PenumbraLogo";
 import { REAL_VEHICLES } from "@/lib/analogs";
 import type { Design, PropellantId, TemplateId } from "@/lib/design";
-import { analyze } from "@/lib/physics";
+import { ALL_MISSIONS } from "@/lib/mission-catalog";
+import { analyze, enginesThatFit } from "@/lib/physics";
 import { ROTATION_MPS } from "@/lib/physics/analyze";
 import {
   DESTINATIONS,
@@ -16,7 +17,7 @@ import {
   TANK_FILL,
 } from "@/lib/physics/data";
 import { TEMPLATES } from "@/lib/templates";
-import { maxPayloadKg, MIN_LIFTOFF_TWR, recoveryCostKg } from "@/lib/trade";
+import { capacityText, maxPayloadKg, MIN_LIFTOFF_TWR, recoveryCostKg, shownKg } from "@/lib/trade";
 import { VOICE_TOOLS } from "@/lib/voice/tools";
 import { TEXT_MODEL, VISION_MODEL } from "@/lib/xai";
 
@@ -25,7 +26,7 @@ import { TEXT_MODEL, VISION_MODEL } from "@/lib/xai";
 
 export const metadata: Metadata = {
   title: "How it works · Penumbra",
-  description: "How Penumbra turns a napkin sketch into a flight verdict: Grok reads and talks, code does the physics.",
+  description: "How Penumbra checks a real rocket, a real flight or a napkin sketch: Grok reads and talks, code does the physics.",
 };
 
 const PROPELLANT_NAMES: Record<PropellantId, string> = {
@@ -41,7 +42,6 @@ const num = (n: number, digits = 0) =>
 const kN = (n: number) => (n > 0 ? num(n / 1000) : "—");
 const sec = (n: number) => (n > 0 ? num(n) : "—");
 const kms = (mps: number) => num(mps / 1000, 2);
-const mass = (kg: number) => (kg < 1_000 ? `${num(kg)} kg` : `${num(kg / 1000, 1)} t`);
 
 const template = (id: TemplateId) => TEMPLATES.find((t) => t.id === id)!;
 /** The design with exactly these stages landing. */
@@ -78,7 +78,10 @@ export default function About() {
   const destinations = Object.values(DESTINATIONS);
   const vehicles = [...REAL_VEHICLES].sort((a, b) => a.firstFlight - b.firstFlight);
   const leoNeeds = TEMPLATES.map((t) => analyze({ ...t.design, destination: "leo" }).requiredDeltaVMps);
-  const boosterLanding = recoveryCostKg(landing(template("falcon9").design, [0]), "leo");
+  const f9 = template("falcon9").design;
+  const boosterLanding = recoveryCostKg(landing(f9, [0]), "leo");
+  const f9Engine = f9.stages[0].engines[0].engine;
+  const f9Base = f9.stages[0].diameterM ?? f9.diameterM;
 
   return (
     <div className="min-h-dvh bg-umbra text-starlight">
@@ -98,13 +101,14 @@ export default function About() {
           <PenumbraWordmark className="mb-10 w-[520px] max-w-full" />
           <p className="text-[15px] text-haze">How it works</p>
           <h1 className="mt-3 max-w-[960px] font-display text-[46px] font-semibold leading-[1.08]">
-            An engineer sketches a vehicle idea and instantly gets delta-v and thrust-to-weight, red-pen fixes computed
-            from the physics, and NASA papers showing where it&apos;s been tried.
+            Pick a real rocket, change it, and see every number next to the real one: what you gained, what you gave
+            up, and why.
           </h1>
           <p className="mt-6 max-w-[760px] text-[17px] leading-relaxed text-haze">
-            The first ten minutes of a concept review. Grok reads the sketch and runs Mission Control by voice;
-            deterministic code built on published engine data decides whether it flies. Every flight ends with a recap
-            of what to try next, already checked against the physics.
+            Start from Falcon 9, Saturn V, Electron or Starship, replay {ALL_MISSIONS.length} real flights, or sketch
+            your own. Grok reads sketches and runs Mission Control by voice; deterministic code built on published
+            engine data decides whether it flies. Every flight ends with a recap of what to try next, already checked
+            against the physics.
           </p>
         </section>
 
@@ -136,6 +140,11 @@ export default function About() {
                 vacuum figures.
               </Item>
               <Item>
+                Engine bells pack onto each stage&apos;s own base at their published nozzle sizes, so a stage takes only
+                as many as fit: {enginesThatFit(f9Engine, f9Base)} {ENGINES[f9Engine].name} on Falcon 9&apos;s{" "}
+                {num(f9Base, 1)} m. Engine sweeps stop there.
+              </Item>
+              <Item>
                 Gravity losses are integrated over each burn along a gravity turn: a stage fights less gravity as the
                 climb turns horizontal, so low thrust-to-weight costs more. Drag comes from frontal area over liftoff
                 mass, capped at 400 m/s.
@@ -147,7 +156,7 @@ export default function About() {
               </Item>
               <Item>
                 A stage that lands keeps a propellant reserve for its landing burns and carries legs and fins or a heat
-                shield. Landing Falcon 9&apos;s booster costs {mass(boosterLanding)} of payload to orbit.
+                shield. Landing Falcon 9&apos;s booster costs {capacityText(boosterLanding)} of payload to orbit.
               </Item>
               <Item>
                 Max payload is the most a design can carry there with a liftoff thrust-to-weight of at least{" "}
@@ -160,16 +169,16 @@ export default function About() {
           <p className="mt-2 max-w-[760px] text-[15px] leading-relaxed text-haze">
             Saturn V&apos;s published figure counts the S-IVB itself, so its row adds the stage&apos;s dry mass.
             Electron&apos;s rides on a kick stage the model leaves out, and Starship&apos;s folds in early-flight margins
-            the model doesn&apos;t know about.
+            the model doesn&apos;t know about. Model figures are rounded down, as the studio shows every capacity.
           </p>
           <Table
             head={["Rocket", "Published to LEO", "Model", "Model / published"]}
             numeric={[1, 2, 3]}
             rows={calibration().map((row) => [
               row.name,
-              mass(row.publishedKg),
-              mass(row.modelKg),
-              `${num((row.modelKg / row.publishedKg) * 100)}%`,
+              capacityText(row.publishedKg),
+              capacityText(row.modelKg),
+              `${num((shownKg(row.modelKg) / row.publishedKg) * 100)}%`,
             ])}
           />
 
@@ -223,6 +232,25 @@ export default function About() {
         </Section>
 
         <Section
+          title="Real flights"
+          lede={`${ALL_MISSIONS.length} flights, lost and successful, filed under the rocket they flew on. Each replays its published timeline, the red pen marks what failed or what made it work, and each says in one line what the numbers don't show.`}
+        >
+          <Table
+            head={["Flight", "Year", "Outcome", "What the numbers don't show"]}
+            rows={ALL_MISSIONS.map((m) => [
+              <div key="n" className="max-w-[300px]">
+                {m.sources[0] ? <Source href={m.sources[0].url}>{`${m.vehicle} · ${m.mission}`}</Source> : `${m.vehicle} · ${m.mission}`}
+              </div>,
+              m.date.slice(0, 4),
+              m.outcome === "lost" ? "Lost" : "Success",
+              <span key="l" className="text-haze">
+                {m.lesson}
+              </span>,
+            ])}
+          />
+        </Section>
+
+        <Section
           title="Decades of missions"
           lede={`After every check, your design is scored against ${vehicles.length} real launch vehicles on stage count, propellant, liftoff mass, shape and first-stage engine count. The closest one appears next to your verdict.`}
         >
@@ -271,7 +299,7 @@ export default function About() {
           </ul>
         </Section>
 
-        <Section title="How Penumbra uses Grok" lede="Three xAI APIs, each where it is strongest. None of them sets a number.">
+        <Section title="How Penumbra uses Grok" lede="Four xAI APIs, each where it is strongest. None of them sets a number.">
           <Table
             head={["API", "Model", "What it does"]}
             rows={[
@@ -289,6 +317,11 @@ export default function About() {
                 "Grok Voice",
                 "Realtime",
                 "Mission Control and a propulsion engineer you talk to over a realtime WebSocket: a spoken GO/NO-GO poll before launch, webcast callouts, and design edits by voice. The server mints a short-lived token, so the API key never reaches the browser. Every edit is a tool call that re-runs the physics.",
+              ],
+              [
+                "xAI text-to-speech",
+                "A voice per speaker",
+                "Gives each flight controller, the launch callouts and the real flights' quotes their own voice. Each line is cached on the server, so it's paid for once; without a key, the browser's voice reads it.",
               ],
             ]}
           />
@@ -310,7 +343,7 @@ export default function About() {
         <Section title="Built with" lede="">
           <ul className="max-w-[820px] space-y-2 text-[15px] leading-relaxed">
             <Item>Next.js 16 (App Router, Turbopack, Proxy), React 19, TypeScript, Tailwind CSS 4 and Vitest.</Item>
-            <Item>xAI Grok APIs: vision, text and Voice realtime.</Item>
+            <Item>xAI Grok APIs: vision, text, Voice realtime and text-to-speech.</Item>
             <Item>NASA Technical Reports Server API for prior art.</Item>
             <Item>Published engine, vehicle and delta-v figures, each linked to its source above.</Item>
             <Item>Cursor, used during the build.</Item>
@@ -388,9 +421,9 @@ const NODES: { title: string; lines: [string, string]; grok: boolean }[] = [
   { title: "Napkin sketch", lines: ["your strokes", "on a 3:4 canvas"], grok: false },
   { title: "Grok vision", lines: ["stages, bells,", "tank sizes"], grok: true },
   { title: "Physics", lines: ["rocket equation,", "real engine data"], grok: false },
-  { title: "Red pen", lines: ["tested fixes drawn", "on your sketch"], grok: false },
+  { title: "Red pen", lines: ["up to three fixes,", "or a tick"], grok: false },
   { title: "Grok Voice", lines: ["GO/NO-GO poll,", "edits by voice"], grok: true },
-  { title: "Launch sim", lines: ["your doodle flies", "the flight trace"], grok: false },
+  { title: "Launch sim", lines: ["real time, then", "a stated warp"], grok: false },
   { title: "Recap", lines: ["what to try next,", "checked by physics"], grok: false },
 ];
 
