@@ -12,6 +12,15 @@ import { NOZZLE_EXIT_DIAMETER_M } from "./data";
 export const NOZZLE_GAP = 0.06;
 
 /**
+ * Real clusters that hang past their base, which packing alone would rule out: Saturn V's five
+ * F-1s overhang the S-IC's 10.1 m tanks, under engine fairings. With nothing else beside them, on a
+ * base at least that wide, that many always fit.
+ */
+const FLOWN_OVERHANG: Partial<Record<EngineId, { count: number; diameterM: number }>> = {
+  "f-1": { count: 5, diameterM: 10.1 },
+};
+
+/**
  * Container radius over circle radius for the densest known packing of n equal circles in a
  * circle, n = 1 to 40. https://www.packomania.com/cci/cci.html
  */
@@ -30,16 +39,52 @@ function circlesThatFit(ratio: number): number {
   return Math.floor(last * (ratio / PACKING_RATIO[last - 1]) ** 2);
 }
 
-/**
- * The most of `engine` that fit on a base `diameterM` across, beside the stage's other clusters
- * (which take room in proportion to their nozzle area). Null when its nozzle isn't published.
- */
-export function enginesThatFit(engine: EngineId, diameterM: number, others: EngineCluster[] = []): number | null {
+/** How many of `engine` alone fill a base `diameterM` across, or null when its nozzle isn't published. */
+function slots(engine: EngineId, diameterM: number): number | null {
   const nozzle = NOZZLE_EXIT_DIAMETER_M[engine];
   if (!nozzle || !(diameterM > 0)) return null;
-  const taken = others.reduce((sum, c) => {
-    const d = NOZZLE_EXIT_DIAMETER_M[c.engine];
-    return sum + (d ? c.count * (d / nozzle) ** 2 : 0);
+  const packed = circlesThatFit(diameterM / (nozzle * (1 + NOZZLE_GAP)));
+  const flown = FLOWN_OVERHANG[engine];
+  return flown && diameterM >= flown.diameterM - 1e-9 ? Math.max(packed, flown.count) : packed;
+}
+
+/**
+ * Share of the base that `others` take: each engine takes 1 / (how many of its kind alone fill
+ * the base). Engines with no published nozzle take none.
+ */
+function taken(others: EngineCluster[], diameterM: number): number {
+  return others.reduce((sum, c) => {
+    if (c.count <= 0) return sum;
+    const n = slots(c.engine, diameterM);
+    return n === null ? sum : sum + (n > 0 ? c.count / n : Infinity);
   }, 0);
-  return Math.max(0, Math.floor(circlesThatFit(diameterM / (nozzle * (1 + NOZZLE_GAP))) - taken + 1e-9));
+}
+
+/**
+ * The most of `engine` that fit on a base `diameterM` across, beside the stage's other clusters.
+ * Null when its nozzle isn't published.
+ */
+export function enginesThatFit(engine: EngineId, diameterM: number, others: EngineCluster[] = []): number | null {
+  const alone = slots(engine, diameterM);
+  if (alone === null) return null;
+  const left = 1 - taken(others, diameterM);
+  return left > 0 ? Math.floor(alone * left + 1e-9) : 0;
+}
+
+/** The narrowest base, in m, that seats `count` of `engine` beside `others`; null when its nozzle isn't published. */
+export function baseFor(engine: EngineId, count: number, others: EngineCluster[] = []): number | null {
+  if (NOZZLE_EXIT_DIAMETER_M[engine] === undefined) return null;
+  const seats = (d: number) => (enginesThatFit(engine, d, others) ?? 0) >= count;
+  let lo = 0;
+  let hi = 1;
+  while (!seats(hi)) {
+    if (hi > 1_000) return null;
+    hi *= 2;
+  }
+  while (hi - lo > 0.005) {
+    const mid = (lo + hi) / 2;
+    if (seats(mid)) hi = mid;
+    else lo = mid;
+  }
+  return hi;
 }

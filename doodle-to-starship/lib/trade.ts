@@ -122,13 +122,12 @@ export function tradeCurve(
     const realStage = realStageFor(design, real, sweep.stageIndex);
     const realCount = realStage?.engines.find((c) => c.engine === engine.engine)?.count;
     realX = realCount ?? engine.count;
-    // Up to as many as fit on the base beside the stage's other engines. The real rocket's own
-    // count always does: Saturn V's five F-1s hang past its 10.1 m base, under engine fairings.
-    // Engines with no published nozzle size sweep to twice the real count.
-    const packed = enginesThatFit(engine.engine, design.diameterM, stage.engines.filter((_, i) => i !== cluster));
-    const fits = packed === null ? null : Math.max(packed, realCount ?? 0);
+    // Up to as many as fit on the stage's base beside its other engines, the same limit the red
+    // pen holds a design to. Engines with no published nozzle size sweep to twice the real count.
+    const baseM = stage.diameterM ?? design.diameterM;
+    const fits = enginesThatFit(engine.engine, baseM, stage.engines.filter((_, i) => i !== cluster));
     const top = fits === null ? Math.max(realX * 2, engine.count + 3, 4) : Math.min(fits, MAX_SWEEP_ENGINES);
-    if (fits !== null && top === fits) limit = { x: fits, engine: ENGINES[engine.engine].name, diameterM: design.diameterM };
+    if (fits !== null && top === fits) limit = { x: fits, engine: ENGINES[engine.engine].name, diameterM: baseM };
     xs = Array.from({ length: top }, (_, k) => k + 1);
     build = (x) =>
       applyAction(design, { type: "set-engines", stageIndex: sweep.stageIndex, clusterIndex: cluster, engine: engine.engine, count: x });

@@ -150,6 +150,16 @@ describe("tradeCurve", () => {
     expect(tradeCurve(template("starship").design, { kind: "engine-count", stageIndex: 0 }, { destination: "leo" }).points.at(-1)!.x).toBe(33);
   });
 
+  it("measures an upper stage's room on its own diameter: the S-IVB's 6.6 m, not the Saturn V's 10.1 m", () => {
+    const saturn = template("saturn-v").design;
+    expect(saturn.stages[2].diameterM).toBe(6.6);
+    const curve = tradeCurve(saturn, { kind: "engine-count", stageIndex: 2 }, { destination: "leo" });
+    const fits = enginesThatFit("j-2", 6.6)!;
+    expect(fits).toBeLessThan(enginesThatFit("j-2", 10.1)!);
+    expect(curve.limit).toEqual({ x: fits, engine: "J-2", diameterM: 6.6 });
+    expect(curve.points.at(-1)!.x).toBe(fits);
+  });
+
   it("measures your stretch against the real tanks, so the penalty never compounds", () => {
     const real = template("falcon9").design;
     // Two drags of 1.25× each, built from the real stage, equal one 1.5625× stretch.
@@ -171,14 +181,16 @@ describe("enginesThatFit", () => {
         stage.engines.forEach((cluster, c) => {
           const fit = enginesThatFit(cluster.engine, t.design.diameterM, stage.engines.filter((_, k) => k !== c));
           if (fit === null) return;
-          // Saturn V's five F-1s hang past its 10.1 m base under engine fairings; packed inside it, four fit.
-          if (t.id === "saturn-v" && i === 0) expect(fit).toBe(4);
-          else expect(fit, `${t.id} stage ${i} ${cluster.engine}`).toBeGreaterThanOrEqual(cluster.count);
+          expect(fit, `${t.id} stage ${i} ${cluster.engine}`).toBeGreaterThanOrEqual(cluster.count);
         });
       });
     }
     expect(enginesThatFit("merlin-1d", 3.7)).toBe(9);
     expect(enginesThatFit("raptor-2", 9)).toBe(33);
+    // Saturn V's five F-1s hang past its 10.1 m base under engine fairings, so they fit as flown,
+    // though packing alone seats four; a narrower base gets no such allowance.
+    expect(enginesThatFit("f-1", 10.1)).toBe(5);
+    expect(enginesThatFit("f-1", 10)).toBe(4);
     // The Ship's three vacuum Raptors take room the sea-level ones can't use.
     expect(enginesThatFit("raptor-2", 9, [{ engine: "raptor-vacuum", count: 3 }])).toBeLessThan(33);
     expect(enginesThatFit("rutherford-vacuum", 1.2)).toBeNull();
