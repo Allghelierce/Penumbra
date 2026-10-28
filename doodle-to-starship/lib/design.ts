@@ -310,20 +310,6 @@ export interface ReviewResponse {
   source: "grok" | "rules";
 }
 
-/** POST /api/render */
-export interface RenderRequest {
-  design: Design;
-  analysis: Analysis;
-  /** "patch" is an embroidered mission patch for the design, shown as a sticker on the napkin. */
-  kind: "concept" | "outcome" | "patch";
-  /** PNG data URL of the napkin. When present, Imagine edits the sketch into a photo so the render looks like the drawing. */
-  sketch?: string;
-}
-export interface RenderResponse {
-  url: string | null;
-  source: "grok" | "none";
-}
-
 /** GET /api/prior-art?q=...&limit=5 returns { results: PriorArtResult[] } */
 export interface PriorArtResult {
   id: string;
