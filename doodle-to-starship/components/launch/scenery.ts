@@ -1,4 +1,4 @@
-import type { DestinationId } from "@/lib/design";
+import type { DestinationId, TemplateId } from "@/lib/design";
 import { BOUNDARIES } from "./atmosphere";
 import type { Doodle, Vec } from "./geometry";
 
@@ -1414,10 +1414,11 @@ export function drawGround(
   alpha: number,
   wobble: number[],
   chalk: RGB,
+  site: LaunchSite = "cape",
 ) {
   if (y >= H + 4 || alpha <= 0.01) return;
   ctx.globalAlpha = alpha;
-  drawSkyline(ctx, W, H, y, alpha);
+  drawSkyline(ctx, W, H, y, alpha, site);
   ctx.fillStyle = "#050505";
   ctx.fillRect(0, y, W, H - y + 4);
   // The crawlerway in chalk, running from the pad toward the viewer.
@@ -1462,17 +1463,56 @@ const SCRUB: [number, number][] = (() => {
   return Array.from({ length: 34 }, () => [rand(), 3 + rand() * 5] as [number, number]);
 })();
 
-/** Two hazy ridges behind the pad, normalized heights along the width. */
-const RIDGES: number[][] = (() => {
-  const rand = seeded(2026);
-  return [0.06, 0.035].map((amp) => {
+/** Where a rocket launches from, for the skyline behind the pad. */
+export type LaunchSite = "cape" | "mahia" | "starbase";
+
+/** Falcon 9 and Saturn V fly from Cape Canaveral, Electron from Mahia in New Zealand, Starship from Starbase in Texas. */
+export function siteFor(templateId?: TemplateId | null): LaunchSite {
+  if (templateId === "electron") return "mahia";
+  if (templateId === "starship") return "starbase";
+  return "cape";
+}
+
+/** Hazy ridges behind the pad as normalized heights along the width, far ridge first. */
+const makeRidges = (seed: number, amps: number[]): number[][] => {
+  const rand = seeded(seed);
+  return amps.map((amp) => {
     let h = amp * 0.6;
     return Array.from({ length: 25 }, () => {
       h = Math.min(amp, Math.max(amp * 0.25, h + (rand() - 0.5) * amp * 0.7));
       return h;
     });
   });
-})();
+};
+
+interface SiteLand {
+  ridges: number[][];
+  colors: [string, string];
+  /** Rolling hills are drawn as curves; the cape's low ridges stay angular. */
+  smooth: boolean;
+  /** Where each ridge drops to the sea, as a fraction of W (Infinity: it runs off the edge). */
+  coast: [number, number];
+  /** Where the strip of sea begins, as a fraction of W. */
+  sea: number;
+}
+
+const SITES: Record<LaunchSite, SiteLand> = {
+  // Florida's coast: flat, with low hazy ridges and the Atlantic past the ladder.
+  cape: { ridges: makeRidges(2026, [0.06, 0.035]), colors: ["rgb(46,104,160)", "rgb(22,52,82)"], smooth: false, coast: [Infinity, Infinity], sea: 0.885 },
+  // Mahia Peninsula: green hills that end in cliffs above the Pacific.
+  mahia: { ridges: makeRidges(64, [0.11, 0.075]), colors: ["rgb(58,118,142)", "rgb(22,62,60)"], smooth: true, coast: [0.86, 0.765], sea: 0.74 },
+  // Boca Chica: low dunes on a flat coastal plain, the Gulf of Mexico to the east.
+  starbase: { ridges: makeRidges(1836, [0.024, 0.013]), colors: ["rgb(80,130,172)", "rgb(36,64,92)"], smooth: true, coast: [0.84, 0.81], sea: 0.79 },
+};
+
+/** Height of a ridge at fraction f of the width, with its drop to the sea. */
+function ridgeAt(land: SiteLand, i: number, f: number): number {
+  const r = land.ridges[i];
+  const j = Math.min(r.length - 1.001, Math.max(0, f * (r.length - 1)));
+  const k = j - Math.floor(j);
+  const h = r[Math.floor(j)] * (1 - k) + r[Math.floor(j) + 1] * k;
+  return h * clamp01((land.coast[i] - f) / 0.025);
+}
 
 /** Sun glints on the strip of sea at the far right: [x, height above the horizon, width] as fractions/px. */
 const OCEAN_GLINTS: [number, number, number][] = (() => {
@@ -1514,34 +1554,59 @@ function drawPalm(ctx: CanvasRenderingContext2D, x: number, y: number, h: number
   ctx.stroke();
 }
 
+/** A strip of sea out to the horizon from fraction `from` of the width, catching the sun. */
+function drawSea(ctx: CanvasRenderingContext2D, W: number, H: number, y: number, from: number) {
+  ctx.fillStyle = "rgb(38,96,152)";
+  ctx.fillRect(W * from, y - H * 0.012, W * (1 - from) + 1, H * 0.012 + 1);
+  ctx.fillStyle = "rgba(214,236,255,0.7)";
+  for (const [gx, gy, gw] of OCEAN_GLINTS) {
+    const x = W * (from + (gx - 0.885) * ((1 - from) / 0.115));
+    ctx.fillRect(Math.round(x), Math.round(y - H * gy), Math.round(gw), 1);
+  }
+}
+
 /**
- * Flat, hazy ridges and the spaceport on the horizon: the assembly building and its low bay,
- * lightning masts with the catenary wire slung between them, a tracking radar, propellant
- * storage spheres, the water tower, palms, and a strip of sea past the altitude ladder.
+ * Flat, hazy ridges and the spaceport on the horizon, for the rocket's real launch site:
+ * Cape Canaveral, Rocket Lab's pad on the Mahia Peninsula, or Starbase on the Texas coast.
  */
-function drawSkyline(ctx: CanvasRenderingContext2D, W: number, H: number, y: number, alpha: number) {
-  const colors = ["rgb(46,104,160)", "rgb(22,52,82)"];
-  RIDGES.forEach((ridge, i) => {
-    ctx.fillStyle = colors[i];
+function drawSkyline(ctx: CanvasRenderingContext2D, W: number, H: number, y: number, alpha: number, site: LaunchSite) {
+  const land = SITES[site];
+  land.ridges.forEach((ridge, i) => {
+    ctx.fillStyle = land.colors[i];
     ctx.beginPath();
     ctx.moveTo(0, y + 1);
-    ridge.forEach((h, j) => ctx.lineTo((j / (ridge.length - 1)) * W, y - h * H));
+    const pts = ridge.map((_, j) => [(j / (ridge.length - 1)) * W, y - ridgeAt(land, i, j / (ridge.length - 1)) * H] as const);
+    if (land.smooth) {
+      ctx.lineTo(pts[0][0], pts[0][1]);
+      for (let j = 1; j < pts.length - 1; j++) {
+        ctx.quadraticCurveTo(pts[j][0], pts[j][1], (pts[j][0] + pts[j + 1][0]) / 2, (pts[j][1] + pts[j + 1][1]) / 2);
+      }
+      ctx.lineTo(pts[pts.length - 1][0], pts[pts.length - 1][1]);
+    } else {
+      for (const [px, py] of pts) ctx.lineTo(px, py);
+    }
     ctx.lineTo(W, y + 1);
     ctx.closePath();
     ctx.fill();
   });
-
-  // The sea at the far right, flat to the horizon, catching the sun.
-  ctx.fillStyle = "rgb(38,96,152)";
-  ctx.fillRect(W * 0.885, y - H * 0.012, W * 0.115, H * 0.012 + 1);
-  ctx.fillStyle = "rgba(214,236,255,0.7)";
-  for (const [gx, gy, gw] of OCEAN_GLINTS) ctx.fillRect(Math.round(W * gx), Math.round(y - H * gy), Math.round(gw), 1);
+  drawSea(ctx, W, H, y, land.sea);
 
   const ink = "rgb(12,26,42)";
   const trim = "rgb(30,58,88)";
   ctx.fillStyle = ink;
   ctx.strokeStyle = ink;
   ctx.lineCap = "round";
+  if (site === "mahia") drawMahia(ctx, W, H, y, ink, land);
+  else if (site === "starbase") drawStarbase(ctx, W, H, y, ink, trim);
+  else drawCape(ctx, W, H, y, ink, trim);
+  ctx.globalAlpha = alpha;
+}
+
+/**
+ * Cape Canaveral: the assembly building and its low bay, lightning masts with the catenary
+ * wire slung between them, a tracking radar, propellant storage spheres, the water tower and palms.
+ */
+function drawCape(ctx: CanvasRenderingContext2D, W: number, H: number, y: number, ink: string, trim: string) {
   // Vehicle assembly building with its tall door, and the low bay beside it.
   const vx = W * 0.08;
   const vh = H * 0.075;
@@ -1602,7 +1667,147 @@ function drawSkyline(ctx: CanvasRenderingContext2D, W: number, H: number, y: num
     ctx.fill();
   }
   for (const [px, k] of PALMS) drawPalm(ctx, W * px, y, H * 0.042 * k);
-  ctx.globalAlpha = alpha;
+}
+
+/** Sheep on the near hill of the Mahia station: [x as a fraction of W, px below the crest]. */
+const SHEEP: [number, number][] = [
+  [0.12, 6],
+  [0.128, 9],
+  [0.137, 5],
+  [0.565, 7],
+  [0.574, 11],
+  [0.6, 6],
+  [0.612, 9],
+];
+
+/**
+ * Rocket Lab's Launch Complex 1 on the Mahia Peninsula, New Zealand: the pad's hangar, a
+ * tracking dish, wind-bent trees along the green hills, and sheep, since the site sits on a
+ * working sheep and cattle station.
+ */
+function drawMahia(ctx: CanvasRenderingContext2D, W: number, H: number, y: number, ink: string, land: SiteLand) {
+  // The hangar where Electron is readied: a long shed with a curved roof, its door lit.
+  const hx = W * 0.32;
+  const hw = W * 0.06;
+  const hh = H * 0.026;
+  ctx.fillRect(hx, y - hh, hw, hh + 1);
+  ctx.beginPath();
+  ctx.ellipse(hx + hw / 2, y - hh, hw / 2, H * 0.01, 0, Math.PI, 0);
+  ctx.fill();
+  ctx.fillStyle = "rgb(214,226,240)";
+  ctx.fillRect(hx + hw * 0.62, y - hh * 0.75, hw * 0.24, hh * 0.75);
+  // A small tracking dish on a post.
+  ctx.fillStyle = ink;
+  const dx = W * 0.405;
+  ctx.fillRect(dx - 1, y - H * 0.022, 2.5, H * 0.022 + 1);
+  ctx.beginPath();
+  ctx.ellipse(dx + 1, y - H * 0.026, H * 0.011, H * 0.0045, -0.5, 0, Math.PI);
+  ctx.closePath();
+  ctx.fill();
+  // Wind-bent trees on the crest of the near hills, leaning away from the sea.
+  for (const [f, k] of [
+    [0.05, 1],
+    [0.075, 0.8],
+    [0.2, 0.9],
+    [0.68, 1.1],
+    [0.71, 0.8],
+  ] as const) {
+    const x = W * f;
+    const top = y - ridgeAt(land, 1, f) * H;
+    const r = H * 0.011 * k;
+    ctx.fillRect(x - 1, top - r * 1.4, 2, r * 1.4 + 2);
+    ctx.beginPath();
+    ctx.ellipse(x - r * 0.5, top - r * 1.9, r * 1.6, r * 0.9, -0.15, 0, Math.PI * 2);
+    ctx.ellipse(x - r * 1.4, top - r * 1.5, r, r * 0.7, -0.15, 0, Math.PI * 2);
+    ctx.fill();
+  }
+  // Sheep grazing just below the crest.
+  for (const [f, dy] of SHEEP) {
+    const x = W * f;
+    const sy = y - ridgeAt(land, 1, f) * H + dy;
+    ctx.fillStyle = "rgb(226,230,232)";
+    ctx.beginPath();
+    ctx.ellipse(x, sy, 3.2, 2, 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = ink;
+    ctx.fillRect(Math.round(x + 2.4), Math.round(sy - 1.5), 2, 2);
+  }
+  ctx.fillStyle = ink;
+}
+
+/** Starbase's propellant tanks: [x as a fraction of W, radius of W, height of H]. */
+const TANK_FARM: [number, number, number][] = [
+  [0.29, 0.0075, 0.058],
+  [0.306, 0.0075, 0.066],
+  [0.322, 0.0075, 0.058],
+  [0.338, 0.0075, 0.062],
+  [0.362, 0.012, 0.034],
+  [0.389, 0.012, 0.034],
+];
+
+/**
+ * Starbase at Boca Chica, Texas: the tall Mega Bays where the rockets are stacked, the pad's
+ * tank farm of stainless propellant tanks, and the second launch tower with its catch arms.
+ */
+function drawStarbase(ctx: CanvasRenderingContext2D, W: number, H: number, y: number, ink: string, trim: string) {
+  // The bays at the build site, in the distance: tall slabs with full-height doors.
+  for (const [bx, bw, bh] of [
+    [0.05, 0.048, 0.09],
+    [0.104, 0.04, 0.072],
+    [0.15, 0.026, 0.05],
+  ] as const) {
+    ctx.fillStyle = ink;
+    ctx.fillRect(W * bx, y - H * bh, W * bw, H * bh + 1);
+    ctx.fillStyle = trim;
+    ctx.fillRect(W * (bx + bw * 0.32), y - H * bh * 0.9, W * bw * 0.36, H * bh * 0.9);
+  }
+  // The tank farm: tall tanks with domed tops, wide ones behind, each with a glint of steel.
+  for (const [tx, tr, th] of TANK_FARM) {
+    const cx = W * tx;
+    const r = W * tr;
+    const top = y - H * th;
+    ctx.fillStyle = ink;
+    ctx.fillRect(cx - r, top, 2 * r, H * th + 1);
+    ctx.beginPath();
+    ctx.arc(cx, top, r, Math.PI, 0);
+    ctx.fill();
+    ctx.fillStyle = trim;
+    ctx.fillRect(Math.round(cx - r * 0.45), top + 2, 1.5, H * th - 4);
+  }
+  // The second launch tower beyond the pad: a lattice with its two catch arms reaching over the mount.
+  const px = W * 0.69;
+  const ph = H * 0.13;
+  const pw = W * 0.009;
+  ctx.fillStyle = ink;
+  ctx.fillRect(px, y - ph, pw, ph + 1);
+  ctx.strokeStyle = trim;
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  for (let i = 0; i < 9; i++) {
+    const y0 = y - ph + (i * ph) / 9;
+    ctx.moveTo(px + 1, y0);
+    ctx.lineTo(px + pw - 1, y0 + ph / 9);
+  }
+  ctx.stroke();
+  ctx.fillStyle = ink;
+  ctx.beginPath();
+  for (const [ay, reach] of [
+    [0.8, 0.03],
+    [0.72, 0.026],
+  ] as const) {
+    ctx.moveTo(px + pw, y - ph * ay);
+    ctx.lineTo(px + pw + W * reach, y - ph * (ay - 0.01));
+    ctx.lineTo(px + pw + W * reach, y - ph * (ay - 0.035));
+    ctx.lineTo(px + pw, y - ph * (ay - 0.06));
+    ctx.closePath();
+  }
+  ctx.fill();
+  // The carriage the arms ride on, and the crane boom at the top.
+  ctx.fillRect(px - 2, y - ph * 0.82, pw + 4, ph * 0.13);
+  ctx.fillRect(px + pw / 2 - 1, y - ph - H * 0.012, 2, H * 0.012);
+  // Its launch mount: a ring table on legs.
+  ctx.fillRect(px + pw + W * 0.008, y - H * 0.022, W * 0.016, H * 0.005);
+  for (const lx of [0.009, 0.015, 0.021]) ctx.fillRect(px + pw + W * lx, y - H * 0.022, 2, H * 0.022 + 1);
 }
 
 /**
