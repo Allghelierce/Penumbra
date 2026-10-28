@@ -21,7 +21,7 @@ export const MORE_MISSIONS: HistoricMission[] = [
     },
     timeline: [
       { tS: 0, altitudeKm: 0, speedMps: 0, kind: "liftoff", event: "Liftoff" },
-      { tS: 79, altitudeKm: 15, speedMps: 600, kind: "engine-cutoff", event: "Engine 1 loses pressure and shuts down" },
+      { tS: 79, altitudeKm: 15, speedMps: 600, kind: "milestone", event: "Engine 1 loses pressure and shuts down" },
       { tS: 190, altitudeKm: 90, speedMps: 2900, kind: "stage-sep", event: "Remaining engines burn longer; stage separation" },
       { tS: 600, altitudeKm: 330, speedMps: 7600, kind: "orbit", event: "Dragon reaches orbit on its way to the ISS" },
     ],
