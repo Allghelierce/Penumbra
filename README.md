@@ -58,7 +58,6 @@ These figures are checked by `lib/trade.test.ts`. The same tests check that the 
 Requires Node.js 20.9 or newer.
 
 ```bash
-cd doodle-to-starship
 npm install
 npm run dev          # http://localhost:3000
 npm test             # vitest
@@ -76,8 +75,6 @@ An xAI key is optional: put `XAI_API_KEY=...` in `.env.local` to enable the Grok
 - **Electron runs high (118%).** Its rated 300 kg rides on the Curie kick stage, whose mass isn't published or modelled, and its stage masses are community-compiled estimates.
 
 ## Project layout
-
-The app lives in `doodle-to-starship/`; paths below are relative to it.
 
 ```
 lib/physics/        analyze() and simulateFlight(): losses, recovery, verdicts
