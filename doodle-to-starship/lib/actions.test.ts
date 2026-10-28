@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { applyAction, structureScale } from "./actions";
+import { applyAction, seaLevelEngine, structureScale, vacuumOnly } from "./actions";
 import type { Design } from "./design";
 import { analyze } from "./physics";
 
@@ -104,6 +104,31 @@ describe("add-stage", () => {
       stages: [{ label: "Ship", engines: [{ engine: "rutherford", count: 1 }], propellant: "kerolox", tankVolumeM3: 5_000 }],
     };
     expect(applyAction(huge, { type: "add-stage" }).stages[0].engines[0].count).toBe(40);
+  });
+
+  it("gives a booster under a vacuum-engined stage the sea-level version, so it lifts off", () => {
+    const ship: Design = {
+      ...falconLike(),
+      stages: [{ label: "Ship", engines: [{ engine: "raptor-3", count: 3 }, { engine: "raptor-vacuum", count: 3 }], propellant: "methalox", tankVolumeM3: 1_800 }],
+    };
+    const next = applyAction(ship, { type: "add-stage" });
+    expect(next.stages[0].engines.map((c) => c.engine)).toEqual(["raptor-3", "raptor-3"]);
+    expect(analyze(next).liftoffTwr).toBeGreaterThanOrEqual(1.3);
+  });
+});
+
+describe("seaLevelEngine", () => {
+  it("swaps a vacuum-only engine for its sea-level family, or one already on the stage", () => {
+    expect(vacuumOnly("merlin-vacuum")).toBe(true);
+    expect(vacuumOnly("merlin-1d")).toBe(false);
+    expect(seaLevelEngine("merlin-vacuum")).toBe("merlin-1d");
+    expect(seaLevelEngine("rutherford-vacuum")).toBe("rutherford");
+    expect(seaLevelEngine("raptor-vacuum")).toMatch(/^raptor-\d$/);
+    const stage = falconLike().stages[0];
+    expect(seaLevelEngine("raptor-vacuum", { ...stage, engines: [{ engine: "raptor-3", count: 33 }] })).toBe("raptor-3");
+    // No sea-level RL10, so the hydrolox engine nearest in thrust.
+    expect(vacuumOnly(seaLevelEngine("rl10c"))).toBe(false);
+    expect(seaLevelEngine("merlin-1d")).toBe("merlin-1d");
   });
 });
 

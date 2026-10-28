@@ -3,12 +3,13 @@
 // check mark when nothing needs fixing. Every number in a note comes from re-running the
 // physics on an edited design, so the corrections are computed, never guessed.
 
-import { applyAction } from "./actions";
+import { applyAction, seaLevelEngine, vacuumOnly } from "./actions";
 import {
   type Analysis,
   type Design,
   type DesignAction,
   type DestinationId,
+  type EngineId,
   type Part,
   type PartKind,
   type Point,
@@ -16,9 +17,12 @@ import {
   type Review,
   type SketchReading,
 } from "./design";
-import { analyze } from "./physics";
+import { analyze, ENGINES } from "./physics";
+import { maxPayloadKg } from "./trade";
 
 type Box = [x: number, y: number, w: number, h: number];
+type SetEngines = Extract<DesignAction, { type: "set-engines" }>;
+type SetPayload = Extract<DesignAction, { type: "set-payload" }>;
 
 const MAX_MARKS = 3;
 /** Real launchers lift off at about 1.2 or more; below that the red pen calls it marginal. */
@@ -67,11 +71,20 @@ export function buildReview(reading: SketchReading, analysis: Analysis): Review 
   const side = sketch.openSide();
   const marks: RedPenMark[] = [];
 
+  // When the rocket could make the trip carrying less, that's the first fix.
+  const lighter = lighterPayload(design);
+  if (lighter) marks.push({ ...arrowTo(sketch.capsuleSide(), side, -0.04, `max ${massText(lighter.payloadMassKg)}`), fix: lighter });
+
   const stuck = analysis.liftoffTwr < 1;
   const marginal = !stuck && analysis.liftoffTwr < SAFE_TWR;
-  const extraEngines = stuck || marginal ? enginesForTwr(design, TARGET_TWR) : null;
+  // A vacuum engine on the pad gives no thrust: the fix is its sea-level version, not more of it.
+  const vacuum = stuck || marginal ? vacuumOnPad(design) : null;
+  const extraEngines = (stuck || marginal) && !vacuum ? enginesForTwr(design, TARGET_TWR) : null;
   const sensibleEngines = extraEngines !== null && extraEngines <= MAX_SENSIBLE_EXTRA_ENGINES;
-  if (stuck || marginal) {
+  if (vacuum) {
+    const use = `use ${ENGINES[vacuum.swap].name}`;
+    marks.push({ ...arrowTo(sketch.enginesSide(), side, 0, `vacuum-only: ${use}`, use), fix: vacuum.fix });
+  } else if (stuck || marginal) {
     // Notes beside the rocket, not inside a circle on top of the drawing.
     const twr = `TWR ${formatTwr(analysis.liftoffTwr)}`;
     if (sensibleEngines) {
@@ -84,7 +97,7 @@ export function buildReview(reading: SketchReading, analysis: Analysis): Review 
   }
 
   // A stuck or marginal rocket's fuel is judged as if the engine fix were made.
-  const engineFixed = sensibleEngines ? withExtraEngines(design, extraEngines) : null;
+  const engineFixed = vacuum ? applyAction(design, vacuum.fix) : sensibleEngines ? withExtraEngines(design, extraEngines) : null;
   const flyable = !(stuck || marginal) ? design : engineFixed && analyze(engineFixed).liftoffTwr >= 1 ? engineFixed : null;
   const flyableAnalysis = flyable === design ? analysis : flyable && analyze(flyable);
   const short = flyableAnalysis !== null && flyableAnalysis.marginMps < 0;
@@ -101,6 +114,8 @@ export function buildReview(reading: SketchReading, analysis: Analysis): Review 
   return {
     marks: issues.length > 0 ? issues : [passMark(sketch, analysis)],
     summary: summarize(design, analysis, {
+      lighter,
+      vacuum,
       extraEngines,
       sensibleEngines,
       fix,
@@ -163,6 +178,55 @@ function withExtraEngines(design: Design, extra: number): Design {
   const main = bottom.engines.reduce((best, c, i, all) => (c.count > all[best].count ? i : best), 0);
   const engines = bottom.engines.map((c, i) => (i === main ? { ...c, count: c.count + extra } : c));
   return { ...design, stages: [{ ...bottom, engines }, ...design.stages.slice(1)] };
+}
+
+/**
+ * The payload to carry instead when the rocket could make the trip lighter: the most it can
+ * carry (trade.ts's figure, which also keeps a safe liftoff), floored to what the note shows.
+ */
+function lighterPayload(design: Design): SetPayload | null {
+  if (!(design.payloadMassKg > 0)) return null;
+  const kg = floorToShown(maxPayloadKg(design));
+  return kg > 0 && kg < design.payloadMassKg ? { type: "set-payload", payloadMassKg: kg } : null;
+}
+
+export type VacuumSwap = { engine: EngineId; swap: EngineId; fix: SetEngines };
+
+/**
+ * A vacuum-only engine on the bottom stage, which can't fire at sea level, and the edit that
+ * puts its sea-level version there instead: as many as were drawn, or enough to lift off at
+ * TWR 1.3 if that takes more.
+ */
+export function vacuumOnPad(design: Design): VacuumSwap | null {
+  const stage = design.stages[0];
+  const i = stage?.engines.findIndex((c) => vacuumOnly(c.engine)) ?? -1;
+  if (!stage || i < 0) return null;
+  const { engine, count } = stage.engines[i];
+  const swap = seaLevelEngine(engine, stage);
+  if (vacuumOnly(swap)) return null;
+  const edit = (n: number): SetEngines => ({
+    type: "set-engines",
+    stageIndex: 0,
+    engine: swap,
+    count: n,
+    ...(stage.engines.length > 1 && { clusterIndex: i }),
+  });
+  const twrWith = (n: number) => analyze(applyAction(design, edit(n))).liftoffTwr;
+  const cap = count + MAX_SENSIBLE_EXTRA_ENGINES;
+  if (twrWith(count) >= TARGET_TWR || twrWith(cap) < TARGET_TWR) return { engine, swap, fix: edit(count) };
+  let lo = count;
+  let hi = cap;
+  while (hi - lo > 1) {
+    const mid = Math.floor((lo + hi) / 2);
+    if (twrWith(mid) >= TARGET_TWR) hi = mid;
+    else lo = mid;
+  }
+  return { engine, swap, fix: edit(hi) };
+}
+
+/** The plain reason, for anywhere that explains a vacuum engine on the pad. */
+export function vacuumReason(engine: EngineId): string {
+  return `${ENGINES[engine].name} can't fire at sea level: its nozzle is built for vacuum`;
 }
 
 type ShortfallFix = {
@@ -244,6 +308,9 @@ function summarize(
   design: Design,
   analysis: Analysis,
   found: {
+    /** The payload to carry instead, when the rocket could make it lighter. */
+    lighter: SetPayload | null;
+    vacuum: VacuumSwap | null;
     extraEngines: number | null;
     /** False when the engine count is absurd (or no count works). */
     sensibleEngines: boolean;
@@ -258,18 +325,26 @@ function summarize(
   const destination = DESTINATION_NAMES[design.destination];
   const fuelFix =
     found.fix && found.flyableAnalysis ? shortfallAdvice(found.fix, found.flyableAnalysis, design.destination) : null;
+  const carryLess = found.lighter ? `carry at most ${massText(found.lighter.payloadMassKg)}` : null;
 
   const twr = formatTwr(analysis.liftoffTwr);
   if (analysis.liftoffTwr < SAFE_TWR) {
     const stuck = analysis.liftoffTwr < 1;
     const then = fuelFix ? `, then ${fuelFix}` : "";
+    if (found.vacuum) {
+      const { engine, swap, fix } = found.vacuum;
+      const swapIn = `swap in ${fix.count} ${ENGINES[swap].name} engine${fix.count === 1 ? "" : "s"}`;
+      const options = [carryLess, swapIn].filter(Boolean).join(", or ");
+      return `${vacuumReason(engine)}, so ${stuck ? "it never leaves the pad" : `liftoff TWR is only ${twr}`}. ${options[0].toUpperCase()}${options.slice(1)}${then}.`;
+    }
     const n = found.extraEngines;
     const thrust = !found.sensibleEngines
       ? `it needs ${MAX_SENSIBLE_EXTRA_ENGINES}+ more engines, so rethink the booster`
       : `add ${n} engine${n === 1 ? "" : "s"} ${stuck ? "to clear the pad" : "for a safe liftoff"}`;
     const start = stuck ? `Liftoff TWR is ${twr}, so it never leaves the pad` : `Liftoff TWR is ${twr}, too marginal to launch safely`;
-    return `${start}: ${thrust}${then}.`;
+    return `${start}: ${[carryLess, thrust].filter(Boolean).join(", or ")}${then}.`;
   }
+  if (carryLess) return `${deltaV}: ${carryLess}${fuelFix ? `, or ${fuelFix}` : ""}.`;
   if (fuelFix) return `${deltaV}: ${fuelFix}.`;
 
   const missing = [found.needsLegs && "landing legs", found.needsShield && "a heat shield"].filter(Boolean);
@@ -480,6 +555,20 @@ function kmShort(totalMps: number, requiredMps: number) {
 
 function kmSpare(totalMps: number, requiredMps: number) {
   return (Math.max(0, tenths(totalMps) - tenths(requiredMps)) / 10).toFixed(1);
+}
+
+/** Payload as it's usually quoted: tonnes with one decimal from a tonne up (whole tonnes from 100 t), kilograms below. */
+export function massText(kg: number) {
+  if (kg < 1_000) return `${Math.round(kg).toLocaleString("en-US")} kg`;
+  const t = kg / 1_000;
+  return `${t >= 100 ? Math.round(t).toLocaleString("en-US") : t.toFixed(1)} t`;
+}
+
+/** Rounds down to what massText shows, so a suggested payload is never more than the rocket can carry. */
+function floorToShown(kg: number) {
+  if (kg >= 100_000) return Math.floor(kg / 1_000) * 1_000;
+  if (kg >= 1_000) return Math.floor(kg / 100) * 100;
+  return Math.floor(kg);
 }
 
 // ---------------------------------------------------------------------------

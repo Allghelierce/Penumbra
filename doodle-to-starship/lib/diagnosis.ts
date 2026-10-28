@@ -5,7 +5,8 @@
 import { applyAction } from "./actions";
 import type { Analysis, Design, DesignAction, Part, RedPenMark, SketchReading } from "./design";
 import { analyze, ascentLossesMps, DESTINATIONS, ENGINES, km, kmShort, kmSpare } from "./physics";
-import { buildReview, DESTINATION_NAMES, hardwareNeeds, isIssueMark, SAFE_TWR } from "./redpen";
+import { buildReview, DESTINATION_NAMES, hardwareNeeds, isIssueMark, massText, SAFE_TWR, vacuumOnPad, vacuumReason } from "./redpen";
+import { MIN_LIFTOFF_TWR } from "./trade";
 
 export interface Issue {
   /** 1-based, in display order; the UI numbers the matching red-pen mark with it. */
@@ -44,6 +45,7 @@ export function diagnose(design: Design, analysis: Analysis, reading?: SketchRea
   };
 
   const drafts: Draft[] = [];
+  drafts.push(...payloadIssue(design, analysis, marks, markFor));
   const liftoff = liftoffIssue(design, analysis, marks, markFor);
   drafts.push(liftoff.issue);
   drafts.push(deltaVIssue(design, liftoff.flyable, marks, markFor));
@@ -57,6 +59,36 @@ export function diagnose(design: Design, analysis: Analysis, reading?: SketchRea
 }
 
 type MarkFinder = (test: (m: RedPenMark) => boolean) => number | undefined;
+
+// ---------------------------------------------------------------------------
+// Payload
+
+/** When the rocket could make the trip carrying less, that's the first fix: the red pen's payload mark. */
+function payloadIssue(design: Design, a: Analysis, marks: RedPenMark[], markFor: MarkFinder): Draft[] {
+  const markIndex = markFor((m) => m.fix?.type === "set-payload");
+  const fix = markIndex !== undefined ? marks[markIndex].fix : undefined;
+  if (fix?.type !== "set-payload") return [];
+  const goal = design.destination === "leo" ? "orbit" : DESTINATION_NAMES[design.destination];
+  const now =
+    a.liftoffTwr < 1
+      ? "it can't leave the pad"
+      : a.marginMps < 0
+        ? `it's ${kmShort(stageSum(a), a.requiredDeltaVMps)} km/s short of ${goal}`
+        : `it lifts off at only thrust-to-weight ${a.liftoffTwr.toFixed(2)}`;
+  const after = analyze(applyAction(design, fix));
+  return [
+    {
+      severity: a.liftoffTwr < 1 || a.marginMps < 0 ? "no-go" : "warning",
+      title: "Payload too heavy",
+      why:
+        `With ${massText(design.payloadMassKg)} aboard ${now}. Every tonne of payload is a tonne every stage has to push. ` +
+        `${massText(fix.payloadMassKg)} is the most it carries to ${goal} while lifting off at thrust-to-weight ${MIN_LIFTOFF_TWR} or better.`,
+      effect: `Carry ${massText(fix.payloadMassKg)}, not ${massText(design.payloadMassKg)} → ${after.marginMps >= 0 ? `makes ${goal === "orbit" ? "orbit" : `it to ${goal}`}` : `still ${kmShort(stageSum(after), after.requiredDeltaVMps)} km/s short`}`,
+      fix,
+      markIndex,
+    },
+  ];
+}
 
 // ---------------------------------------------------------------------------
 // Liftoff
@@ -88,6 +120,26 @@ function liftoffIssue(
   const fix = markIndex !== undefined ? marks[markIndex].fix : undefined;
   const title = a.liftoffTwr < 1 ? "Can't lift off" : "Marginal liftoff";
   const severity = a.liftoffTwr < 1 ? "no-go" : "warning";
+
+  // A vacuum engine on the pad: the fix is its sea-level version, as the red pen says.
+  const vacuum = vacuumOnPad(design);
+  if (vacuum) {
+    const fixed = applyAction(design, vacuum.fix);
+    const after = analyze(fixed);
+    return {
+      issue: {
+        severity,
+        title: "Vacuum engine on the pad",
+        why:
+          `${vacuumReason(vacuum.engine)}, so wide that at sea level the air would push the exhaust off its walls. ` +
+          `On the pad, ${engineText} make ${tonnesForce(thrust)} of thrust against ${tonnes(a.liftoffMassKg)}: thrust-to-weight ${twr}.`,
+        effect: `Swap to ${vacuum.fix.count} × ${ENGINES[vacuum.swap].name} → TWR ${twr} → ${after.liftoffTwr.toFixed(2)}`,
+        fix: vacuum.fix,
+        markIndex: markFor((m) => m.fix?.type === "set-engines"),
+      },
+      flyable: after.liftoffTwr >= 1 ? fixed : design,
+    };
+  }
   if (fix?.type === "set-engines") {
     const fixed = applyAction(design, fix);
     const after = analyze(fixed);

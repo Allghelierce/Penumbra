@@ -5,7 +5,7 @@
 import { applyAction } from "./actions";
 import type { Analysis, Attempt, Design, DesignAction, DestinationId, Improvement, Recap, RedPenMark } from "./design";
 import { analyze, DESTINATIONS, ENGINES, km, kmShort, kmSpare } from "./physics";
-import { buildReview, DESTINATION_NAMES, hardwareNeeds, SAFE_TWR } from "./redpen";
+import { buildReview, DESTINATION_NAMES, hardwareNeeds, massText, SAFE_TWR } from "./redpen";
 
 const MAX_IMPROVEMENTS = 3;
 /** Margin past which a design counts as over-built and could shed tank volume. */
@@ -133,6 +133,12 @@ function fixesFromRedPen(design: Design, marks: RedPenMark[]): Improvement[] {
   let base = design;
   // Fuel fixes only need to leave the pad; a marginal liftoff gets its own engine fix next time.
   const closes = (a: Analysis) => a.liftoffTwr >= 1 && a.marginMps >= 0;
+
+  // When the rocket could make the trip carrying less, that comes first.
+  const payload = marks.find((m) => m.fix?.type === "set-payload")?.fix;
+  if (payload?.type === "set-payload" && closes(analyze(applyAction(design, payload)))) {
+    out.push({ text: `Carry ${massText(payload.payloadMassKg)} instead of ${massText(design.payloadMassKg)} to ${target}`, fix: payload });
+  }
 
   const engines = marks.find((m) => m.fix?.type === "set-engines")?.fix;
   if (engines?.type === "set-engines") {

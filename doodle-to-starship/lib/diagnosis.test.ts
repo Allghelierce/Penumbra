@@ -5,6 +5,7 @@ import type { Design } from "./design";
 import { diagnose, sensitivities } from "./diagnosis";
 import { analyze } from "./physics";
 import { buildReview } from "./redpen";
+import { maxPayloadKg } from "./trade";
 
 function falconLike(overrides: Partial<Design> = {}): Design {
   return {
@@ -81,6 +82,32 @@ describe("diagnose", () => {
     }
     const titles = diagnose(design, analysis).map((i) => i.title);
     expect(titles).toEqual(expect.arrayContaining(["No landing legs", "No heat shield"]));
+  });
+
+  it("puts a lighter payload first when the rocket could make the trip carrying less", () => {
+    const heavy = falconLike({ payloadMassKg: 30_000 });
+    const analysis = analyze(heavy);
+    const marks = buildReview({ design: heavy, parts: [] }, analysis).marks;
+    const [first] = diagnose(heavy, analysis);
+    expect(first).toMatchObject({ n: 1, severity: "no-go", title: "Payload too heavy" });
+    expect(first.why).toMatch(/^With 30\.0 t aboard it's \d+\.\d km\/s short of orbit\./);
+    expect(first.effect).toMatch(/^Carry \d+\.\d t, not 30\.0 t → makes orbit$/);
+    expect(first.fix).toEqual(marks[first.markIndex!].fix);
+    if (first.fix?.type !== "set-payload") throw new Error("expected set-payload");
+    expect(first.fix.payloadMassKg).toBeLessThanOrEqual(maxPayloadKg(heavy));
+    expect(analyze(applyAction(heavy, first.fix)).marginMps).toBeGreaterThanOrEqual(0);
+  });
+
+  it("says plainly that a vacuum engine can't fire at sea level, and swaps in the sea-level one", () => {
+    const vacuum = falconLike({
+      stages: [{ ...falconLike().stages[0], engines: [{ engine: "merlin-vacuum", count: 9 }] }, falconLike().stages[1]],
+    });
+    const [first] = issues(vacuum);
+    expect(first).toMatchObject({ severity: "no-go", title: "Vacuum engine on the pad" });
+    expect(first.why).toMatch(/^Merlin Vacuum can't fire at sea level: its nozzle is built for vacuum/);
+    expect(first.why).not.toMatch(/even empty|too heavy/i);
+    expect(first.effect).toMatch(/^Swap to 9 × Merlin 1D → TWR 0\.00 → 1\.\d\d$/);
+    expect(first.fix).toEqual({ type: "set-engines", stageIndex: 0, engine: "merlin-1d", count: 9 });
   });
 
   it("still lists legs and dead-weight fins when the napkin had no room for their marks", () => {

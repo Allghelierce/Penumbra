@@ -4,6 +4,7 @@ import { applyAction } from "./actions";
 import { NAPKIN_ASPECT, type Design, type Part, type RedPenMark, type SketchReading } from "./design";
 import { analyze } from "./physics";
 import { buildReview } from "./redpen";
+import { maxPayloadKg, MIN_LIFTOFF_TWR } from "./trade";
 
 function falconLike(overrides: Partial<Design> = {}): Design {
   return {
@@ -193,7 +194,9 @@ describe("a rocket short of its destination", () => {
       expect(mark.to[1]).toBeGreaterThan(0.4);
       expect(mark.to[1]).toBeLessThan(0.78);
     }
-    expect(r.summary).toMatch(new RegExp(`^\\d+\\.\\d of \\d+\\.\\d km/s: stretch the tanks ${percent}%`));
+    // Its payload is what's over, so carrying less comes first and the stretch is the other way.
+    expect(r.marks[0].fix?.type).toBe("set-payload");
+    expect(r.summary).toMatch(new RegExp(`^\\d+\\.\\d of \\d+\\.\\d km/s: carry at most [\\d.]+ t, or stretch the tanks ${percent}%`));
 
     expect(mark!.fix).toEqual({ type: "scale-tanks", stageIndex: 0, factor: 1 + percent / 100 });
     expect(analyze(applyAction(design, mark!.fix!)).marginMps).toBeGreaterThanOrEqual(0);
@@ -359,5 +362,67 @@ describe("every review", () => {
 
   it("is deterministic", () => {
     expect(review(everythingWrong).review).toEqual(review(everythingWrong).review);
+  });
+});
+
+describe("a payload heavier than the rocket can carry", () => {
+  const heavy = falconLike({ payloadMassKg: 30_000 });
+
+  it("asks for the lighter payload first: the most it can carry, pointed at the payload", () => {
+    const { analysis, review: r } = review(heavy);
+    expect(analysis.marginMps).toBeLessThan(0);
+    const max = maxPayloadKg(heavy);
+    expect(max).toBeGreaterThan(0);
+
+    const [first] = r.marks;
+    expect(first.kind).toBe("arrow");
+    expect(first.note).toMatch(/^max \d+\.\d t$/);
+    const fix = first.fix;
+    if (fix?.type !== "set-payload") throw new Error("expected set-payload");
+    // Floored to what the note shows, so it never asks for more than the rocket carries.
+    expect(first.note).toBe(`max ${(fix.payloadMassKg / 1000).toFixed(1)} t`);
+    expect(fix.payloadMassKg).toBeLessThanOrEqual(max);
+    expect(fix.payloadMassKg).toBeGreaterThan(max - 100);
+    const after = analyze(applyAction(heavy, fix));
+    expect(after.marginMps).toBeGreaterThanOrEqual(0);
+    expect(after.liftoffTwr).toBeGreaterThanOrEqual(MIN_LIFTOFF_TWR);
+    if (first.kind === "arrow") expect(first.to[1]).toBeCloseTo(0.18, 2);
+    expect(r.summary).toMatch(/^\d+\.\d of \d+\.\d km\/s: carry at most \d+\.\d t/);
+  });
+
+  it("isn't offered when no payload would do, or the payload already fits", () => {
+    const hopeless = falconLike({ stages: [falconLike().stages[0]], destination: "mars-surface" });
+    for (const d of [falconLike(), hopeless, falconLike({ payloadMassKg: 0, destination: "europa" })]) {
+      expect(review(d).review.marks.some((m) => m.fix?.type === "set-payload")).toBe(false);
+    }
+  });
+});
+
+describe("a vacuum engine on the bottom stage", () => {
+  const vacuumBooster = falconLike({
+    stages: [{ ...falconLike().stages[0], engines: [{ engine: "merlin-vacuum", count: 9 }] }, falconLike().stages[1]],
+  });
+
+  it("says plainly it can't fire at sea level, and swaps in the sea-level engine", () => {
+    const { analysis, review: r } = review(vacuumBooster);
+    expect(analysis.liftoffTwr).toBe(0);
+    const [mark] = r.marks;
+    expect(mark.note).toMatch(/^(vacuum-only: )?use Merlin 1D$/);
+    expect(mark.fix).toEqual({ type: "set-engines", stageIndex: 0, engine: "merlin-1d", count: 9 });
+    if (mark.kind === "arrow") expect(mark.to[1]).toBeCloseTo(ENGINE_BOX[1] + ENGINE_BOX[3] / 2, 2);
+    expect(analyze(applyAction(vacuumBooster, mark.fix!)).liftoffTwr).toBeGreaterThanOrEqual(1.3);
+    expect(r.summary).toBe(
+      "Merlin Vacuum can't fire at sea level: its nozzle is built for vacuum, so it never leaves the pad. Swap in 9 Merlin 1D engines.",
+    );
+  });
+
+  it("adds engines to the swap when the drawn count can't lift it", () => {
+    const one = falconLike({ stages: [{ ...falconLike().stages[0], engines: [{ engine: "merlin-vacuum", count: 1 }] }, falconLike().stages[1]] });
+    const fix = review(one).review.marks[0].fix;
+    if (fix?.type !== "set-engines") throw new Error("expected set-engines");
+    expect(fix.engine).toBe("merlin-1d");
+    const twrWith = (count: number) => analyze(applyAction(one, { ...fix, count })).liftoffTwr;
+    expect(twrWith(fix.count)).toBeGreaterThanOrEqual(1.3);
+    expect(twrWith(fix.count - 1)).toBeLessThan(1.3);
   });
 });

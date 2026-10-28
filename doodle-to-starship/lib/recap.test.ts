@@ -4,6 +4,8 @@ import { applyAction } from "./actions";
 import type { Attempt, Design, Improvement } from "./design";
 import { analyze } from "./physics";
 import { recap } from "./recap";
+import { templateById } from "./templates";
+import { maxPayloadKg } from "./trade";
 
 function falconLike(overrides: Partial<Design> = {}): Design {
   return {
@@ -94,6 +96,18 @@ describe("improvements after a failure", () => {
     const after = analyze(applied(short, improvements, fuel!));
     expect(after.marginMps).toBeGreaterThanOrEqual(0);
     expect(after.liftoffTwr).toBeGreaterThanOrEqual(1);
+  });
+
+  it("asks for the lighter payload first when that's what's over", () => {
+    // Falcon 9 landing its booster with 23.1 t aboard: it carries 17.5 t that way.
+    const f9 = templateById("falcon9");
+    const landing = { ...applyAction(f9.design, { type: "set-recover", stageIndex: 0, recover: true }), payloadMassKg: 23_100 };
+    expect(analyze(landing).marginMps).toBeLessThan(0);
+    const [first] = recap(attempts(landing)).improvements;
+    expect(first.text).toMatch(/^Carry \d+\.\d t instead of 23\.1 t to make orbit$/);
+    if (first.fix?.type !== "set-payload") throw new Error("expected set-payload");
+    expect(first.fix.payloadMassKg).toBeLessThanOrEqual(maxPayloadKg(landing));
+    expect(analyze(applyAction(landing, first.fix)).marginMps).toBeGreaterThanOrEqual(0);
   });
 
   it("offers a closer target this design already reaches", () => {

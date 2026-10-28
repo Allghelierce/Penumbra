@@ -1,7 +1,7 @@
 // Pure edits to a Design, used by the voice reviewer, the UI and the red pen's
 // what-if checks. Every function returns a new Design and never mutates its input.
 
-import type { Design, DesignAction, EngineCluster, Stage } from "./design";
+import type { Design, DesignAction, EngineCluster, EngineId, Stage } from "./design";
 import { analyze, ENGINES } from "./physics";
 
 /** A new bottom stage holds this many times the current bottom stage's propellant. */
@@ -109,9 +109,33 @@ function engineMassKg(engines: EngineCluster[]): number {
   return engines.reduce((sum, c) => sum + ENGINES[c.engine].massKg * c.count, 0);
 }
 
+/** A vacuum engine's nozzle is too wide to fire in thick air, so it gives no thrust at sea level. */
+export function vacuumOnly(engine: EngineId): boolean {
+  return ENGINES[engine].thrustSeaLevelN <= 0;
+}
+
 /**
- * A booster under the current bottom stage: bigger tanks and the same engines, with the
- * fewest engines (at least 3, at most 40) that lift the whole new stack at TWR 1.3.
+ * The sea-level engine to fly in place of a vacuum-only one: one already on the stage that
+ * burns the same propellant, else the same family ("Merlin Vacuum" → "Merlin 1D"), else the
+ * same propellant's engine nearest in vacuum thrust. Sea-level engines come back unchanged.
+ */
+export function seaLevelEngine(engine: EngineId, stage?: Stage): EngineId {
+  if (!vacuumOnly(engine)) return engine;
+  const spec = ENGINES[engine];
+  const options = Object.values(ENGINES).filter((e) => !vacuumOnly(e.id) && e.propellant === spec.propellant);
+  const onStage = options.find((e) => stage?.engines.some((c) => c.engine === e.id));
+  if (onStage) return onStage.id;
+  const family = spec.name.replace(/\s*vacuum\s*/i, " ").trim().split(" ")[0].toLowerCase();
+  const sameFamily = options.find((e) => e.name.toLowerCase().startsWith(family));
+  if (sameFamily) return sameFamily.id;
+  const nearest = options.sort((a, b) => Math.abs(a.thrustVacuumN - spec.thrustVacuumN) - Math.abs(b.thrustVacuumN - spec.thrustVacuumN))[0];
+  return nearest?.id ?? engine;
+}
+
+/**
+ * A booster under the current bottom stage: bigger tanks and the same engines (sea-level
+ * versions of any vacuum ones), with the fewest engines (at least 3, at most 40) that lift the
+ * whole new stack at TWR 1.3.
  */
 function withNewBottomStage(design: Design): Design {
   const bottom = design.stages[0];
@@ -120,7 +144,7 @@ function withNewBottomStage(design: Design): Design {
     const booster: Stage = {
       label: design.stages.some((s) => s.label === "Booster") ? "Lower booster" : "Booster",
       engines: bottom.engines.map((cluster, i) => ({
-        engine: cluster.engine,
+        engine: seaLevelEngine(cluster.engine, bottom),
         count: i === main ? count : Math.max(1, Math.ceil(ADDED_STAGE_SCALE * cluster.count)),
       })),
       propellant: bottom.propellant,
