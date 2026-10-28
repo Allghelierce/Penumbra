@@ -77,7 +77,9 @@ function onNapkin(m: RedPenMark) {
           ? m.points
           : m.kind === "circle"
             ? [m.center]
-            : [
+            : m.kind === "tick"
+              ? [m.at]
+              : [
                 [m.box[0], m.box[1]],
                 [m.box[0] + m.box[2], m.box[1] + m.box[3]],
               ];

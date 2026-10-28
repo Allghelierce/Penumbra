@@ -166,6 +166,8 @@ export function calloutFor(event: FlightEvent, design: Design, trace?: FlightTra
       return SURFACE.includes(design.destination)
         ? `Touchdown, ${TARGET[design.destination]}.`
         : `Arrival, ${TARGET[design.destination]}.`;
+    case "escape":
+      return "Escape velocity. Leaving Earth.";
     case "pad-failure":
       return "Pad failure.";
     case "breakup":

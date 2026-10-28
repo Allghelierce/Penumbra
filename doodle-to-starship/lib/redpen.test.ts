@@ -334,7 +334,7 @@ describe("the engineer's markup", () => {
   const of = <K extends RedPenMark["kind"]>(kind: K) => full.marks.filter((m): m is Extract<RedPenMark, { kind: K }> => m.kind === kind);
 
   it("comes before the issue marks: outlines, then dimensions, then callouts", () => {
-    const order = { outline: 0, dimension: 1, callout: 2, arrow: 3, circle: 3, "ghost-line": 3 };
+    const order = { outline: 0, dimension: 1, callout: 2, arrow: 3, circle: 3, "ghost-line": 3, tick: 3 };
     full.marks.forEach((m, i) => {
       if (i > 0) expect(order[m.kind]).toBeGreaterThanOrEqual(order[full.marks[i - 1].kind]);
     });

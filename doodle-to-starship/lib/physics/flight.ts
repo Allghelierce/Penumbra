@@ -29,10 +29,11 @@ const EVENT_ORDER: Record<FlightEventKind, number> = {
   "fuel-exhausted": 4,
   orbit: 5,
   arrival: 6,
-  apogee: 7,
-  impact: 8,
-  "pad-failure": 9,
-  breakup: 10,
+  escape: 7,
+  apogee: 8,
+  impact: 9,
+  "pad-failure": 10,
+  breakup: 11,
 };
 
 export function simulateFlight(design: Design, analysis: Analysis): FlightTrace {

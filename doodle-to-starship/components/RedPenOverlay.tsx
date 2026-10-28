@@ -48,6 +48,8 @@ function badgeAt(mark: RedPenMark): Point {
       return mark.anchor;
     case "ghost-line":
       return mark.points[0] ?? [0.5, 0.5];
+    case "tick":
+      return mark.at;
   }
 }
 
@@ -59,6 +61,7 @@ const MARKUP_ORDER: Record<RedPenMark["kind"], number> = {
   circle: 3,
   arrow: 3,
   "ghost-line": 3,
+  tick: 3,
 };
 
 /** Each mark's start time: stable-sorted by kind, staggered so the whole sheet is marked up in about 3 s. */
@@ -594,6 +597,26 @@ function Mark({
           size={9.5}
           label
         />
+      </g>
+    );
+  }
+
+  if (mark.kind === "tick") {
+    const [x, y] = scale(mark.at);
+    return (
+      <g>
+        <path
+          className="pen-draw"
+          style={draw}
+          pathLength={1}
+          d={`M${x - 9} ${y - 1} Q${x - 5} ${y + 3} ${x - 2} ${y + 8} Q${x + 4} ${y - 6} ${x + 14} ${y - 15}`}
+          fill="none"
+          stroke="var(--redpen)"
+          strokeWidth="1.6"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+        />
+        <Note x={x + 16} y={y + 4} anchor="start" text={mark.note} style={write} />
       </g>
     );
   }

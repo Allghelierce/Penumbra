@@ -125,6 +125,8 @@ export type FlightEventKind =
   | "apogee"
   | "impact"
   | "arrival"
+  /** Past escape speed after a departure burn: leaving Earth on the long coast to Mars or Jupiter. */
+  | "escape"
   | "pad-failure"
   /** The vehicle broke up in flight (historic replays). */
   | "breakup";
@@ -196,7 +198,9 @@ export type RedPenMark =
   /** A measured dimension line with end ticks, e.g. the vehicle's height "96 m". */
   | { kind: "dimension"; from: Point; to: Point; note: string; fix?: DesignAction }
   /** A leader line from a point on a part out to a spec label, e.g. "33× Raptor 3 · 7,590 tf". */
-  | { kind: "callout"; anchor: Point; label: Point; note: string; fix?: DesignAction };
+  | { kind: "callout"; anchor: Point; label: Point; note: string; fix?: DesignAction }
+  /** A teacher's check mark beside a design that passes, with a short note ("Good to fly"). */
+  | { kind: "tick"; at: Point; note: string; fix?: DesignAction };
 
 /** One filled shape of the cleaned-up, colored side profile, in the napkin's SVG units (viewBox 0 0 300 400). */
 export interface CleanShape {
