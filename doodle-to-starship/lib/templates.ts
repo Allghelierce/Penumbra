@@ -90,6 +90,7 @@ export const TEMPLATES: RocketTemplate[] = [
           propellant: "hydrolox",
           tankVolumeM3: tankFor(lb(265_600) - lb(33_600), "hydrolox"),
           dryMassKg: lb(33_600),
+          diameterM: 6.6,
         },
       ],
       // The published 140,000 kg "to LEO" INCLUDES the S-IVB stage and its translunar propellant
@@ -207,7 +208,6 @@ export function templateById(id: TemplateId): RocketTemplate {
 interface StageLook {
   /** Tank section length at the template's real volume. */
   tankM: number;
-  diameterM: number;
   /** Band above this stage, up to the next stage (interstage, hot-staging ring, adapter). */
   interstageM: number;
   /** Bells a side view shows of the real stage's engines, when it is the bottom stage. */
@@ -227,30 +227,30 @@ interface Look {
 const LOOKS: Record<TemplateId, Look> = {
   falcon9: {
     stages: [
-      { tankM: 37.5, diameterM: 3.7, interstageM: 6.5, bells: 3, gridFins: true, legs: true },
-      { tankM: 11, diameterM: 3.7, interstageM: 0, bells: 1 },
+      { tankM: 37.5, interstageM: 6.5, bells: 3, gridFins: true, legs: true },
+      { tankM: 11, interstageM: 0, bells: 1 },
     ],
     nose: { kind: "fairing", lengthM: 13, diameterM: 5.2 },
   },
   "saturn-v": {
     stages: [
-      { tankM: 36, diameterM: 10.1, interstageM: 5.5, bells: 4, fins: true },
-      { tankM: 24.9, diameterM: 10.1, interstageM: 3, bells: 3 },
-      { tankM: 17.9, diameterM: 6.6, interstageM: 0, bells: 1 },
+      { tankM: 36, interstageM: 5.5, bells: 4, fins: true },
+      { tankM: 24.9, interstageM: 3, bells: 3 },
+      { tankM: 17.9, interstageM: 0, bells: 1 },
     ],
     nose: { kind: "apollo", lengthM: 29.3, diameterM: 6.6 },
   },
   electron: {
     stages: [
-      { tankM: 11.4, diameterM: 1.2, interstageM: 0.6, bells: 3 },
-      { tankM: 2.2, diameterM: 1.2, interstageM: 0, bells: 1 },
+      { tankM: 11.4, interstageM: 0.6, bells: 3 },
+      { tankM: 2.2, interstageM: 0, bells: 1 },
     ],
     nose: { kind: "fairing", lengthM: 2.5, diameterM: 1.2 },
   },
   starship: {
     stages: [
-      { tankM: 67, diameterM: 9, interstageM: 1.8, bells: 5, gridFins: true },
-      { tankM: 38, diameterM: 9, interstageM: 0, bells: 3, flaps: true, heatShield: true },
+      { tankM: 67, interstageM: 1.8, bells: 5, gridFins: true },
+      { tankM: 38, interstageM: 0, bells: 3, flaps: true, heatShield: true },
     ],
     nose: { kind: "ogive", lengthM: 14, diameterM: 9 },
   },
@@ -295,7 +295,9 @@ export function drawTemplate(t: RocketTemplate, design: Design): TemplateDrawing
     const base = look.stages[index ?? 0];
     const real = t.design.stages[index ?? 0];
     const stretch = real.tankVolumeM3 > 0 ? stage.tankVolumeM3 / real.tankVolumeM3 : 1;
-    return { ...base, tankM: base.tankM * Math.max(0.15, stretch), templateIndex: index };
+    // Widths come from the design: the stage's own diameter, else the vehicle's.
+    const diameterM = stage.diameterM ?? design.diameterM;
+    return { ...base, tankM: base.tankM * Math.max(0.15, stretch), diameterM, templateIndex: index };
   });
 
   // Vertical layout in metres from the nose tip down.

@@ -57,6 +57,7 @@ describe("TEMPLATES", () => {
         const kg = s.tankVolumeM3 * PROPELLANT_DENSITY_KG_M3[s.propellant] * TANK_FILL;
         expect(Math.abs(kg - published[i]) / published[i], `${t.id} stage ${i}`).toBeLessThan(0.001);
         expect(s.dryMassKg, `${t.id} stage ${i}`).toBeGreaterThan(0);
+        expect(s.diameterM ?? t.design.diameterM, `${t.id} stage ${i}`).toBeLessThanOrEqual(t.design.diameterM);
         for (const c of s.engines) expect(ENGINES[c.engine], `${t.id} ${c.engine}`).toBeDefined();
       });
     }
@@ -120,10 +121,16 @@ describe("drawTemplate", () => {
       expect(((bottom - top) * metresPerUnit) / t.design.heightM, t.id).toBeGreaterThan(0.9);
       expect(((bottom - top) * metresPerUnit) / t.design.heightM, t.id).toBeLessThan(1.12);
     }
-    // Saturn V's S-IVB (6.6 m) and S-IC (10.1 m) keep their real width ratio.
-    const sat = drawTemplate(TEMPLATES[1], TEMPLATES[1].design).parts.filter((p) => p.kind === "tank");
-    const width = (i: number) => sat.find((p) => p.stageIndex === i)!.box[2];
-    expect(width(2) / width(0)).toBeCloseTo(6.6 / 10.1, 2);
+    // Each tank is drawn at its stage's own diameter: Saturn V's S-IVB is 6.6 m on a 10.1 m rocket.
+    expect(templateById("saturn-v").design.stages[2].diameterM).toBe(6.6);
+    for (const t of TEMPLATES) {
+      const tanks = drawTemplate(t, t.design).parts.filter((p) => p.kind === "tank");
+      const widest = Math.max(...tanks.map((p) => p.box[2]));
+      t.design.stages.forEach((s, i) => {
+        const width = tanks.find((p) => p.stageIndex === i)!.box[2];
+        expect(width / widest, `${t.id} ${s.label}`).toBeCloseTo((s.diameterM ?? t.design.diameterM) / t.design.diameterM, 2);
+      });
+    }
   });
 
   it("lengthens a stretched stage relative to the others", () => {
