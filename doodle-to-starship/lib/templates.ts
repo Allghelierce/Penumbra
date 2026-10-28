@@ -1,5 +1,5 @@
 import { NAPKIN_ASPECT } from "./design";
-import type { Design, Part, Point, PropellantId, RocketTemplate, Stage, Stroke, TemplateDrawing, TemplateId } from "./design";
+import type { Design, EngineId, Part, Point, PropellantId, RocketTemplate, Stage, Stroke, TemplateDrawing, TemplateId } from "./design";
 import { PROPELLANT_DENSITY_KG_M3, TANK_FILL } from "./physics/data";
 import { hand, seeded } from "./sketch/detail";
 
@@ -21,7 +21,7 @@ export const TEMPLATES: RocketTemplate[] = [
   {
     id: "falcon9",
     name: "Falcon 9 Block 5",
-    blurb: "Reusable medium-lift launcher, first flown in 2018: the booster lands and flies again.",
+    blurb: "Medium-lift launcher, shown expendable (22.8\u00a0t). Switch Recover on to land the booster like most flights (17.4\u00a0t).",
     design: {
       name: "Falcon 9 Block 5",
       stages: [
@@ -210,10 +210,8 @@ interface StageLook {
   diameterM: number;
   /** Band above this stage, up to the next stage (interstage, hot-staging ring, adapter). */
   interstageM: number;
-  /** Bells drawn when this stage is the bottom one, and their size. */
+  /** Bells a side view shows of the real stage's engines, when it is the bottom stage. */
   bells: number;
-  bellM: number;
-  bellExitM: number;
   gridFins?: boolean;
   fins?: boolean;
   legs?: boolean;
@@ -229,34 +227,57 @@ interface Look {
 const LOOKS: Record<TemplateId, Look> = {
   falcon9: {
     stages: [
-      { tankM: 37.5, diameterM: 3.7, interstageM: 6.5, bells: 3, bellM: 2.0, bellExitM: 1.1, gridFins: true, legs: true },
-      { tankM: 11, diameterM: 3.7, interstageM: 0, bells: 1, bellM: 3.0, bellExitM: 3.0 },
+      { tankM: 37.5, diameterM: 3.7, interstageM: 6.5, bells: 3, gridFins: true, legs: true },
+      { tankM: 11, diameterM: 3.7, interstageM: 0, bells: 1 },
     ],
     nose: { kind: "fairing", lengthM: 13, diameterM: 5.2 },
   },
   "saturn-v": {
     stages: [
-      { tankM: 36, diameterM: 10.1, interstageM: 5.5, bells: 4, bellM: 5.8, bellExitM: 3.7, fins: true },
-      { tankM: 24.9, diameterM: 10.1, interstageM: 3, bells: 3, bellM: 3.4, bellExitM: 2.0 },
-      { tankM: 17.9, diameterM: 6.6, interstageM: 0, bells: 1, bellM: 3.4, bellExitM: 2.0 },
+      { tankM: 36, diameterM: 10.1, interstageM: 5.5, bells: 4, fins: true },
+      { tankM: 24.9, diameterM: 10.1, interstageM: 3, bells: 3 },
+      { tankM: 17.9, diameterM: 6.6, interstageM: 0, bells: 1 },
     ],
     nose: { kind: "apollo", lengthM: 29.3, diameterM: 6.6 },
   },
   electron: {
     stages: [
-      { tankM: 11.4, diameterM: 1.2, interstageM: 0.6, bells: 3, bellM: 0.6, bellExitM: 0.35 },
-      { tankM: 2.2, diameterM: 1.2, interstageM: 0, bells: 1, bellM: 0.9, bellExitM: 0.7 },
+      { tankM: 11.4, diameterM: 1.2, interstageM: 0.6, bells: 3 },
+      { tankM: 2.2, diameterM: 1.2, interstageM: 0, bells: 1 },
     ],
     nose: { kind: "fairing", lengthM: 2.5, diameterM: 1.2 },
   },
   starship: {
     stages: [
-      { tankM: 67, diameterM: 9, interstageM: 1.8, bells: 5, bellM: 2.6, bellExitM: 1.3, gridFins: true },
-      { tankM: 38, diameterM: 9, interstageM: 0, bells: 3, bellM: 2.6, bellExitM: 2.3, flaps: true, heatShield: true },
+      { tankM: 67, diameterM: 9, interstageM: 1.8, bells: 5, gridFins: true },
+      { tankM: 38, diameterM: 9, interstageM: 0, bells: 3, flaps: true, heatShield: true },
     ],
     nose: { kind: "ogive", lengthM: 14, diameterM: 9 },
   },
 };
+
+/**
+ * Each engine's nozzle as drawn: how far the bell hangs below the tank and its exit diameter, in
+ * metres, roughly to scale. Only the outline uses these; the physics never reads them.
+ */
+const BELLS: Record<EngineId, { lengthM: number; exitM: number }> = {
+  "raptor-2": { lengthM: 2.6, exitM: 1.3 },
+  "raptor-3": { lengthM: 2.6, exitM: 1.3 },
+  "raptor-vacuum": { lengthM: 2.6, exitM: 2.3 },
+  "merlin-1d": { lengthM: 2, exitM: 1.1 },
+  "merlin-vacuum": { lengthM: 3, exitM: 3 },
+  "rs-25": { lengthM: 4.3, exitM: 2.4 },
+  rl10c: { lengthM: 2.2, exitM: 1.45 },
+  "f-1": { lengthM: 5.8, exitM: 3.7 },
+  "j-2": { lengthM: 3.4, exitM: 2 },
+  "be-4": { lengthM: 4.5, exitM: 1.8 },
+  "rd-180": { lengthM: 3.6, exitM: 1.45 },
+  rutherford: { lengthM: 0.6, exitM: 0.35 },
+  "rutherford-vacuum": { lengthM: 0.9, exitM: 0.7 },
+  "generic-solid": { lengthM: 1.5, exitM: 1.2 },
+};
+/** Room each bell takes in the row: its exit plus a small gap. */
+const bellSlotM = (engine: EngineId) => 1.05 * BELLS[engine].exitM;
 
 /** Napkin margins (normalized) left around the scaled-to-fit rocket. */
 const MARGIN_Y = 0.05;
@@ -293,13 +314,24 @@ export function drawTemplate(t: RocketTemplate, design: Design): TemplateDrawing
     sections[i].tankBottom = cursor;
   }
   const bottomLook = looks[0];
-  const totalM = cursor + bottomLook.bellM;
 
-  // Widest point: fins, legs, flaps or the fairing.
+  // Engine bells under the bottom stage, from its engines. When the real stage's own row is wider
+  // than its base (Saturn V's F-1s), every bell narrows by the same factor so the real rocket fits;
+  // a row that is still wider than the stage hangs out past it.
+  const bottomReal = t.design.stages[bottomLook.templateIndex ?? 0];
+  const row = bellRow(design.stages[0], bottomLook, bottomReal);
+  const realRowM = bellRow(bottomReal, bottomLook, bottomReal).reduce((sum, e) => sum + bellSlotM(e), 0);
+  const squeeze = Math.min(1, (0.95 * bottomLook.diameterM) / realRowM);
+  const rowM = squeeze * row.reduce((sum, e) => sum + bellSlotM(e), 0);
+  const bellsM = Math.max(0, ...row.map((e) => BELLS[e].lengthM));
+  const totalM = cursor + bellsM;
+
+  // Widest point: fins, legs, flaps, the fairing or the engines.
   const reach = Math.max(
     ...looks.map((l) => l.diameterM / 2 + (l.fins ? 0.55 * l.diameterM : l.gridFins ? 0.22 * l.diameterM : l.flaps ? 0.3 * l.diameterM : 0)),
     bottomLook.legs ? bottomLook.diameterM : 0,
     look.nose.diameterM / 2,
+    rowM / 2,
   );
   const scale = Math.min((1 - 2 * MARGIN_Y) / totalM, ((0.5 - MARGIN_X) * NAPKIN_ASPECT) / reach);
   const y0 = (1 - totalM * scale) / 2;
@@ -369,24 +401,29 @@ export function drawTemplate(t: RocketTemplate, design: Design): TemplateDrawing
   if (bottomLook.fins) {
     const finTop = b.tankBottom - 0.22 * bottomLook.tankM;
     const out = 0.55 * bottomLook.diameterM;
-    for (const side of [-1, 1]) pen([[side * rb, finTop], [side * (rb + out), b.tankBottom + 0.5 * bottomLook.bellM], [side * (rb + out), b.tankBottom + bottomLook.bellM], [side * rb, b.tankBottom]]);
-    parts.push({ kind: "fin", label: "Fins", box: box(-rb - out, finTop, rb + out, b.tankBottom + bottomLook.bellM), stageIndex: 0 });
+    for (const side of [-1, 1]) pen([[side * rb, finTop], [side * (rb + out), b.tankBottom + 0.5 * bellsM], [side * (rb + out), b.tankBottom + bellsM], [side * rb, b.tankBottom]]);
+    parts.push({ kind: "fin", label: "Fins", box: box(-rb - out, finTop, rb + out, b.tankBottom + bellsM), stageIndex: 0 });
   }
   if (bottomLook.legs) {
     const legTop = b.tankBottom - 0.28 * bottomLook.tankM;
     for (const side of [-1, 1]) {
-      pen([[side * rb, legTop], [side * (rb + 0.35), legTop + 0.6], [side * (rb + 0.35), b.tankBottom + 0.6 * bottomLook.bellM], [side * rb, b.tankBottom]]);
+      pen([[side * rb, legTop], [side * (rb + 0.35), legTop + 0.6], [side * (rb + 0.35), b.tankBottom + 0.6 * bellsM], [side * rb, b.tankBottom]]);
     }
-    parts.push({ kind: "landing-legs", label: "Landing legs", box: box(-rb - 0.35, legTop, rb + 0.35, b.tankBottom + 0.6 * bottomLook.bellM), stageIndex: 0 });
+    parts.push({ kind: "landing-legs", label: "Landing legs", box: box(-rb - 0.35, legTop, rb + 0.35, b.tankBottom + 0.6 * bellsM), stageIndex: 0 });
   }
-  const across = bottomLook.bells;
-  const span = Math.min(2 * rb * 0.95, across * bottomLook.bellExitM * 1.05);
-  for (let k = 0; k < across; k++) {
-    const c = -span / 2 + (span * (k + 0.5)) / across;
-    const half = Math.min(bottomLook.bellExitM / 2, span / across / 2);
+  if (rowM / 2 > rb) {
+    // A row wider than the stage flares the skirt out to it.
+    const skirtM = Math.min(0.4 * bottomLook.tankM, 1.2 * (rowM / 2 - rb));
+    for (const side of [-1, 1]) pen([[side * rb, b.tankBottom - skirtM], [(side * rowM) / 2, b.tankBottom], [side * rb, b.tankBottom]]);
+  }
+  let left = -rowM / 2;
+  for (const engine of row) {
+    const c = left + (squeeze * bellSlotM(engine)) / 2;
+    left += squeeze * bellSlotM(engine);
+    const half = (BELLS[engine].exitM * Math.min(1, 1.05 * squeeze)) / 2;
     const throat = half * 0.35;
     const y = b.tankBottom;
-    const yEnd = y + bottomLook.bellM;
+    const yEnd = y + BELLS[engine].lengthM;
     const flare = (side: 1 | -1): [number, number][] =>
       Array.from({ length: 9 }, (_, n) => {
         const u = n / 8;
@@ -396,13 +433,39 @@ export function drawTemplate(t: RocketTemplate, design: Design): TemplateDrawing
     pen(flare(1));
     pen([[c - half, yEnd], [c + half, yEnd]]);
   }
-  parts.push({ kind: "engine", label: `${across === 1 ? "Engine" : "Engines"}`, box: box(-span / 2, b.tankBottom, span / 2, totalM), stageIndex: 0 });
+  if (row.length > 0) {
+    const label = engineCount(design.stages[0]) === 1 ? "Engine" : "Engines";
+    parts.push({ kind: "engine", label, box: box(-rowM / 2, b.tankBottom, rowM / 2, totalM), stageIndex: 0 });
+  }
 
   // Nose: fairing, Apollo stack or Starship ogive, on top of the top stage.
   drawNose(look.nose, looks[top].diameterM / 2, sections[top].tankTop, pen, parts, box, top);
 
   const stageBands = sections.map((s): [number, number] => [round4(Y(s.tankTop)), round4(Y(s.tankBottom))]);
   return { strokes, parts, stageBands };
+}
+
+const engineCount = (stage: Stage) => stage.engines.reduce((sum, c) => sum + Math.max(0, c.count), 0);
+
+/**
+ * The bells a side view shows of `stage`'s engines, left to right, widest outside. A cluster's
+ * width grows with the square root of its engine count, so the row does too, scaled from what
+ * the drawing shows for the real stage (`look.bells` bells for `real`'s engines).
+ */
+function bellRow(stage: Stage, look: StageLook, real: Stage): EngineId[] {
+  const n = engineCount(stage);
+  if (n === 0) return [];
+  const across = Math.round(look.bells * Math.sqrt(n / Math.max(1, engineCount(real))));
+  const k = Math.min(n, Math.max(Math.min(n, 2), across));
+  // Each cluster gets its share of the row, at least one bell.
+  const bells = stage.engines
+    .filter((c) => c.count > 0)
+    .flatMap((c) => Array.from({ length: Math.max(1, Math.round((k * c.count) / n)) }, () => c.engine))
+    .sort((a, b) => BELLS[b].exitM - BELLS[a].exitM);
+  // Alternate the widest to the left and right ends, working inwards.
+  const row: EngineId[] = [];
+  bells.forEach((e, i) => (row[i % 2 === 0 ? i / 2 : bells.length - 1 - (i - 1) / 2] = e));
+  return row;
 }
 
 /** Pairs each design stage with the template stage it came from: by label, then by position from the top. */

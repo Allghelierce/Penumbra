@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { applyAction } from "./actions";
-import { NAPKIN_ASPECT, type Design, type TemplateId } from "./design";
+import { NAPKIN_ASPECT, type Design, type EngineId, type TemplateId } from "./design";
 import { analyze, ENGINES, PROPELLANT_DENSITY_KG_M3 } from "./physics";
 import { TANK_FILL } from "./physics/data";
 import { drawTemplate, TEMPLATES, templateById } from "./templates";
@@ -155,5 +155,35 @@ describe("drawTemplate", () => {
       }
     }
     expect(drawTemplate(TEMPLATES[0], { ...TEMPLATES[0].design, stages: [] })).toEqual({ strokes: [], parts: [], stageBands: [] });
+  });
+
+  it("draws the bottom stage's bells from its engines: the count sets the row, the engine their size", () => {
+    const f9 = templateById("falcon9");
+    const withEngines = (engine: EngineId, count: number) =>
+      applyAction(f9.design, { type: "set-engines", stageIndex: 0, engine, count });
+    // The engine row in metres, measured against the first stage's 3.7 m tank.
+    const row = (d: Design) => {
+      const { parts } = drawTemplate(f9, d);
+      const metres = f9.design.diameterM / parts.find((p) => p.kind === "tank" && p.stageIndex === 0)!.box[2];
+      const [, , w, h] = parts.find((p) => p.kind === "engine")!.box;
+      return { widthM: w * metres, lengthM: (h * metres) / NAPKIN_ASPECT };
+    };
+    const real = row(f9.design);
+    expect(row(withEngines("merlin-1d", 1)).widthM).toBeCloseTo(real.widthM / 3, 1);
+    expect(row(withEngines("merlin-1d", 5)).widthM).toBeLessThan(real.widthM);
+    expect(row(withEngines("merlin-1d", 13)).widthM).toBeGreaterThan(f9.design.diameterM);
+    expect(row(withEngines("raptor-2", 9)).lengthM).toBeGreaterThan(real.lengthM);
+    const vacuum = row(withEngines("merlin-vacuum", 8));
+    expect(vacuum.widthM).toBeGreaterThan(2 * real.widthM);
+    expect(vacuum.lengthM).toBeGreaterThan(real.lengthM);
+    // Even absurd swaps stay on the napkin.
+    for (const t of TEMPLATES) {
+      for (const [engine, count] of [["f-1", 40], ["rutherford", 1]] as const) {
+        const d = applyAction(t.design, { type: "set-engines", stageIndex: 0, engine, count });
+        for (const s of drawTemplate(t, d).strokes) {
+          for (const [x, y] of s.points) expect(inBounds(x) && inBounds(y), `${t.id} ${count}× ${engine}`).toBe(true);
+        }
+      }
+    }
   });
 });
