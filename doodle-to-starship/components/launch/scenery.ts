@@ -1122,22 +1122,19 @@ function drawStarlinkTrain(ctx: CanvasRenderingContext2D, W: number, H: number, 
 }
 
 /**
- * A flat cartoon sun with two halo rings, low in the sky at liftoff; it sinks out of view as
- * the rocket climbs. It fades as added light, so it dims into a glow instead of a grey disc.
+ * A flat cartoon sun with two halo rings, low in the sky at liftoff. It sinks behind the cloud
+ * decks and out of the frame as the rocket climbs, fading only once it's under the readouts.
  */
 function drawSun(ctx: CanvasRenderingContext2D, W: number, H: number, alt: number) {
-  const k = clamp01(1 - alt / 8);
+  const k = clamp01(8.5 - alt);
   if (k <= 0) return;
   const base = ctx.globalAlpha;
   const x = W * 0.14;
-  const y = H * 0.2 + alt * H * 0.05;
-  const r = H * 0.034 * (0.75 + 0.25 * k);
-  ctx.save();
-  ctx.globalCompositeOperation = "lighter";
+  const y = H * 0.2 + alt * H * 0.1;
+  const r = H * 0.034;
   for (const [ring, a] of [
-    [2.8, 0.06],
-    [1.9, 0.1],
-    [1, 0.85],
+    [2.8, 0.07],
+    [1.9, 0.12],
   ] as const) {
     ctx.globalAlpha = base * a * k;
     ctx.fillStyle = "rgb(255,236,170)";
@@ -1145,9 +1142,7 @@ function drawSun(ctx: CanvasRenderingContext2D, W: number, H: number, alt: numbe
     ctx.arc(x, y, r * ring, 0, Math.PI * 2);
     ctx.fill();
   }
-  ctx.restore();
-  // The solid disc only while it's bright, so its warm color holds at liftoff.
-  ctx.globalAlpha = base * Math.pow(k, 4);
+  ctx.globalAlpha = base * k;
   ctx.fillStyle = "rgb(255,240,190)";
   ctx.beginPath();
   ctx.arc(x, y, r, 0, Math.PI * 2);
@@ -1220,6 +1215,7 @@ export function drawStars(
   if (alpha <= 0.01) return;
   drawMilkyWay(ctx, W, H, alpha);
   drawConstellations(ctx, W, H, alpha, t);
+  drawSatellitePasses(ctx, W, H, alpha, t);
   for (const s of stars) {
     const f = PARALLAX[s.layer];
     const x = wrap(s.x * W + scrollX * f, W);
@@ -1243,6 +1239,32 @@ export function drawStars(
     }
   }
   ctx.globalAlpha = 1;
+}
+
+/** Satellites drifting across the starfield: [from x, from y, to x, to y (fractions), seconds per pass]. */
+const SATELLITE_PASSES: [number, number, number, number, number][] = [
+  [-0.05, 0.12, 1.05, 0.34, 34],
+  [1.05, 0.06, -0.05, 0.24, 47],
+  [0.18, -0.05, 0.6, 1.05, 41],
+];
+
+/** Steady moving points of sunlit metal; the second flashes once mid-pass as its panels catch the sun. */
+function drawSatellitePasses(ctx: CanvasRenderingContext2D, W: number, H: number, alpha: number, t: number) {
+  if (alpha < 0.3) return;
+  ctx.save();
+  ctx.fillStyle = "#ffffff";
+  SATELLITE_PASSES.forEach(([x0, y0, x1, y1, period], i) => {
+    const f = (t / period + i * 0.37) % 1;
+    const x = W * (x0 + (x1 - x0) * f);
+    const y = H * (y0 + (y1 - y0) * f);
+    const flare = i === 1 ? Math.max(0, 1 - Math.abs(f - 0.5) * 30) : 0;
+    const r = 0.8 + flare * 1.6;
+    ctx.globalAlpha = alpha * (0.6 + flare * 0.4);
+    ctx.beginPath();
+    ctx.arc(x, y, r, 0, Math.PI * 2);
+    ctx.fill();
+  });
+  ctx.restore();
 }
 
 interface Constellation {
@@ -1387,11 +1409,51 @@ function drawMilkyWay(ctx: CanvasRenderingContext2D, W: number, H: number, alpha
     ctx.ellipse(0, 0, (W * w) / 2, (H * h) / 2, 0, 0, Math.PI * 2);
     ctx.fill();
   }
+  // The bulge toward the galactic center, warmer and wider, and brighter star clouds along the band.
+  for (const [u, v, w, h, a, c] of MILKY_GLOWS) {
+    ctx.globalAlpha = alpha * a;
+    ctx.fillStyle = c;
+    ctx.beginPath();
+    ctx.ellipse(u * W, v * H, (W * w) / 2, (H * h) / 2, 0, 0, Math.PI * 2);
+    ctx.fill();
+  }
   ctx.fillStyle = "#ffffff";
   ctx.globalAlpha = alpha * 0.35;
   for (const [u, v] of MILKY_WAY) ctx.fillRect(u * W, v * H, 1, 1);
+  // Dark rifts: lanes of dust down the middle that hide the stars behind them. They only come in
+  // once the sky is nearly black, so they never shade a blue sky the band itself barely shows on.
+  const dust = clamp01((alpha - 0.75) / 0.25);
+  if (dust <= 0) {
+    ctx.restore();
+    return;
+  }
+  ctx.fillStyle = "rgb(10,8,30)";
+  for (const [u, v, w, h, a, tilt] of MILKY_RIFTS) {
+    ctx.globalAlpha = alpha * dust * a;
+    ctx.beginPath();
+    ctx.ellipse(u * W, v * H, (W * w) / 2, (H * h) / 2, tilt, 0, Math.PI * 2);
+    ctx.fill();
+  }
   ctx.restore();
 }
+
+/** Glows along the band, in its own frame: [u, v, width of W, height of H, alpha, color]. */
+const MILKY_GLOWS: [number, number, number, number, number, string][] = [
+  [-0.2, 0.004, 0.2, 0.09, 0.05, "rgb(214,196,255)"],
+  [-0.2, 0.004, 0.09, 0.045, 0.06, "rgb(255,226,204)"],
+  [-0.34, 0.01, 0.07, 0.02, 0.05, "rgb(210,214,255)"],
+  [0.16, -0.008, 0.08, 0.022, 0.045, "rgb(210,214,255)"],
+  [0.33, -0.004, 0.05, 0.014, 0.04, "rgb(210,214,255)"],
+];
+
+/** Dust lanes, in the band's frame: [u, v, width of W, height of H, alpha, tilt]. */
+const MILKY_RIFTS: [number, number, number, number, number, number][] = [
+  [0.04, 0.005, 0.46, 0.02, 0.09, 0.01],
+  [0.04, 0.005, 0.4, 0.01, 0.14, 0.01],
+  [-0.2, -0.006, 0.2, 0.016, 0.12, -0.02],
+  [0.24, 0.011, 0.16, 0.008, 0.12, 0.03],
+  [-0.06, -0.012, 0.1, 0.006, 0.1, -0.05],
+];
 
 /** Air glow on the horizon (or the bottom of the screen once the ground is gone); warm at dusk. */
 export function drawHorizonGlow(ctx: CanvasRenderingContext2D, W: number, H: number, y: number, intensity: number, warm = 0) {
@@ -1992,7 +2054,18 @@ export function drawOzone(ctx: CanvasRenderingContext2D, W: number, H: number, a
   ctx.fillRect(0, Math.max(0, yTop), W, Math.min(H, yBot) - Math.max(0, yTop));
 }
 
-/** Thermosphere aurora: flat, stylized curtains (green with a violet fringe) on the limb, k 0..1. */
+/** Aurora rays: [offset px, width px, alpha, reach] with uneven spacing, seeded. */
+const AURORA_RAYS: [number, number, number, number][] = (() => {
+  const rand = seeded(1108);
+  const rays: [number, number, number, number][] = [];
+  for (let x = 0; x < 3000; x += 10 + rand() * 34) rays.push([x, 1 + rand() * 2.2, 0.06 + rand() * 0.14, 0.55 + rand() * 0.6]);
+  return rays;
+})();
+
+/**
+ * Thermosphere aurora: flat, stylized curtains on the limb, k 0..1. Each is green with a sharp
+ * bright lower edge that fades upward, a violet fringe on top, and uneven vertical rays.
+ */
 export function drawAurora(ctx: CanvasRenderingContext2D, W: number, H: number, k: number, t: number, base: number) {
   if (k <= 0.01) return;
   const wave = (x: number, ph: number, amp: number) => Math.sin(x * 0.006 + ph) * amp + Math.sin(x * 0.017 + ph * 1.7) * amp * 0.35;
@@ -2009,21 +2082,42 @@ export function drawAurora(ctx: CanvasRenderingContext2D, W: number, H: number, 
     const height = H * (0.06 - i * 0.015);
     const bottom = (x: number) => base - lift + wave(x, ph, H * 0.012);
     const top = (x: number) => bottom(x) - height - wave(x, ph * 1.3 + 1, H * 0.03);
+    // Brightest at the lower edge, where the incoming electrons stop, fading toward the top.
+    const lo = base - lift + H * 0.015;
+    const hi = base - lift - height - H * 0.045;
+    const glow = ctx.createLinearGradient(0, lo, 0, hi);
+    glow.addColorStop(0, "rgba(96,230,160,1)");
+    glow.addColorStop(0.45, "rgba(76,209,142,0.75)");
+    glow.addColorStop(1, "rgba(76,209,142,0.2)");
     ribbon(top, bottom);
-    ctx.globalAlpha = k * (0.32 - i * 0.1);
-    ctx.fillStyle = "#4cd18e";
+    ctx.globalAlpha = k * (0.36 - i * 0.11);
+    ctx.fillStyle = glow;
     ctx.fill();
     // Violet fringe along the top of the curtain.
     ribbon((x) => top(x) - H * 0.018, (x) => top(x) + H * 0.006);
     ctx.globalAlpha = k * (0.24 - i * 0.08);
     ctx.fillStyle = "#9b6bff";
     ctx.fill();
-    // Vertical rays.
-    ctx.globalAlpha = k * 0.12;
+    // The sharp lower edge.
+    ctx.globalAlpha = k * (0.5 - i * 0.18);
+    ctx.strokeStyle = "#a8ffd0";
+    ctx.lineWidth = 1.4;
+    ctx.beginPath();
+    for (let x = 0; x <= W; x += 12) {
+      if (x === 0) ctx.moveTo(x, bottom(x));
+      else ctx.lineTo(x, bottom(x));
+    }
+    ctx.stroke();
+    // Vertical rays, unevenly spaced, drifting along the curtain.
     ctx.fillStyle = "#c8ffe2";
-    for (let x = ((t * 30 * (i + 1)) % 30) - 30; x < W; x += 30) {
-      const y0 = top(x);
-      ctx.fillRect(Math.round(x), Math.round(y0), 2, Math.round(bottom(x) - y0));
+    const drift = (t * 24 * (i + 1)) % 3000;
+    for (const [off, w, a, reach] of AURORA_RAYS) {
+      const x = ((off + drift) % 3000) - 60;
+      if (x > W) continue;
+      const y1 = bottom(x);
+      const y0 = y1 - (y1 - top(x)) * reach;
+      ctx.globalAlpha = k * a * (1 - i * 0.4);
+      ctx.fillRect(Math.round(x), Math.round(y0), w, Math.round(y1 - y0));
     }
   }
   ctx.restore();
