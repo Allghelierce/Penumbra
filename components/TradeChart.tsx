@@ -108,16 +108,23 @@ const fmtX = (x: number, unit: string) => (unit === "×" ? `${trim(x)}×` : `${t
 const pct = (a: number, b: number) => Math.round((a / b - 1) * 100);
 const signedPct = (p: number) => `${p > 0 ? "+" : "−"}${Math.abs(p)}%`;
 
-/** One sentence on the user's change against the real rocket; empty while it's unchanged. */
-function yoursLine(curve: TradeCurve, currentX: number, at: (x: number) => number) {
-  if (Math.abs(currentX - curve.realX) < 1e-6) return "";
+/**
+ * A sweep of the user's design, plus (optionally) whether its as-built point is the real rocket. After other
+ * changes it isn't: the as-built point is then "yours with this part as built", and the real rocket's own
+ * capacity comes in `realPayloadKg`.
+ */
+type Curve = SweptCurve & { realOnCurve?: boolean; realPayloadKg?: number };
+
+/** One sentence on the user's rocket against the real one; empty while it is the real one. */
+function yoursLine(curve: TradeCurve, currentX: number, at: (x: number) => number, realKg: number, realOn: boolean) {
+  if (realOn && Math.abs(currentX - curve.realX) < 1e-6) return "";
   const fx = fmtX(currentX, curve.unit);
-  const real = at(curve.realX);
   const you = at(currentX);
   if (you <= 0) return `Yours, at ${fx}, can't get there at all.`;
-  if (real <= 0) return `Yours, at ${fx}, carries ${capacityText(you)}.`;
-  const p = pct(you, real);
-  return `Yours, at ${fx}, carries ${capacityText(you)}: ${p === 0 ? "about the same as" : `${Math.abs(p)}% ${p > 0 ? "more" : "less"} than`} the real rocket.`;
+  if (realKg <= 0) return `Yours, at ${fx}, carries ${capacityText(you)}.`;
+  const p = pct(you, realKg);
+  const than = p === 0 ? "about the same as" : `${Math.abs(p)}% ${p > 0 ? "more" : "less"} than`;
+  return `Yours, at ${fx}, carries ${capacityText(you)}: ${than} the real rocket${realOn ? "" : `'s ${capacityText(realKg)}`}.`;
 }
 
 type Placed = { left: number; right: number; lane: number; flip: boolean };
@@ -174,8 +181,11 @@ function Shape({ kind, x, y, s = 1 }: { kind: MarkKey; x: number; y: number; s?:
 }
 
 interface Props {
-  /** A trade curve; when its `limit` ends the sweep (no more engines fit), the plot shows a "won't fit" zone past it. */
-  curve: SweptCurve;
+  /**
+   * A trade curve; when its `limit` ends the sweep (no more engines fit), the plot shows a "won't fit" zone past it.
+   * With `realOnCurve: false` there's no REAL marker on it; the real rocket's `realPayloadKg` is a line across instead.
+   */
+  curve: Curve;
   /** x of the user's modified rocket. */
   currentX: number;
   /** Called with the swept value of the point the user clicked. */
@@ -212,8 +222,12 @@ export default function TradeChart({ curve, currentX, onPick, caption, context, 
     const { at, cmds } = curveModel(xs, ys);
     const nearest = (x: number) => xs.reduce((b, v, i) => (Math.abs(v - x) < Math.abs(xs[b] - x) ? i : b), 0);
 
-    const maxKg = Math.max(0, ...ys);
-    const allZero = maxKg <= 0;
+    const realOn = curve.realOnCurve !== false;
+    // What the real rocket carries: its own figure when given, else the curve's as-built point when that's it.
+    const realKg = curve.realPayloadKg ?? (realOn ? at(curve.realX) : 0);
+    const allZero = Math.max(0, ...ys) <= 0;
+    const refKg = !realOn && !allZero && realKg > 0 ? realKg : null;
+    const maxKg = Math.max(0, ...ys, refKg ?? 0);
     const tonnes = maxKg >= 2000;
     const div = tonnes ? 1000 : 1;
     const yStep = allZero ? 1 : niceStep(maxKg / div, plotHeight < 140 ? 2 : 4);
@@ -237,14 +251,13 @@ export default function TradeChart({ curve, currentX, onPick, caption, context, 
     const xStep = Math.max(integers ? 1 : 0, niceStep(hi - lo, Math.max(2, Math.floor(plotW / 80))));
     const xTicks = ticks(lo, hi, integers ? Math.round(xStep) : xStep).filter((v) => limitX == null || v <= limitX + 1e-9);
 
-    const realKg = at(curve.realX);
     const marks = (["real", "best", "you"] as const)
-      .filter((k) => !(k === "best" && allZero))
+      .filter((k) => !(k === "best" && allZero) && !(k === "real" && !realOn))
       .map((key) => {
         const x = key === "real" ? curve.realX : key === "best" ? curve.bestX : currentX;
         const kg = at(x);
         let value = allZero ? "" : kg > 0 ? capacityText(kg) : "can't reach";
-        if (key === "you" && kg > 0 && realKg > 0 && Math.abs(currentX - curve.realX) > 1e-6) {
+        if (key === "you" && kg > 0 && realKg > 0 && (!realOn || Math.abs(currentX - curve.realX) > 1e-6)) {
           const p = pct(kg, realKg);
           if (p !== 0) value += ` ${signedPct(p)}`;
         }
@@ -271,14 +284,15 @@ export default function TradeChart({ curve, currentX, onPick, caption, context, 
     const maxDv = Math.max(0, ...pts.map((p) => p.totalDeltaVMps));
 
     const limitPx = limitX == null ? null : sx(limitX);
-    return { pts, at, nearest, allZero, tonnes, yTicks, yLabels, padL, plotW, lo, hi, sx, sy, xTicks, marks, placed, top, bottom, line, area, maxDv, limitPx, height: bottom + PAD_B };
+    const refY = refKg == null ? null : sy(refKg);
+    return { pts, at, nearest, realOn, realKg, refKg, refY, allZero, tonnes, yTicks, yLabels, padL, plotW, lo, hi, sx, sy, xTicks, marks, placed, top, bottom, line, area, maxDv, limitPx, height: bottom + PAD_B };
   }, [curve, currentX, width, plotHeight]);
 
   const n = g.pts.length;
   const hp = cursor != null && cursor < n ? g.pts[cursor] : null;
   const fx = (x: number) => fmtX(x, curve.unit);
   const text =
-    caption === undefined ? [explainCurve(curve, context), yoursLine(curve, currentX, g.at)].filter(Boolean).join(" ") : caption;
+    caption === undefined ? [explainCurve(curve, context), yoursLine(curve, currentX, g.at, g.realKg, g.realOn)].filter(Boolean).join(" ") : caption;
 
   const pointToIndex = (clientX: number) => {
     const r = svgRef.current?.getBoundingClientRect();
@@ -371,6 +385,24 @@ export default function TradeChart({ curve, currentX, onPick, caption, context, 
               </g>
             )}
             {g.area && !g.allZero && <path d={g.area} fill="#fff" fillOpacity={0.06} />}
+          {/* The real rocket isn't on this sweep of yours: its capacity is a level to beat, not a point. */}
+          {g.refY != null && g.refKg != null && (
+            <g>
+              <line x1={g.padL} x2={g.padL + g.plotW} y1={g.refY} y2={g.refY} stroke="#fff" strokeOpacity={0.45} />
+              <text
+                x={g.padL + 6}
+                y={g.refY - 14 < g.top ? g.refY + 13 : g.refY - 5}
+                fontSize={10}
+                letterSpacing="0.06em"
+                fill="rgba(255,255,255,0.8)"
+                stroke="#000"
+                strokeWidth={4}
+                paintOrder="stroke"
+              >
+                REAL ROCKET {capacityText(g.refKg)}
+              </text>
+            </g>
+          )}
             <path d={g.line} fill="none" stroke={g.allZero ? "#555" : "#d9d9d9"} strokeWidth={2} strokeLinejoin="round" strokeLinecap="round" />
             {/* Engine counts are whole numbers: a dot on each one says the line only joins them up. */}
             {curve.unit !== "×" &&
@@ -481,7 +513,7 @@ export default function TradeChart({ curve, currentX, onPick, caption, context, 
               <tbody>
                 {g.pts.map((p, i) => {
                   const tags = [
-                    i === g.nearest(curve.realX) && "real",
+                    g.realOn && i === g.nearest(curve.realX) && "real",
                     !g.allZero && i === g.nearest(curve.bestX) && "best",
                     i === g.nearest(currentX) && "you",
                   ].filter(Boolean);
