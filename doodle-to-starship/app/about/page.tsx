@@ -3,7 +3,9 @@ import Link from "next/link";
 import type { ReactNode } from "react";
 import { PenumbraLockup, PenumbraWordmark } from "@/components/PenumbraLogo";
 import { REAL_VEHICLES } from "@/lib/analogs";
-import type { PropellantId } from "@/lib/design";
+import type { Design, PropellantId, TemplateId } from "@/lib/design";
+import { analyze } from "@/lib/physics";
+import { ROTATION_MPS } from "@/lib/physics/analyze";
 import {
   DESTINATIONS,
   ENGINES,
@@ -13,6 +15,8 @@ import {
   STRUCTURAL_FACTOR,
   TANK_FILL,
 } from "@/lib/physics/data";
+import { TEMPLATES } from "@/lib/templates";
+import { maxPayloadKg, MIN_LIFTOFF_TWR, recoveryCostKg } from "@/lib/trade";
 import { VOICE_TOOLS } from "@/lib/voice/tools";
 import { TEXT_MODEL, VISION_MODEL } from "@/lib/xai";
 
@@ -37,12 +41,44 @@ const num = (n: number, digits = 0) =>
 const kN = (n: number) => (n > 0 ? num(n / 1000) : "—");
 const sec = (n: number) => (n > 0 ? num(n) : "—");
 const kms = (mps: number) => num(mps / 1000, 2);
+const mass = (kg: number) => (kg < 1_000 ? `${num(kg)} kg` : `${num(kg / 1000, 1)} t`);
+
+const template = (id: TemplateId) => TEMPLATES.find((t) => t.id === id)!;
+/** The design with exactly these stages landing. */
+const landing = (design: Design, stages: number[]): Design => ({
+  ...design,
+  stages: design.stages.map((stage, i) => ({ ...stage, recover: stages.includes(i) })),
+});
+
+/** Each real rocket's published LEO payload next to the model's, counted the way the published figure counts it. */
+function calibration() {
+  const f9 = template("falcon9");
+  const saturn = template("saturn-v");
+  const electron = template("electron");
+  const starship = template("starship");
+  return [
+    { name: `${f9.name}, expended`, publishedKg: f9.realPayloadLeoKg, modelKg: maxPayloadKg(landing(f9.design, []), "leo") },
+    {
+      name: `${f9.name}, booster landing`,
+      publishedKg: f9.realPayloadLeoReusableKg ?? 0,
+      modelKg: maxPayloadKg(landing(f9.design, [0]), "leo"),
+    },
+    {
+      name: `${saturn.name}, counting the S-IVB`,
+      publishedKg: saturn.realPayloadLeoKg,
+      modelKg: maxPayloadKg(saturn.design, "leo") + (saturn.design.stages.at(-1)?.dryMassKg ?? 0),
+    },
+    { name: electron.name, publishedKg: electron.realPayloadLeoKg, modelKg: maxPayloadKg(electron.design, "leo") },
+    { name: `${starship.name}, both stages landing`, publishedKg: starship.realPayloadLeoKg, modelKg: maxPayloadKg(starship.design, "leo") },
+  ].filter((row) => row.publishedKg > 0);
+}
 
 export default function About() {
   const engines = Object.values(ENGINES);
   const destinations = Object.values(DESTINATIONS);
   const vehicles = [...REAL_VEHICLES].sort((a, b) => a.firstFlight - b.firstFlight);
-  const losses = DESTINATIONS.leo.deltaVFromSurfaceMps - ORBITAL_SPEED_MPS;
+  const leoNeeds = TEMPLATES.map((t) => analyze({ ...t.design, destination: "leo" }).requiredDeltaVMps);
+  const boosterLanding = recoveryCostKg(landing(template("falcon9").design, [0]), "leo");
 
   return (
     <div className="min-h-dvh bg-umbra text-starlight">
@@ -78,7 +114,7 @@ export default function About() {
 
         <Section
           title="Numbers come from code, not the AI"
-          lede="Grok reports what it sees (stages, bells, tank sizes). The physics below turns that into thrust, delta-v and a verdict. The same design always gets the same answer."
+          lede="A real rocket starts from its published figures; a sketch starts from what Grok reads in it (stages, bells, tank sizes). The physics below turns either into thrust, delta-v, payload and a verdict. The same design always gets the same answer."
         >
           <div className="grid grid-cols-[1fr_1fr] gap-10">
             <div>
@@ -93,16 +129,49 @@ export default function About() {
             <ul className="space-y-2 text-[15px] leading-relaxed">
               <Item>
                 Propellant = tank volume × {num(TANK_FILL * 100)}% usable × bulk density of the propellant mix.
+                Stretched tanks add structure, and long stretches need disproportionately heavier walls.
               </Item>
-              <Item>Dry mass, when not drawn, is a structural fraction of the propellant (table below).</Item>
-              <Item>Liftoff uses sea-level thrust and Isp; upper stages use vacuum figures.</Item>
-              <Item>Thrust-to-weight under 1 at liftoff means it never leaves the pad.</Item>
               <Item>
-                Targets are delta-v from Earth&apos;s surface. Low Earth orbit is {kms(ORBITAL_SPEED_MPS)} km/s of
-                orbital speed plus {kms(losses)} km/s of gravity and drag losses.
+                The first stage gets sea-level thrust and the mean of its sea-level and vacuum Isp; upper stages get
+                vacuum figures.
+              </Item>
+              <Item>
+                Gravity losses are integrated over each burn along a gravity turn: a stage fights less gravity as the
+                climb turns horizontal, so low thrust-to-weight costs more. Drag comes from frontal area over liftoff
+                mass, capped at 400 m/s.
+              </Item>
+              <Item>
+                Low Earth orbit takes {kms(ORBITAL_SPEED_MPS)} km/s, less {kms(ROTATION_MPS)} km/s from Earth&apos;s
+                spin, plus the design&apos;s own losses: {kms(Math.min(...leoNeeds))} to {kms(Math.max(...leoNeeds))}{" "}
+                km/s for the real rockets. Farther targets add the legs in the table below.
+              </Item>
+              <Item>
+                A stage that lands keeps a propellant reserve for its landing burns and carries legs and fins or a heat
+                shield. Landing Falcon 9&apos;s booster costs {mass(boosterLanding)} of payload to orbit.
+              </Item>
+              <Item>
+                Max payload is the most a design can carry there with a liftoff thrust-to-weight of at least{" "}
+                {MIN_LIFTOFF_TWR}, found by bisection. Below 1, it never leaves the pad.
               </Item>
             </ul>
           </div>
+
+          <h3 className="mt-12 font-display text-[22px] font-medium">Checked against real rockets</h3>
+          <p className="mt-2 max-w-[760px] text-[15px] leading-relaxed text-haze">
+            Saturn V&apos;s published figure counts the S-IVB itself, so its row adds the stage&apos;s dry mass.
+            Electron&apos;s rides on a kick stage the model leaves out, and Starship&apos;s folds in early-flight margins
+            the model doesn&apos;t know about.
+          </p>
+          <Table
+            head={["Rocket", "Published to LEO", "Model", "Model / published"]}
+            numeric={[1, 2, 3]}
+            rows={calibration().map((row) => [
+              row.name,
+              mass(row.publishedKg),
+              mass(row.modelKg),
+              `${num((row.modelKg / row.publishedKg) * 100)}%`,
+            ])}
+          />
 
           <h3 className="mt-12 font-display text-[22px] font-medium">Engines</h3>
           <Table
@@ -126,14 +195,16 @@ export default function About() {
             <div>
               <h3 className="font-display text-[22px] font-medium">Destinations</h3>
               <Table
-                head={["Target", "Δv from surface (km/s)"]}
+                head={["Target", "Δv past low Earth orbit (km/s)"]}
                 numeric={[1]}
-                rows={destinations.map((d) => [
-                  <Source key="n" href={d.source}>
-                    {d.name}
-                  </Source>,
-                  kms(d.deltaVFromSurfaceMps),
-                ])}
+                rows={destinations
+                  .filter((d) => d.id !== "leo")
+                  .map((d) => [
+                    <Source key="n" href={d.source}>
+                      {d.name}
+                    </Source>,
+                    kms(d.deltaVFromSurfaceMps - DESTINATIONS.leo.deltaVFromSurfaceMps),
+                  ])}
               />
             </div>
             <div>
