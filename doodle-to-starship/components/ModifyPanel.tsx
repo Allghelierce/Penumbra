@@ -8,6 +8,7 @@ import { applyAction } from "@/lib/actions";
 import type { Analysis, Design, DesignAction, DestinationId, EngineCluster, RocketTemplate, Stage } from "@/lib/design";
 import { analyze, DESTINATIONS, ENGINES } from "@/lib/physics";
 import { km } from "@/lib/physics/format";
+import { vacuumOnPad, vacuumReason } from "@/lib/redpen";
 import { maxPayloadKg, MIN_LIFTOFF_TWR, realStageFor, recoveryCostKg, stretchFromReal, tradeCurve, type TradeSweep } from "@/lib/trade";
 
 /** Index of the real stage your stage i was made from, or -1 for a stage you added. */
@@ -130,15 +131,8 @@ function changesOf(real: Design, yours: Design): string[] {
  * The plain-language answer: what yours carries there, against what the real rocket does. Capacities are
  * rounded down as shown everywhere else, so the verdict, the table and "Most it can carry" agree.
  */
-function verdictLine(
-  name: string,
-  destination: DestinationId,
-  payloadKg: number,
-  yoursMax: number,
-  realMax: number,
-  empty: Analysis | null,
-  changed: boolean,
-): { text: string; good: boolean } {
+function verdictLine(name: string, design: Design, yoursMax: number, realMax: number, empty: Analysis | null, changed: boolean): { text: string; good: boolean } {
+  const { destination, payloadMassKg: payloadKg } = design;
   const place = PLACE_NAMES[destination];
   const yours = floorShown(yoursMax);
   const realMost = floorShown(realMax);
@@ -161,6 +155,9 @@ function verdictLine(
       good: diff > 0,
     };
   }
+  // A vacuum engine lighting at sea level isn't "too heavy": name the engine that would fire there.
+  const vacuum = vacuumOnPad(design);
+  if (vacuum) return { text: `${vacuumReason(vacuum.engine)}. Swap in ${ENGINES[vacuum.swap].name}.`, good: false };
   if (!empty || empty.liftoffTwr < MIN_LIFTOFF_TWR) {
     const twr = empty ? empty.liftoffTwr.toFixed(2) : "0";
     return { text: `Too heavy to leave the pad safely, even empty: thrust is ${twr}× its weight, and real rockets lift off at ${MIN_LIFTOFF_TWR} or more. ${real}`, good: false };
@@ -192,7 +189,7 @@ export default function ModifyPanel({ template, design, preview, onAction, onRes
     return labels.length > 0 ? { labels, costKg: recoveryCostKg(shown, destination) } : null;
   }, [shown, destination]);
   const changes = useMemo(() => changesOf(template.design, design), [template, design]);
-  const verdict = verdictLine(name, destination, payloadMassKg, yoursMax, realMax, empty, changes.length > 0 || preview !== null);
+  const verdict = verdictLine(name, shown, yoursMax, realMax, empty, changes.length > 0 || preview !== null);
 
   // The chart sweeps one real stage; find it in your rocket (stages you add have no real one to compare).
   const stageTabs = useMemo(
