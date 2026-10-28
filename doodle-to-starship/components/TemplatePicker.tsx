@@ -16,6 +16,9 @@ export function payloadText(kg: number): string {
   return `${t >= 100 ? Math.round(t).toLocaleString("en-US") : t.toFixed(1)} t`;
 }
 
+/** "Falcon 9 Block 5" → "Falcon 9": the name people use in a sentence. */
+export const shortName = (name: string) => name.replace(/\s+Block\s+\d+$/i, "");
+
 /** A payload capacity rounded down to what payloadText shows, so the most it can carry always still flies. */
 export function floorShown(kg: number): number {
   if (kg >= 100_000) return Math.floor(kg / 1_000) * 1_000;

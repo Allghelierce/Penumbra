@@ -68,7 +68,6 @@ export const HISTORIC_MISSIONS: HistoricMission[] = [
   // https://en.wikipedia.org/wiki/SpaceX_CRS-7
   {
     id: "crs7",
-    sketchId: "two-stage-orbiter",
     vehicle: "Falcon 9",
     rocket: "falcon9",
     mission: "CRS-7 · Dragon to the ISS",
@@ -118,7 +117,6 @@ export const HISTORIC_MISSIONS: HistoricMission[] = [
   // https://en.wikipedia.org/wiki/Starship_flight_test_1
   {
     id: "ift1",
-    sketchId: "mars-ship",
     vehicle: "Starship",
     rocket: "starship",
     mission: "Integrated Flight Test 1",

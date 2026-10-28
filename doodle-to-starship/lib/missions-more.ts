@@ -6,7 +6,6 @@ export const MORE_MISSIONS: HistoricMission[] = [
   // https://en.wikipedia.org/wiki/SpaceX_CRS-1
   {
     id: "crs1",
-    sketchId: "two-stage-orbiter",
     vehicle: "Falcon 9",
     rocket: "falcon9",
     mission: "CRS-1 · first operational ISS cargo run",
@@ -74,7 +73,6 @@ export const MORE_MISSIONS: HistoricMission[] = [
   // https://en.wikipedia.org/wiki/Crew_Dragon_Demo-2
   {
     id: "demo2",
-    sketchId: "two-stage-orbiter",
     vehicle: "Falcon 9",
     rocket: "falcon9",
     mission: "Crew Dragon Demo-2",
@@ -104,7 +102,6 @@ export const MORE_MISSIONS: HistoricMission[] = [
   // https://en.wikipedia.org/wiki/Starship_flight_test_2
   {
     id: "ift2",
-    sketchId: "mars-ship",
     vehicle: "Starship",
     rocket: "starship",
     mission: "Integrated Flight Test 2",
@@ -138,7 +135,6 @@ export const MORE_MISSIONS: HistoricMission[] = [
   // https://en.wikipedia.org/wiki/Starship_flight_test_3
   {
     id: "ift3",
-    sketchId: "mars-ship",
     vehicle: "Starship",
     rocket: "starship",
     mission: "Integrated Flight Test 3",
@@ -172,7 +168,6 @@ export const MORE_MISSIONS: HistoricMission[] = [
   // https://en.wikipedia.org/wiki/Starship_flight_test_4
   {
     id: "ift4",
-    sketchId: "mars-ship",
     vehicle: "Starship",
     rocket: "starship",
     mission: "Integrated Flight Test 4",

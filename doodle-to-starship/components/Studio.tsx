@@ -41,15 +41,15 @@ import type {
   Stroke,
 } from "@/lib/design";
 import { drawTemplate, TEMPLATES } from "@/lib/templates";
-import TemplatePicker from "@/components/TemplatePicker";
+import TemplatePicker, { shortName } from "@/components/TemplatePicker";
 import { strokesToPng } from "@/lib/napkin";
 import { buildReview } from "@/lib/redpen";
 import { readFromGeometry } from "@/lib/sketch/geometry";
-import { COMEBACK, defectStrokes, fixNote, fixStrokes, historicReading, historicReview, historicTrace } from "@/lib/history";
+import { COMEBACK, defectStrokes, fixNote, fixStrokes, historicReading, historicReview, historicStrokes, historicTrace } from "@/lib/history";
 import { prefetchNarration } from "@/lib/voice/tts";
 import { ALL_MISSIONS } from "@/lib/mission-catalog";
 import MissionFile from "@/components/MissionFile";
-import MissionPicker from "@/components/MissionPicker";
+import MissionPicker, { FlightRows } from "@/components/MissionPicker";
 import StepBar from "@/components/StepBar";
 import { recap } from "@/lib/recap";
 import { calloutFor, offerFor, pollRoom } from "@/lib/mission-control";
@@ -92,12 +92,14 @@ function safeAnalyze(design: Design | null): Analysis | null {
 const FEATURED = ["falcon1-f1", "crs7", "ift1"];
 const FEATURED_MISSIONS = FEATURED.map((id) => ALL_MISSIONS.find((m) => m.id === id)).filter((m): m is HistoricMission => Boolean(m));
 const MORE_FLIGHTS = ALL_MISSIONS.filter((m) => !FEATURED.includes(m.id));
-/** Each family flies the same napkin sketch, so the sketch names the family. */
-const FAMILIES = [
-  { sketchId: "napkin-hopper", label: "Falcon 1" },
-  { sketchId: "two-stage-orbiter", label: "Falcon 9 & Falcon Heavy" },
-  { sketchId: "mars-ship", label: "Starship" },
-];
+/** The other flights under the real rocket each belongs to, naming the family's other vehicles: "Falcon 9, with Falcon 1 and Falcon Heavy". */
+const ROCKET_GROUPS = TEMPLATES.map((t) => {
+  const flights = MORE_FLIGHTS.filter((m) => m.rocket === t.id);
+  const name = shortName(t.name);
+  const others = [...new Set(flights.map((m) => m.vehicle))].filter((v) => v !== name);
+  const family = others.length > 1 ? `${others.slice(0, -1).join(", ")} and ${others.at(-1)}` : others[0];
+  return { rocket: t.id, label: family ? `${name}, with ${family}` : name, flights };
+}).filter((group) => group.flights.length > 0);
 
 /** CleanProfile drops its profile when its reset key is an empty array: used below the Build step. */
 const NO_STROKES: Stroke[] = [];
@@ -548,8 +550,6 @@ export default function Studio() {
 
   // ---- The flow.
   function pickMission(m: HistoricMission) {
-    const sketch = DEMO_SKETCHES.find((d) => d.id === m.sketchId);
-    if (!sketch) return;
     clearAll();
     setMission(m);
     setDestination(m.destination);
@@ -560,7 +560,7 @@ export default function Studio() {
     const controller = new AbortController();
     replay.current = controller;
     setReplaying(true);
-    void replaySketch([...sketch.strokes, ...flaw], setStrokes, { signal: controller.signal }).finally(() => {
+    void replaySketch([...historicStrokes(m), ...flaw], setStrokes, { signal: controller.signal }).finally(() => {
       if (replay.current === controller) setReplaying(false);
     });
   }
@@ -837,7 +837,7 @@ export default function Studio() {
         </button>
         {step > 0 && (
           <span className="border-l border-rule pl-5 font-space text-[12px] font-semibold uppercase tracking-[0.2em] text-haze">
-            {template ? "Modify a real rocket" : mission ? "Real missions" : "Your design"}
+            {template ? "Modify a real rocket" : mission ? "Real flights" : "Your design"}
           </span>
         )}
         <div className="ml-auto flex items-center gap-2">
@@ -891,49 +891,19 @@ export default function Studio() {
               Stretch its tanks, swap its engines, add a stage. Every number is the real rocket&apos;s, next to what your change does to it.
             </p>
             <TemplatePicker templates={TEMPLATES} onPick={pickTemplate} />
-            <h2 className="mt-14 font-space text-[20px] font-semibold uppercase tracking-[0.1em] text-white">Real missions</h2>
-            <p className="mb-6 mt-1 text-[15px] text-haze">Case studies: find what broke on a real flight, then fly what actually happened.</p>
+            <h2 className="mt-14 font-space text-[20px] font-semibold uppercase tracking-[0.1em] text-white">Real flights</h2>
+            <p className="mb-6 mt-1 text-[15px] text-haze">What the numbers don&apos;t show: find what broke on a real flight, then fly what actually happened.</p>
             <MissionPicker missions={FEATURED_MISSIONS} onPick={pickMission} onDrawOwn={drawOwn} />
-            {MORE_FLIGHTS.length > 0 && (
+            {ROCKET_GROUPS.length > 0 && (
               <div className="mt-10 pb-6">
                 <h3 className="font-space text-[13px] font-semibold uppercase tracking-[0.22em] text-white/75">More real flights</h3>
-                <div className="mt-4 grid grid-cols-3 gap-6">
-                  {FAMILIES.map((family) => {
-                    const flights = MORE_FLIGHTS.filter((m) => m.sketchId === family.sketchId);
-                    if (flights.length === 0) return null;
-                    return (
-                      <div key={family.sketchId}>
-                        <p className="mb-2 text-[11px] uppercase tracking-[0.2em] text-haze">{family.label}</p>
-                        <ul className="space-y-2">
-                          {flights.map((m) => (
-                            <li key={m.id}>
-                              <button
-                                type="button"
-                                onClick={() => pickMission(m)}
-                                className="flex w-full items-center gap-3 border border-rule bg-black/70 px-3 py-2.5 text-left transition-colors hover:border-white/60"
-                              >
-                                <span
-                                  className={`shrink-0 border px-1.5 py-px text-[9px] font-semibold uppercase tracking-[0.16em] ${
-                                    m.outcome === "lost" ? "border-nogo text-nogo" : "border-go-signal text-go-signal"
-                                  }`}
-                                >
-                                  {m.outcome === "lost" ? "Lost" : "Success"}
-                                </span>
-                                <span className="min-w-0 flex-1">
-                                  <span className="block truncate text-[13px] font-semibold text-white">
-                                    {m.vehicle} · {m.mission}
-                                  </span>
-                                  <span className="block truncate text-[12px] text-haze">
-                                    {m.date.slice(0, 4)} · {m.failure?.label ?? m.stats[0]?.meaning ?? ""}
-                                  </span>
-                                </span>
-                              </button>
-                            </li>
-                          ))}
-                        </ul>
-                      </div>
-                    );
-                  })}
+                <div className="mt-4 grid gap-6 md:grid-cols-2">
+                  {ROCKET_GROUPS.map((group) => (
+                    <div key={group.rocket}>
+                      <p className="mb-2 text-[11px] uppercase tracking-[0.2em] text-haze">{group.label}</p>
+                      <FlightRows flights={group.flights} onPick={pickMission} />
+                    </div>
+                  ))}
                 </div>
               </div>
             )}
@@ -1095,6 +1065,8 @@ export default function Studio() {
                 onReset={resetTemplate}
                 chartStage={chartStage}
                 onChartStage={setChartStage}
+                flights={ALL_MISSIONS.filter((m) => m.rocket === template.id)}
+                onFlight={pickMission}
                 top={
                   step === 2 && review ? (
                     <section className="module">

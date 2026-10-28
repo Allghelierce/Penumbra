@@ -35,7 +35,6 @@ export const SUCCESS_MISSIONS: HistoricMission[] = [
   // https://en.wikipedia.org/wiki/Falcon_9_flight_20
   {
     id: "og2",
-    sketchId: "two-stage-orbiter",
     vehicle: "Falcon 9",
     rocket: "falcon9",
     mission: "Orbcomm OG2 · Flight 20",
@@ -65,7 +64,6 @@ export const SUCCESS_MISSIONS: HistoricMission[] = [
   // https://en.wikipedia.org/wiki/Starship_flight_test_5
   {
     id: "ift5",
-    sketchId: "mars-ship",
     vehicle: "Starship",
     rocket: "starship",
     mission: "Integrated Flight Test 5",

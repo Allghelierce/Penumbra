@@ -1,11 +1,12 @@
 "use client";
 
 import { useMemo, useState, type ReactNode } from "react";
+import { FlightRows } from "@/components/MissionPicker";
 import TradeChart from "@/components/TradeChart";
-import { floorShown, payloadText } from "@/components/TemplatePicker";
+import { floorShown, payloadText, shortName } from "@/components/TemplatePicker";
 import { PLACE_NAMES } from "@/components/VerdictPanel";
 import { applyAction } from "@/lib/actions";
-import type { Analysis, Design, DesignAction, DestinationId, EngineCluster, RocketTemplate, Stage } from "@/lib/design";
+import type { Analysis, Design, DesignAction, DestinationId, EngineCluster, HistoricMission, RocketTemplate, Stage } from "@/lib/design";
 import { analyze, DESTINATIONS, ENGINES } from "@/lib/physics";
 import { km } from "@/lib/physics/format";
 import { vacuumOnPad, vacuumReason } from "@/lib/redpen";
@@ -47,6 +48,9 @@ interface ModifyPanelProps {
   onChartStage: (realIndex: number) => void;
   /** Above everything else: the red pen's findings on Check, the flight log after a flight. */
   top?: ReactNode;
+  /** This rocket's real flights, last: each opens its replay. */
+  flights: HistoricMission[];
+  onFlight: (mission: HistoricMission) => void;
 }
 
 const DESTINATION_CHIPS: { id: DestinationId; label: string }[] = [
@@ -64,9 +68,6 @@ function safeAnalyze(design: Design): Analysis | null {
     return null;
   }
 }
-
-/** "Falcon 9 Block 5" → "Falcon 9": the name people use in a sentence. */
-const shortName = (name: string) => name.replace(/\s+Block\s+\d+$/i, "");
 
 const engineText = (stage: Stage) => stage.engines.map((c) => `${c.count}× ${ENGINES[c.engine]?.name ?? c.engine}`).join(" + ");
 
@@ -172,7 +173,7 @@ const signed = (d: number, text: string) => `${d > 0 ? "+" : "−"}${text}`;
  * yours (payload to the destination, delta-v, thrust-to-weight, mass) with a one-line verdict and what
  * landing costs, and the trade-off chart for one stage.
  */
-export default function ModifyPanel({ template, design, preview, onAction, onReset, chartStage, onChartStage, top }: ModifyPanelProps) {
+export default function ModifyPanel({ template, design, preview, onAction, onReset, chartStage, onChartStage, top, flights, onFlight }: ModifyPanelProps) {
   const [sweep, setSweep] = useState<TradeSweep["kind"]>("tank-stretch");
   const shown = preview ?? design;
   const { destination, payloadMassKg } = shown;
@@ -438,6 +439,12 @@ export default function ModifyPanel({ template, design, preview, onAction, onRes
           {/* Its own caption reads the curve and your point on it; what landing costs is already said above. */}
           <TradeChart curve={chart.curve} currentX={currentX} onPick={pick} plotHeight={96} />
         </div>
+      )}
+
+      {flights.length > 0 && (
+        <Module title="Real flights" meta={<span className="text-[12px] text-haze">What the numbers don&apos;t show</span>}>
+          <FlightRows flights={flights} onPick={onFlight} framed={false} />
+        </Module>
       )}
     </aside>
   );
