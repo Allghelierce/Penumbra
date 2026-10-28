@@ -137,6 +137,7 @@ export function drawSky(ctx: CanvasRenderingContext2D, W: number, H: number, _pa
   drawSprite(ctx, W, H, alt, centerY);
   drawSoundingRocket(ctx, W, H, alt, centerY);
   drawNoctilucent(ctx, W, H, alt, centerY);
+  drawAirglowLayer(ctx, W, H, alt, centerY);
   drawElve(ctx, W, H, alt, centerY);
   drawStarlinkTrain(ctx, W, H, alt, centerY);
   drawLandmarks(ctx, W, H, alt, centerY);
@@ -1196,6 +1197,22 @@ function drawSprite(ctx: CanvasRenderingContext2D, W: number, H: number, alt: nu
 }
 
 /**
+ * The airglow layer near 95 km: oxygen atoms that soaked up sunlight by day give it back as a
+ * faint green glow all night. Seen edge-on as the rocket passes through it, a thin even band.
+ */
+function drawAirglowLayer(ctx: CanvasRenderingContext2D, W: number, H: number, alt: number, centerY: number) {
+  const y = featureY(alt, 95, centerY, H);
+  if (y < -30 || y > H + 30) return;
+  // Soft on both edges, so it never reads as one of the crisp layer boundaries.
+  const g = ctx.createLinearGradient(0, y - 22, 0, y + 22);
+  g.addColorStop(0, "rgba(120,255,170,0)");
+  g.addColorStop(0.5, "rgba(120,255,170,0.12)");
+  g.addColorStop(1, "rgba(120,255,170,0)");
+  ctx.fillStyle = g;
+  ctx.fillRect(0, y - 22, W, 44);
+}
+
+/**
  * Elves: rings of red light that race outward around 90 km when a big lightning stroke's
  * pulse hits the ionosphere. They last a millisecond; here one ring expands every couple of seconds.
  */
@@ -1534,6 +1551,20 @@ function drawConstellations(ctx: CanvasRenderingContext2D, W: number, H: number,
       ctx.fill();
     });
   }
+  // The Andromeda galaxy: a tilted smudge with a bright core, the farthest thing you can see unaided.
+  const ax = W * 0.6;
+  const ay = H * 0.62;
+  for (const [rx, ry, a] of [
+    [26, 7, 0.06],
+    [15, 4, 0.1],
+    [5, 2, 0.3],
+  ] as const) {
+    ctx.globalAlpha = alpha * a;
+    ctx.fillStyle = "rgb(226,220,255)";
+    ctx.beginPath();
+    ctx.ellipse(ax, ay, rx, ry, -0.62, 0, Math.PI * 2);
+    ctx.fill();
+  }
   const px = W * 0.79;
   const py = H * 0.36;
   ctx.globalAlpha = alpha * 0.06;
@@ -1783,8 +1814,11 @@ function drawPalm(ctx: CanvasRenderingContext2D, x: number, y: number, h: number
   ctx.stroke();
 }
 
-/** A strip of sea out to the horizon from fraction `from` of the width, catching the sun. */
-function drawSea(ctx: CanvasRenderingContext2D, W: number, H: number, y: number, from: number) {
+/**
+ * A strip of sea out to the horizon from fraction `from` of the width, catching the sun, with a
+ * pale beach (or none, below cliffs) and a line of surf along the shore that comes and goes.
+ */
+function drawSea(ctx: CanvasRenderingContext2D, W: number, H: number, y: number, from: number, beach: boolean) {
   ctx.fillStyle = "rgb(38,96,152)";
   ctx.fillRect(W * from, y - H * 0.012, W * (1 - from) + 1, H * 0.012 + 1);
   ctx.fillStyle = "rgba(214,236,255,0.7)";
@@ -1792,6 +1826,21 @@ function drawSea(ctx: CanvasRenderingContext2D, W: number, H: number, y: number,
     const x = W * (from + (gx - 0.885) * ((1 - from) / 0.115));
     ctx.fillRect(Math.round(x), Math.round(y - H * gy), Math.round(gw), 1);
   }
+  if (beach) {
+    ctx.fillStyle = "rgb(170,160,132)";
+    ctx.fillRect(W * from, y - 3, W * (1 - from) + 1, 3);
+  }
+  // Surf: short white dashes along the shore, rolling in and fading.
+  const now = wallSeconds();
+  ctx.fillStyle = "#ffffff";
+  for (let i = 0; i < 14; i++) {
+    const f = (i * 0.618) % 1;
+    const x = W * (from + (1 - from) * f);
+    const a = 0.25 + 0.35 * Math.max(0, Math.sin(now * 1.3 + i * 2.1));
+    ctx.globalAlpha = a;
+    ctx.fillRect(Math.round(x), Math.round(y - (beach ? 4 : 2)), 6 + (i % 3) * 3, 1);
+  }
+  ctx.globalAlpha = 1;
 }
 
 /**
@@ -1818,7 +1867,7 @@ function drawSkyline(ctx: CanvasRenderingContext2D, W: number, H: number, y: num
     ctx.closePath();
     ctx.fill();
   });
-  drawSea(ctx, W, H, y, land.sea);
+  drawSea(ctx, W, H, y, land.sea, site !== "mahia");
 
   const ink = "rgb(12,26,42)";
   const trim = "rgb(30,58,88)";
@@ -1828,7 +1877,36 @@ function drawSkyline(ctx: CanvasRenderingContext2D, W: number, H: number, y: num
   if (site === "mahia") drawMahia(ctx, W, H, y, ink, land);
   else if (site === "starbase") drawStarbase(ctx, W, H, y, ink, trim);
   else drawCape(ctx, W, H, y, ink, trim);
+  drawWindsock(ctx, W, H, y, ink);
   ctx.globalAlpha = alpha;
+}
+
+/** A windsock on a pole near the pad: launch weather rules cap the wind, so every pad has one. */
+function drawWindsock(ctx: CanvasRenderingContext2D, W: number, H: number, y: number, ink: string) {
+  const x = W * 0.415;
+  const top = y - H * 0.045;
+  const now = wallSeconds();
+  ctx.fillStyle = ink;
+  ctx.fillRect(x - 1, top, 2, H * 0.045 + 1);
+  // Five bands, alternating orange and white, tapering downwind and rippling.
+  const len = H * 0.04;
+  const droop = 0.12 + 0.05 * Math.sin(now * 1.7);
+  for (let i = 0; i < 5; i++) {
+    const f0 = i / 5;
+    const f1 = (i + 1) / 5;
+    const w0 = H * 0.009 * (1 - f0 * 0.45);
+    const w1 = H * 0.009 * (1 - f1 * 0.45);
+    const y0 = top + w0 / 2 + len * f0 * droop + Math.sin(now * 6 - i * 0.9) * 0.6 * f0;
+    const y1 = top + w1 / 2 + len * f1 * droop + Math.sin(now * 6 - (i + 1) * 0.9) * 0.6 * f1;
+    ctx.fillStyle = i % 2 ? "rgb(244,244,240)" : "rgb(255,120,40)";
+    ctx.beginPath();
+    ctx.moveTo(x + 1 + len * f0, y0 - w0 / 2);
+    ctx.lineTo(x + 1 + len * f1, y1 - w1 / 2);
+    ctx.lineTo(x + 1 + len * f1, y1 + w1 / 2);
+    ctx.lineTo(x + 1 + len * f0, y0 + w0 / 2);
+    ctx.closePath();
+    ctx.fill();
+  }
 }
 
 /**
