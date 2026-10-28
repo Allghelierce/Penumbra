@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import { applyAction } from "./actions";
 import type { Design } from "./design";
-import { analyze, ascentLossesMps } from "./physics";
+import { analyze, ascentLossesMps, enginesThatFit } from "./physics";
 import { TEMPLATES } from "./templates";
 import { explainCurve, maxPayloadKg, MIN_LIFTOFF_TWR, realStageFor, recoveryCostKg, stretchFromReal, tradeCurve } from "./trade";
 
@@ -135,7 +135,7 @@ describe("tradeCurve", () => {
     for (const t of TEMPLATES) expect(stretchBest(t.id, t.design.stages.length - 1).bestX, t.id).toBeLessThanOrEqual(1.1);
   });
 
-  it("sweeps engine counts from the real rocket's, with nothing at too few engines to lift off", () => {
+  it("sweeps engine counts from one up to as many as fit on the base, with nothing at too few to lift off", () => {
     const f9 = template("falcon9").design;
     const curve = tradeCurve(f9, { kind: "engine-count", stageIndex: 0 }, { destination: "leo" });
     expect(curve.realX).toBe(9);
@@ -143,6 +143,11 @@ describe("tradeCurve", () => {
     expect(curve.points[0].x).toBe(1);
     expect(curve.points[0].payloadKg).toBe(0);
     expect(curve.points.find((p) => p.x === 9)!.payloadKg).toBe(maxPayloadKg(f9, "leo"));
+    // Nine Merlins fill Falcon 9's 3.7 m base, so the sweep stops there.
+    expect(curve.points.at(-1)!.x).toBe(9);
+    expect(curve.limit).toEqual({ x: 9, engine: "Merlin 1D", diameterM: 3.7 });
+    // Super Heavy's 33 Raptors fill its 9 m base.
+    expect(tradeCurve(template("starship").design, { kind: "engine-count", stageIndex: 0 }, { destination: "leo" }).points.at(-1)!.x).toBe(33);
   });
 
   it("measures your stretch against the real tanks, so the penalty never compounds", () => {
@@ -159,12 +164,46 @@ describe("tradeCurve", () => {
   });
 });
 
+describe("enginesThatFit", () => {
+  it("fits every real rocket's engines on its base, and not one more on Falcon 9 or Super Heavy", () => {
+    for (const t of TEMPLATES) {
+      t.design.stages.forEach((stage, i) => {
+        stage.engines.forEach((cluster, c) => {
+          const fit = enginesThatFit(cluster.engine, t.design.diameterM, stage.engines.filter((_, k) => k !== c));
+          if (fit === null) return;
+          // Saturn V's five F-1s hang past its 10.1 m base under engine fairings; packed inside it, four fit.
+          if (t.id === "saturn-v" && i === 0) expect(fit).toBe(4);
+          else expect(fit, `${t.id} stage ${i} ${cluster.engine}`).toBeGreaterThanOrEqual(cluster.count);
+        });
+      });
+    }
+    expect(enginesThatFit("merlin-1d", 3.7)).toBe(9);
+    expect(enginesThatFit("raptor-2", 9)).toBe(33);
+    // The Ship's three vacuum Raptors take room the sea-level ones can't use.
+    expect(enginesThatFit("raptor-2", 9, [{ engine: "raptor-vacuum", count: 3 }])).toBeLessThan(33);
+    expect(enginesThatFit("rutherford-vacuum", 1.2)).toBeNull();
+  });
+});
+
 describe("explainCurve", () => {
   it("says where the best point is and why, in a sentence or two", () => {
     const curve = tradeCurve(template("falcon9").design, { kind: "tank-stretch", stageIndex: 0 }, { destination: "leo" });
     const text = explainCurve(curve);
     expect(text).toMatch(/^The most payload is at 1\.\d\d×: \d+(\.\d)? t, \d+% more than the real \d+(\.\d)? t\./);
     expect(text).toMatch(/thrust-to-weight/);
+  });
+
+  it("says when no more engines fit on the base", () => {
+    const curve = tradeCurve(template("falcon9").design, { kind: "engine-count", stageIndex: 0 }, { destination: "leo" });
+    expect(explainCurve(curve)).toBe(
+      "The real rocket already carries the most: 23.2 t at 9 engines. Fewer carry less, and 9 Merlin 1D engines are all that fit on its 3.7 m base.",
+    );
+  });
+
+  it("shows masses under 100 t to a tenth, so close ones read apart", () => {
+    const f9 = withRecovery(template("falcon9").design, [0]);
+    const text = explainCurve(tradeCurve(f9, { kind: "tank-stretch", stageIndex: 0 }, { destination: "leo" }));
+    expect(text).toMatch(/^The most payload is at 1\.\d\d×: 18\.0 t, 3% more than the real 17\.5 t\./);
   });
 
   it("says when the real rocket is already at the peak", () => {

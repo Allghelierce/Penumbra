@@ -179,6 +179,36 @@ export const ENGINES: Record<EngineId, EngineSpec> = {
   },
 };
 
+/**
+ * Nozzle exit diameter in m (or the engine's published diameter, which its nozzle sets), for
+ * fitting engines side by side on a stage's base. Left out where nothing is published.
+ */
+export const NOZZLE_EXIT_DIAMETER_M: Partial<Record<EngineId, number>> = {
+  // SpaceX, 2018: 1.3 m at sea level, 2.4 m for the vacuum nozzle. https://en.wikipedia.org/wiki/SpaceX_Raptor
+  "raptor-2": 1.3,
+  "raptor-3": 1.3,
+  "raptor-vacuum": 2.4,
+  // 0.92 m at sea level, 3.3 m vacuum. https://en.wikipedia.org/wiki/SpaceX_Merlin
+  "merlin-1d": 0.92,
+  "merlin-vacuum": 3.3,
+  // Nozzle exit 2.30 m. https://en.wikipedia.org/wiki/RS-25
+  "rs-25": 2.3,
+  // RL10C-1 nozzle. https://en.wikipedia.org/wiki/RL10
+  rl10c: 1.45,
+  // https://en.wikipedia.org/wiki/Rocketdyne_F-1
+  "f-1": 3.7,
+  // https://en.wikipedia.org/wiki/Rocketdyne_J-2
+  "j-2": 2.01,
+  // Not published: the widest nozzle that seats seven on New Glenn's 7.0 m base. https://en.wikipedia.org/wiki/New_Glenn
+  "be-4": 2.2,
+  // Across both nozzles. https://en.wikipedia.org/wiki/RD-180
+  "rd-180": 3.15,
+  // The vacuum version's longer nozzle isn't published. https://en.wikipedia.org/wiki/Rutherford_(rocket_engine)
+  rutherford: 0.25,
+  // Motor case. https://en.wikipedia.org/wiki/GEM_63
+  "generic-solid": 1.61,
+};
+
 /** Bulk density of oxidizer plus fuel at the usual mixture ratio, in kg/m³. */
 export const PROPELLANT_DENSITY_KG_M3: Record<PropellantId, number> = {
   // LOX 1141 + RP-1 810 at O/F 2.56

@@ -3,13 +3,25 @@
 
 import { applyAction, structureScale } from "./actions";
 import type { Design, DestinationId, EngineCluster, Stage, TradeCurve, TradePoint } from "./design";
-import { analyze, ENGINES } from "./physics";
+import { analyze, ENGINES, enginesThatFit } from "./physics";
 
 export type TradeSweep = { kind: "tank-stretch" | "engine-count"; stageIndex: number; clusterIndex?: number };
+
+/** Where an engine sweep stops because no more of the engine fit on the stage's base. */
+export interface FitLimit {
+  x: number;
+  engine: string;
+  diameterM: number;
+}
+
+/** A trade curve, plus the base-fit limit when that is what ends an engine sweep. */
+export type SweptCurve = TradeCurve & { limit?: FitLimit };
 
 const STRETCH_FROM = 0.6;
 const STRETCH_TO = 1.8;
 const STRETCH_STEP = 0.05;
+/** An engine sweep never runs past this many, however small the engine. */
+const MAX_SWEEP_ENGINES = 60;
 
 /**
  * Real launchers keep a margin at liftoff for steering and an engine out; the Saturn V left
@@ -77,14 +89,14 @@ export function stretchFromReal(yours: Design, real: Design, stageIndex: number,
 
 /**
  * Payload against one change: a stage's tank stretch (x = times the real tanks, so the real
- * rocket sits at 1) or an engine cluster's count (x = engines). realX marks the real rocket,
- * bestX the most payload.
+ * rocket sits at 1) or an engine cluster's count (x = engines), which stops at as many as fit on
+ * the stage's base. realX marks the real rocket, bestX the most payload.
  */
 export function tradeCurve(
   design: Design,
   sweep: TradeSweep,
   options: { destination?: DestinationId; real?: Design } = {},
-): TradeCurve {
+): SweptCurve {
   const destination = options.destination ?? design.destination;
   const real = options.real ?? design;
   const stage = design.stages[sweep.stageIndex];
@@ -95,6 +107,7 @@ export function tradeCurve(
   let realX: number;
   let label: string;
   let unit: string;
+  let limit: FitLimit | undefined;
   if (sweep.kind === "tank-stretch") {
     const steps = Math.round((STRETCH_TO - STRETCH_FROM) / STRETCH_STEP);
     xs = Array.from({ length: steps + 1 }, (_, k) => round2(STRETCH_FROM + k * STRETCH_STEP));
@@ -107,8 +120,15 @@ export function tradeCurve(
     const engine = stage.engines[cluster];
     if (!engine) return { label: "", unit: "", points: [], realX: 0, bestX: 0 };
     const realStage = realStageFor(design, real, sweep.stageIndex);
-    realX = realStage?.engines.find((c) => c.engine === engine.engine)?.count ?? engine.count;
-    const top = Math.max(realX * 2, engine.count + 3, 4);
+    const realCount = realStage?.engines.find((c) => c.engine === engine.engine)?.count;
+    realX = realCount ?? engine.count;
+    // Up to as many as fit on the base beside the stage's other engines. The real rocket's own
+    // count always does: Saturn V's five F-1s hang past its 10.1 m base, under engine fairings.
+    // Engines with no published nozzle size sweep to twice the real count.
+    const packed = enginesThatFit(engine.engine, design.diameterM, stage.engines.filter((_, i) => i !== cluster));
+    const fits = packed === null ? null : Math.max(packed, realCount ?? 0);
+    const top = fits === null ? Math.max(realX * 2, engine.count + 3, 4) : Math.min(fits, MAX_SWEEP_ENGINES);
+    if (fits !== null && top === fits) limit = { x: fits, engine: ENGINES[engine.engine].name, diameterM: design.diameterM };
     xs = Array.from({ length: top }, (_, k) => k + 1);
     build = (x) =>
       applyAction(design, { type: "set-engines", stageIndex: sweep.stageIndex, clusterIndex: cluster, engine: engine.engine, count: x });
@@ -122,11 +142,12 @@ export function tradeCurve(
     const at = analyze({ ...built, destination, payloadMassKg: payloadKg });
     return { x, payloadKg, totalDeltaVMps: at.totalDeltaVMps, liftoffTwr: at.liftoffTwr };
   });
+  if (points.length === 0) return { label, unit, points, realX, bestX: realX, ...(limit && { limit }) };
   // The most payload; on a tie, the point nearest the real rocket.
   const best = points.reduce((b, p) =>
     p.payloadKg > b.payloadKg || (p.payloadKg === b.payloadKg && Math.abs(p.x - realX) < Math.abs(b.x - realX)) ? p : b,
   );
-  return { label, unit, points, realX, bestX: best.x };
+  return { label, unit, points, realX, bestX: best.x, ...(limit && { limit }) };
 }
 
 /** Payload given up by landing the stages that recover, compared with throwing them away. */
@@ -138,9 +159,10 @@ export function recoveryCostKg(design: Design, destination: DestinationId = desi
 
 /**
  * One to three plain sentences for the chart caption: where the real rocket sits, why the best
- * point is where it is, and (given the design) what landing its recovered stages costs.
+ * point is where it is (including when no more engines fit), and (given the design) what landing
+ * its recovered stages costs.
  */
-export function explainCurve(curve: TradeCurve, context?: { design: Design; destination?: DestinationId }): string {
+export function explainCurve(curve: SweptCurve, context?: { design: Design; destination?: DestinationId }): string {
   const text = explainShape(curve);
   if (!context || !text) return text;
   const recovered = context.design.stages.filter((s) => s.recover).map((s) => s.label);
@@ -150,17 +172,24 @@ export function explainCurve(curve: TradeCurve, context?: { design: Design; dest
   return `${text} Landing ${which} costs about ${tonnes(cost)} of payload.`;
 }
 
-function explainShape(curve: TradeCurve): string {
-  if (curve.points.length === 0) return "";
+function explainShape(curve: SweptCurve): string {
+  const limit = curve.limit;
+  const fit = limit ? fitClause(limit) : "";
+  if (curve.points.length === 0) return limit ? `${capitalize(fit)}.` : "";
   const at = (x: number) => curve.points.reduce((b, p) => (Math.abs(p.x - x) < Math.abs(b.x - x) ? p : b));
   const real = at(curve.realX);
   const best = at(curve.bestX);
   const stretch = curve.unit === "×";
-  const fmtX = (x: number) => (stretch ? `${x.toFixed(2)}×` : `${x} engines`);
+  const fmtX = (x: number) => (stretch ? `${x.toFixed(2)}×` : x === 1 ? "1 engine" : `${x} engines`);
   if (best.payloadKg <= 0) return "No setting along this line gets a payload there. Try a closer destination or another change.";
+  if (limit && curve.points.length === 1) return `${capitalize(fit)}, so there's nothing to trade: it carries ${tonnes(real.payloadKg)}.`;
+  // The best point is the last engine that fits, not a peak.
+  const atLimit = limit !== undefined && curve.bestX === limit.x;
+  const atEnd = curve.bestX === curve.points[curve.points.length - 1].x;
 
   const gain = real.payloadKg > 0 ? (best.payloadKg - real.payloadKg) / real.payloadKg : Infinity;
   if (Math.abs(curve.bestX - curve.realX) < (stretch ? 0.051 : 1) || gain < 0.02) {
+    if (atLimit) return `The real rocket already carries the most: ${tonnes(real.payloadKg)} at ${fmtX(curve.realX)}. Fewer carry less, and ${fit}.`;
     return `The real rocket already sits at the peak: ${tonnes(real.payloadKg)} at ${fmtX(curve.realX)}. Change it either way and it carries less.`;
   }
   const more = Number.isFinite(gain) ? `${tonnes(best.payloadKg)}, ${Math.round(gain * 100)}% more than the real ${tonnes(real.payloadKg)}` : tonnes(best.payloadKg);
@@ -169,10 +198,24 @@ function explainShape(curve: TradeCurve): string {
       ? `More propellant adds speed until the heavier rocket lifts off at thrust-to-weight ${best.liftoffTwr.toFixed(2)}; past that it can't leave the pad safely.`
       : `A smaller stage leaves more of the work to the stages that do it more efficiently; shrink it further and there isn't enough speed left.`
     : curve.bestX > curve.realX
-      ? `More engines cut the time spent fighting gravity; past that, each one is weight it barely needs.`
+      ? atLimit
+        ? `More engines cut the time spent fighting gravity, and ${fit}.`
+        : atEnd
+          ? `More engines cut the time spent fighting gravity.`
+          : `More engines cut the time spent fighting gravity; past that, each one is weight it barely needs.`
       : `Fewer engines save weight while it still lifts off at thrust-to-weight ${best.liftoffTwr.toFixed(2)}; any fewer and it's too sluggish.`;
   return `The most payload is at ${fmtX(curve.bestX)}: ${more}. ${why}`;
 }
+
+/** e.g. "9 Merlin 1D engines are all that fit on its 3.7 m base". */
+function fitClause({ x, engine, diameterM }: FitLimit): string {
+  const base = `its ${Number.isInteger(diameterM) ? diameterM : diameterM.toFixed(1)} m base`;
+  if (x === 0) return `not one ${engine} fits on ${base}`;
+  if (x === 1) return `only one ${engine} fits on ${base}`;
+  return `${x} ${engine} engines are all that fit on ${base}`;
+}
+
+const capitalize = (text: string) => text.charAt(0).toUpperCase() + text.slice(1);
 
 function mainCluster(engines: EngineCluster[]): number {
   return engines.reduce((best, c, i, all) => (c.count > all[best].count ? i : best), 0);
@@ -186,8 +229,9 @@ function round2(x: number) {
   return Math.round(x * 100) / 100;
 }
 
+/** Whole tonnes from 100 t; one decimal below, so 17.5 t and 18.0 t read apart. */
 function tonnes(kg: number) {
-  if (kg >= 10_000) return `${Math.round(kg / 1000).toLocaleString("en-US")} t`;
+  if (kg >= 100_000) return `${Math.round(kg / 1000).toLocaleString("en-US")} t`;
   if (kg >= 1_000) return `${(kg / 1000).toFixed(1)} t`;
   return `${Math.round(kg)} kg`;
 }
