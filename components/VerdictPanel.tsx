@@ -41,9 +41,9 @@ export const PLACE_NAMES: Record<DestinationId, string> = {
   leo: "orbit",
   gto: "geostationary transfer",
   "moon-orbit": "Moon orbit",
-  "moon-surface": "the Moon",
+  "moon-surface": "the Moon's surface",
   "mars-transfer": "Mars transfer",
-  "mars-surface": "Mars",
+  "mars-surface": "the surface of Mars",
   europa: "Europa",
 };
 

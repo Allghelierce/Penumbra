@@ -61,8 +61,8 @@ import DesignReview, { type ReviewIssue, type Trade } from "@/components/DesignR
 const DESTINATION_CHIPS: { id: DestinationId; label: string }[] = [
   { id: "leo", label: "Orbit" },
   { id: "gto", label: "GEO" },
-  { id: "moon-surface", label: "Moon" },
-  { id: "mars-surface", label: "Mars" },
+  { id: "moon-surface", label: "Moon landing" },
+  { id: "mars-surface", label: "Mars landing" },
   { id: "europa", label: "Europa" },
 ];
 

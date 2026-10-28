@@ -9,7 +9,7 @@ import { applyAction } from "@/lib/actions";
 import type { Analysis, Design, DesignAction, DestinationId, EngineCluster, HistoricMission, RocketTemplate, Stage } from "@/lib/design";
 import { analyze, DESTINATIONS, ENGINES } from "@/lib/physics";
 import { km } from "@/lib/physics/format";
-import { vacuumOnPad, vacuumReason } from "@/lib/redpen";
+import { metres, overfitEngines, vacuumOnPad, vacuumReason, type EngineOverfit } from "@/lib/redpen";
 import { capacityText, maxPayloadKg, MIN_LIFTOFF_TWR, realStageFor, recoveryCostKg, shownKg, stretchFromReal, tradeCurve, type TradeSweep } from "@/lib/trade";
 
 /** Index of the real stage your stage i was made from, or -1 for a stage you added. */
@@ -56,8 +56,8 @@ interface ModifyPanelProps {
 const DESTINATION_CHIPS: { id: DestinationId; label: string }[] = [
   { id: "leo", label: "Orbit" },
   { id: "gto", label: "GTO" },
-  { id: "moon-surface", label: "Moon" },
-  { id: "mars-surface", label: "Mars" },
+  { id: "moon-surface", label: "Moon landing" },
+  { id: "mars-surface", label: "Mars landing" },
   { id: "europa", label: "Europa" },
 ];
 
@@ -81,7 +81,22 @@ function theStages(labels: string[]): string {
  * The published payload next to the model's, with what each one counts: a rating is the builder's number,
  * with its own margins and assumptions; the model's comes from the published masses alone.
  */
-function publishedNote(t: RocketTemplate, modelLeoKg: number): string {
+function publishedNote(t: RocketTemplate, modelLeoKg: number, destination: DestinationId): string {
+  const leo = leoNote(t, modelLeoKg);
+  const notes = [leo];
+  if (destination === "moon-surface" || destination === "mars-surface") {
+    notes.push("Published Moon and Mars figures stop at the transfer orbit; this model also lands the payload, so it carries less.");
+  }
+  if (t.id === "starship" && beyondOrbit(destination)) {
+    notes.push("Starship is meant to refill its tanks in orbit before leaving Earth, as Starship HLS will for the Moon; this model flies it on one load.");
+  }
+  return notes.join(" ");
+}
+
+/** Destinations past Earth orbit, where Starship would refill first. */
+const beyondOrbit = (destination: DestinationId) => destination !== "leo" && destination !== "gto";
+
+function leoNote(t: RocketTemplate, modelLeoKg: number): string {
   const published = payloadText(t.realPayloadLeoKg);
   const model = capacityText(modelLeoKg);
   switch (t.id) {
@@ -105,25 +120,39 @@ function publishedNote(t: RocketTemplate, modelLeoKg: number): string {
 /** The cluster an engine-count sweep changes: the stage's biggest. */
 const mainCluster = (engines: EngineCluster[]) => engines.reduce((best, c, i, all) => (c.count > all[best].count ? i : best), 0);
 
-/** What you changed on the real rocket, one line per change. */
-function changesOf(real: Design, yours: Design): string[] {
-  const lines: string[] = [];
+/** "only 9 fit", "only 1 fits" or "none fit". */
+const fitsText = (o: EngineOverfit) => (o.fits === 0 ? "none fit" : `only ${o.fits} fit${o.fits === 1 ? "s" : ""}`);
+
+/** As the red pen says it: "10 Merlin 1D engines don't fit on a 3.7 m base; 9 do." */
+function fitSentence(o: EngineOverfit): string {
+  const n = o.fits === 0 ? "not even one does" : `${o.fits} ${o.fits === 1 ? "does" : "do"}`;
+  return `${o.count} ${ENGINES[o.engine].name} engines don't fit on a ${metres(o.baseM)} m base; ${n}.`;
+}
+
+/** What you changed on the real rocket, one line per change; engines that don't fit on their stage are flagged. */
+function changesOf(real: Design, yours: Design, overfit: EngineOverfit[]): { text: string; alert?: boolean }[] {
+  const lines: { text: string; alert?: boolean }[] = [];
   const kept = new Set<number>();
+  const crowded = (i: number) => overfit.find((o) => o.stageIndex === i);
   yours.stages.forEach((stage, i) => {
+    const over = crowded(i);
     const j = realIndex(yours, real, i);
     if (j < 0) {
-      lines.push(`Added ${stage.label}: ${engineText(stage)}`);
+      lines.push(over ? { text: `Added ${stage.label}: ${engineText(stage)}; ${fitsText(over)}`, alert: true } : { text: `Added ${stage.label}: ${engineText(stage)}` });
       return;
     }
     kept.add(j);
     const was = real.stages[j];
     const stretch = stage.tankVolumeM3 / was.tankVolumeM3;
-    if (Math.abs(stretch - 1) > 0.004) lines.push(`${stage.label} tanks ×${stretch.toFixed(2)}`);
-    if (engineText(stage) !== engineText(was)) lines.push(`${stage.label}: ${engineText(stage)}, was ${engineText(was)}`);
-    if (Boolean(stage.recover) !== Boolean(was.recover)) lines.push(stage.recover ? `${stage.label} lands to fly again` : `${stage.label} is thrown away`);
+    if (Math.abs(stretch - 1) > 0.004) lines.push({ text: `${stage.label} tanks ×${stretch.toFixed(2)}` });
+    if (engineText(stage) !== engineText(was)) {
+      const text = `${stage.label}: ${engineText(stage)}, was ${engineText(was)}`;
+      lines.push(over ? { text: `${text}; ${fitsText(over)}`, alert: true } : { text });
+    }
+    if (Boolean(stage.recover) !== Boolean(was.recover)) lines.push({ text: stage.recover ? `${stage.label} lands to fly again` : `${stage.label} is thrown away` });
   });
   real.stages.forEach((stage, j) => {
-    if (!kept.has(j)) lines.push(`Removed ${stage.label}`);
+    if (!kept.has(j)) lines.push({ text: `Removed ${stage.label}` });
   });
   return lines;
 }
@@ -132,11 +161,32 @@ function changesOf(real: Design, yours: Design): string[] {
  * The plain-language answer: what yours carries there, against what the real rocket does. Capacities are
  * shown as lib/trade shows them, rounded down, so the verdict, the table, the chart and "Most it can carry" agree.
  */
-function verdictLine(name: string, design: Design, yoursMax: number, realMax: number, empty: Analysis | null, changed: boolean): { text: string; good: boolean } {
+function verdictLine({
+  template,
+  design,
+  yoursMax,
+  realMax,
+  empty,
+  changed,
+  overfit,
+}: {
+  template: RocketTemplate;
+  design: Design;
+  yoursMax: number;
+  realMax: number;
+  empty: Analysis | null;
+  changed: boolean;
+  overfit: EngineOverfit[];
+}): { text: string; good: boolean } {
+  const name = shortName(template.name);
   const { destination, payloadMassKg: payloadKg } = design;
   const place = PLACE_NAMES[destination];
   const yours = shownKg(yoursMax);
   const realMost = shownKg(realMax);
+  // Engines that don't fit come first: every number below counts them as if they did.
+  if (overfit.length > 0) return { text: `${overfit.map(fitSentence).join(" ")} The numbers below count them all as if they fit.`, good: false };
+  // Starship leaves Earth orbit only after refilling from tanker flights, which this model doesn't do.
+  const unrefilled = template.id === "starship" && beyondOrbit(destination) ? " without refilling in orbit" : "";
   // More on board than it can carry fails in flight, changed or not.
   if (yours > 0 && payloadKg > yoursMax) {
     return { text: `Too heavy for ${place}: ${payloadText(payloadKg)} on board, and it can carry ${capacityText(yoursMax)} at most. Lower the payload to fly it there.`, good: false };
@@ -144,10 +194,10 @@ function verdictLine(name: string, design: Design, yoursMax: number, realMax: nu
   if (!changed) {
     return realMost > 0
       ? { text: `This is the real ${name}: it carries ${capacityText(realMax)} to ${place}. Change something to see what it does.`, good: true }
-      : { text: `This is the real ${name}, and it can't get to ${place}. Change something to see what would.`, good: false };
+      : { text: `This is the real ${name}, and it can't get to ${place}${unrefilled}. Change something to see what would.`, good: false };
   }
-  const real = realMost > 0 ? `The real ${name} carries ${capacityText(realMax)} there.` : `The real ${name} can't get there either.`;
-  if (yours > 0 && realMost === 0) return { text: `Reaches ${place} with ${capacityText(yoursMax)}. The real ${name} can't.`, good: true };
+  const real = realMost > 0 ? `The real ${name} carries ${capacityText(realMax)} there.` : `The real ${name} can't get there either${unrefilled}.`;
+  if (yours > 0 && realMost === 0) return { text: `Reaches ${place} with ${capacityText(yoursMax)}. The real ${name} can't${unrefilled}.`, good: true };
   if (yours > 0) {
     const diff = yours - realMost;
     if (diff === 0) return { text: `Carries ${capacityText(yoursMax)} to ${place}, the same as the real ${name}.`, good: true };
@@ -163,7 +213,7 @@ function verdictLine(name: string, design: Design, yoursMax: number, realMax: nu
     const twr = empty ? empty.liftoffTwr.toFixed(2) : "0";
     return { text: `Too heavy to leave the pad safely, even empty: thrust is ${twr}× its weight, and real rockets lift off at ${MIN_LIFTOFF_TWR} or more. ${real}`, good: false };
   }
-  return { text: `Can't reach ${place}, even empty: ${km(Math.max(0, -empty.marginMps))} km/s short. ${real}`, good: false };
+  return { text: `Can't reach ${place}${unrefilled}, even empty: ${km(Math.max(0, -empty.marginMps))} km/s short. ${real}`, good: false };
 }
 
 const signed = (d: number, text: string) => `${d > 0 ? "+" : "−"}${text}`;
@@ -177,7 +227,6 @@ export default function ModifyPanel({ template, design, preview, onAction, onRes
   const [sweep, setSweep] = useState<TradeSweep["kind"]>("tank-stretch");
   const shown = preview ?? design;
   const { destination, payloadMassKg } = shown;
-  const name = shortName(template.name);
   const real = useMemo(() => ({ ...template.design, destination, payloadMassKg }), [template, destination, payloadMassKg]);
   const realA = useMemo(() => safeAnalyze(real), [real]);
   const yoursA = useMemo(() => safeAnalyze(shown), [shown]);
@@ -190,10 +239,12 @@ export default function ModifyPanel({ template, design, preview, onAction, onRes
     if (labels.length === 0) return null;
     // Thrown away less landing, both as shown, so this line and the table's payload change agree.
     const thrownAwayKg = yoursMax + recoveryCostKg(shown, destination);
-    return { labels, costKg: shownKg(thrownAwayKg) - shownKg(yoursMax) };
+    return { labels, reaches: shownKg(thrownAwayKg) > 0, costKg: shownKg(thrownAwayKg) - shownKg(yoursMax) };
   }, [shown, destination, yoursMax]);
-  const changes = useMemo(() => changesOf(template.design, design), [template, design]);
-  const verdict = verdictLine(name, shown, yoursMax, realMax, empty, changes.length > 0 || preview !== null);
+  const overfit = useMemo(() => overfitEngines(shown), [shown]);
+  // A drag only stretches tanks, so the preview's engines (and what doesn't fit) are the design's.
+  const changes = useMemo(() => changesOf(template.design, design, overfit), [template, design, overfit]);
+  const verdict = verdictLine({ template, design: shown, yoursMax, realMax, empty, changed: changes.length > 0 || preview !== null, overfit });
 
   // The chart sweeps one real stage; find it in your rocket (stages you add have no real one to compare).
   const stageTabs = useMemo(
@@ -299,11 +350,11 @@ export default function ModifyPanel({ template, design, preview, onAction, onRes
           ) : (
             <ul className="mt-2 space-y-0.5 text-[13px] leading-snug text-white/90">
               {changes.map((line) => (
-                <li key={line} className="flex gap-2">
+                <li key={line.text} className={`flex gap-2 ${line.alert ? "text-nogo" : ""}`}>
                   <span className="text-redpen" aria-hidden>
                     ▸
                   </span>
-                  {line}
+                  {line.text}
                 </li>
               ))}
             </ul>
@@ -382,7 +433,9 @@ export default function ModifyPanel({ template, design, preview, onAction, onRes
               <span aria-hidden className="mr-1.5 text-go-signal">
                 ♻
               </span>
-              Landing {theStages(landing.labels)} costs {payloadText(landing.costKg)} of payload to {PLACE_NAMES[destination]}, against throwing {landing.labels.length > 1 ? "them" : "it"} away.
+              {landing.reaches
+                ? `Landing ${theStages(landing.labels)} costs ${payloadText(landing.costKg)} of payload to ${PLACE_NAMES[destination]}, against throwing ${landing.labels.length > 1 ? "them" : "it"} away.`
+                : `Landing or not, it can't reach ${PLACE_NAMES[destination]}, so there's no landing cost to show.`}
             </span>
           ) : (
             <span className="text-haze">
@@ -401,7 +454,7 @@ export default function ModifyPanel({ template, design, preview, onAction, onRes
           ) : (
             "Published"
           )}
-          : {publishedNote(template, modelLeo)}
+          : {publishedNote(template, modelLeo, destination)}
         </p>
       </Module>
 
