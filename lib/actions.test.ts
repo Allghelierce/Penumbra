@@ -3,6 +3,9 @@ import { describe, expect, it } from "vitest";
 import { applyAction, seaLevelEngine, structureScale, vacuumOnly } from "./actions";
 import type { Design } from "./design";
 import { analyze } from "./physics";
+import { overfitEngines } from "./redpen";
+import { TEMPLATES } from "./templates";
+import { MIN_LIFTOFF_TWR } from "./trade";
 
 function deepFreeze<T>(value: T): T {
   if (value && typeof value === "object") {
@@ -79,7 +82,14 @@ describe("add-stage", () => {
     const next = applyAction(design, { type: "add-stage" });
     expect(next.stages).toHaveLength(3);
     expect(next.stages[0]).toMatchObject({ label: "Lower booster", propellant: "kerolox", tankVolumeM3: 1000 });
-    expect(next.stages.slice(1)).toEqual(design.stages);
+    // The stages above are unchanged, and keep their width if the booster is wider.
+    const withoutWidth = (s: (typeof next.stages)[number]) => {
+      const copy = { ...s };
+      delete copy.diameterM;
+      return copy;
+    };
+    expect(next.stages.slice(1).map(withoutWidth)).toEqual(design.stages);
+    for (const s of next.stages.slice(1)) expect(s.diameterM ?? next.diameterM).toBe(design.diameterM);
 
     const count = next.stages[0].engines[0].count;
     expect(next.stages[0].engines[0].engine).toBe("merlin-1d");
@@ -112,8 +122,30 @@ describe("add-stage", () => {
       stages: [{ label: "Ship", engines: [{ engine: "raptor-3", count: 3 }, { engine: "raptor-vacuum", count: 3 }], propellant: "methalox", tankVolumeM3: 1_800 }],
     };
     const next = applyAction(ship, { type: "add-stage" });
-    expect(next.stages[0].engines.map((c) => c.engine)).toEqual(["raptor-3", "raptor-3"]);
+    expect(next.stages[0].engines.map((c) => c.engine)).toEqual(["raptor-3"]);
     expect(analyze(next).liftoffTwr).toBeGreaterThanOrEqual(1.3);
+  });
+
+  it.each(TEMPLATES.map((t) => [t.id, t] as const))("%s: a booster that fits and lifts the stack, wider when its engines need it", (_, t) => {
+    const next = applyAction(t.design, { type: "add-stage" });
+    expect(overfitEngines(next)).toEqual([]);
+    expect(analyze(next).liftoffTwr).toBeGreaterThanOrEqual(MIN_LIFTOFF_TWR);
+    const booster = next.stages[0];
+    const width = (s: (typeof next.stages)[number], d: typeof next) => s.diameterM ?? d.diameterM;
+    // The upper stages keep their widths; the booster is at least as wide as any of them, and the
+    // vehicle's diameter (its drag) is the booster's.
+    t.design.stages.forEach((s, i) => expect(width(next.stages[i + 1], next)).toBeCloseTo(width(s, t.design), 9));
+    expect(width(booster, next)).toBeGreaterThanOrEqual(Math.max(...t.design.stages.map((s) => width(s, t.design))));
+    expect(next.diameterM).toBe(width(booster, next));
+  });
+
+  it("widens the vehicle's drag area with the booster", () => {
+    const f9 = TEMPLATES.find((t) => t.id === "falcon9")!.design;
+    const next = applyAction(f9, { type: "add-stage" });
+    expect(next.diameterM).toBeGreaterThan(f9.diameterM);
+    // The same stack on the old width would lose less to drag: the loss model sees the wider base.
+    const narrow = { ...next, diameterM: f9.diameterM, stages: [{ ...next.stages[0], diameterM: f9.diameterM }, ...next.stages.slice(1)] };
+    expect(analyze(next).requiredDeltaVMps).toBeGreaterThan(analyze(narrow).requiredDeltaVMps);
   });
 });
 

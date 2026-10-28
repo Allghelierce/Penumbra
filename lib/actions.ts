@@ -2,7 +2,7 @@
 // what-if checks. Every function returns a new Design and never mutates its input.
 
 import type { Design, DesignAction, EngineCluster, EngineId, Stage } from "./design";
-import { analyze, ENGINES } from "./physics";
+import { analyze, baseFor, ENGINES } from "./physics";
 
 /** A new bottom stage holds this many times the current bottom stage's propellant. */
 const ADDED_STAGE_SCALE = 2.5;
@@ -133,24 +133,27 @@ export function seaLevelEngine(engine: EngineId, stage?: Stage): EngineId {
 }
 
 /**
- * A booster under the current bottom stage: bigger tanks and the same engines (sea-level
- * versions of any vacuum ones), with the fewest engines (at least 3, at most 40) that lift the
- * whole new stack at TWR 1.3.
+ * A booster under the current bottom stage: bigger tanks and one cluster of its main engine (the
+ * sea-level version of a vacuum one), with the fewest engines (at least 3, at most 40) that lift
+ * the whole new stack at TWR 1.3, on a base wide enough to seat them all.
  */
 function withNewBottomStage(design: Design): Design {
   const bottom = design.stages[0];
   const main = bottom.engines.reduce((best, c, i, all) => (c.count > all[best].count ? i : best), 0);
+  // One cluster of the bottom stage's main engine, in its sea-level version.
+  const engine = seaLevelEngine(bottom.engines[main].engine, bottom);
+  const label = design.stages.some((s) => s.label === "Booster") ? "Lower booster" : "Booster";
+  // The stages above keep the width they have now, stated, in case the new booster is wider.
+  const above = design.stages.map((s) => (s.diameterM === undefined ? { ...s, diameterM: design.diameterM } : s));
   const withCount = (count: number): Design => {
-    const booster: Stage = {
-      label: design.stages.some((s) => s.label === "Booster") ? "Lower booster" : "Booster",
-      engines: bottom.engines.map((cluster, i) => ({
-        engine: seaLevelEngine(cluster.engine, bottom),
-        count: i === main ? count : Math.max(1, Math.ceil(ADDED_STAGE_SCALE * cluster.count)),
-      })),
-      propellant: bottom.propellant,
-      tankVolumeM3: bottom.tankVolumeM3 * ADDED_STAGE_SCALE,
-    };
-    return { ...design, stages: [booster, ...design.stages] };
+    // As wide as its engines need, to the next 10 cm, like Saturn V's 10.1 m S-IC under its 6.6 m
+    // S-IVB; never narrower than the rocket it lifts. The vehicle's diameter, which sets its drag,
+    // is the widest stage's.
+    const needed = baseFor(engine, count) ?? 0;
+    const width = Math.max(design.diameterM, Math.ceil(needed * 10 - 1e-9) / 10);
+    const booster: Stage = { label, engines: [{ engine, count }], propellant: bottom.propellant, tankVolumeM3: bottom.tankVolumeM3 * ADDED_STAGE_SCALE };
+    if (width <= design.diameterM) return { ...design, stages: [booster, ...design.stages] };
+    return { ...design, diameterM: width, stages: [{ ...booster, diameterM: width }, ...above] };
   };
 
   const cap = Math.max(ADDED_STAGE_MAX_ENGINES, Math.ceil(ADDED_STAGE_SCALE * bottom.engines[main].count));
