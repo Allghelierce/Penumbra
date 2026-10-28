@@ -123,8 +123,9 @@ describe("diagnose", () => {
   });
 
   it("flags a slow upper stage with what its long burn costs, and what one more engine buys", () => {
+    // Wide enough for a second Merlin Vacuum's 3.3 m nozzle.
     const slow = falconLike({
-      stages: [falconLike().stages[0], { ...falconLike().stages[1], tankVolumeM3: 200 }],
+      stages: [falconLike().stages[0], { ...falconLike().stages[1], tankVolumeM3: 200, diameterM: 7.2 }],
     });
     const analysis = analyze(slow);
     expect(analysis.stages[1].twrAtIgnition).toBeLessThan(0.5);
@@ -137,6 +138,38 @@ describe("diagnose", () => {
     expect(issue.fix).toEqual({ type: "set-engines", stageIndex: 1, engine: "merlin-vacuum", count: 2, clusterIndex: 0 });
     const gain = Number(issue.effect.match(/\+([\d,]+) m\/s of margin$/)![1].replace(/,/g, ""));
     expect(analyze(applyAction(slow, issue.fix!)).marginMps - analysis.marginMps).toBeCloseTo(gain, -1);
+  });
+
+  it("doesn't ask for another upper-stage engine that wouldn't fit", () => {
+    // Falcon 9's second stage has room for its one Merlin Vacuum and no more.
+    const slow = falconLike({ stages: [falconLike().stages[0], { ...falconLike().stages[1], tankVolumeM3: 200 }] });
+    expect(analyze(slow).stages[1].twrAtIgnition).toBeLessThan(0.5);
+    expect(issues(slow).map((i) => i.title)).not.toContain("Slow Stage 2");
+  });
+
+  it("calls more engines than fit a no-go, with the physics, and judges the rest on the engines that fit", () => {
+    const f9 = templateById("falcon9").design;
+    const eighteen = applyAction(f9, { type: "set-engines", stageIndex: 0, engine: "merlin-1d", count: 18 });
+    const analysis = analyze(eighteen);
+    const marks = buildReview({ design: eighteen, parts: [] }, analysis).marks;
+    const list = diagnose(eighteen, analysis);
+    const [first] = list;
+    expect(first).toMatchObject({ n: 1, severity: "no-go", title: "18 Merlin 1D engines don't fit" });
+    expect(first.why).toMatch(
+      /^Each Merlin 1D nozzle is 0\.92 m across, and the nozzles need room between them\. Packed as tightly as circles go, 9 fit on the First stage's 3\.7 m base; 18 need one about 4\.\d m across\.$/,
+    );
+    expect(first.effect).toMatch(/^9 × Merlin 1D → fits, TWR \d\.\d\d → 1\.\d\d, [+−±][\d,]+ m\/s of margin$/);
+    expect(first.fix).toEqual({ type: "set-engines", stageIndex: 0, engine: "merlin-1d", count: 9 });
+    expect(marks[first.markIndex!].fix).toEqual(first.fix);
+    // The liftoff check is about the nine that fit, not the eighteen drawn.
+    expect(list.find((i) => i.title === "Lifts off")?.why).toMatch(/^With only the engines that fit, 9 × Merlin 1D make /);
+  });
+
+  it("finds nothing that doesn't fit on the real rockets", () => {
+    for (const id of ["falcon9", "saturn-v", "electron", "starship"] as const) {
+      const d = templateById(id).design;
+      expect(issues(d).some((i) => /don't fit/.test(i.title)), id).toBe(false);
+    }
   });
 
   it("leaves a slow upper stage alone when another engine wouldn't pay for itself, like the Saturn V's S-IVB", () => {

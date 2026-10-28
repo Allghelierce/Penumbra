@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import { applyAction } from "./actions";
 import { NAPKIN_ASPECT, type Design, type Part, type RedPenMark, type SketchReading } from "./design";
 import { analyze } from "./physics";
-import { buildReview } from "./redpen";
+import { buildReview, overfitEngines } from "./redpen";
 import { TEMPLATES } from "./templates";
 import { maxPayloadKg, MIN_LIFTOFF_TWR } from "./trade";
 
@@ -176,12 +176,13 @@ describe("a rocket stuck on the pad", () => {
 
 describe("a rocket short of its destination", () => {
   it("asks for the smallest tank stretch that closes the gap", () => {
-    // Plenty of thrust, so a stretched booster still clears the pad.
+    // Plenty of thrust, so a stretched booster still clears the pad, on a base wide enough for 15 Merlins.
     const strong = falconLike({
       stages: [
         { label: "Booster", engines: [{ engine: "merlin-1d", count: 15 }], propellant: "kerolox", tankVolumeM3: 400 },
         falconLike().stages[1],
       ],
+      diameterM: 4.5,
     });
     const design = withMargin(strong, -300);
     const { analysis, review: r } = review(design);
@@ -404,6 +405,49 @@ describe("a payload heavier than the rocket can carry", () => {
     for (const d of [falconLike(), hopeless, falconLike({ payloadMassKg: 0, destination: "europa" })]) {
       expect(review(d).review.marks.some((m) => m.fix?.type === "set-payload")).toBe(false);
     }
+  });
+});
+
+describe("more engines than fit on the base", () => {
+  const f9 = TEMPLATES.find((t) => t.id === "falcon9")!.design;
+  const eighteen = applyAction(f9, { type: "set-engines", stageIndex: 0, engine: "merlin-1d", count: 18 });
+
+  it("never fires on a real rocket, Saturn V's overhanging F-1s included", () => {
+    for (const t of TEMPLATES) expect(overfitEngines(t.design), t.id).toEqual([]);
+  });
+
+  it("is a no-go that points at the engines, says how many fit, and cuts back to that many", () => {
+    const { review: r } = review(eighteen, partsFor(eighteen));
+    const [mark] = r.marks;
+    expect(mark.kind).toBe("arrow");
+    expect(mark.note).toMatch(/^only 9 fit( \(3\.7m\))?$/);
+    expect(mark.fix).toEqual({ type: "set-engines", stageIndex: 0, engine: "merlin-1d", count: 9 });
+    if (mark.kind === "arrow") expect(mark.to[1]).toBeCloseTo(ENGINE_BOX[1] + ENGINE_BOX[3] / 2, 2);
+    expect(r.summary.startsWith("18 Merlin 1D engines don't fit on a 3.7 m base; 9 do. ")).toBe(true);
+    // The fix is the real Falcon 9 again: nothing left to mark.
+    expect(applyAction(eighteen, mark.fix!)).toEqual(f9);
+    expect(review(f9, []).review.marks.map((m) => m.kind)).toEqual(["tick"]);
+  });
+
+  it("cuts back the cluster that takes the room when two share a base", () => {
+    const ship = TEMPLATES.find((t) => t.id === "starship")!.design;
+    // The Ship: 3 sea-level Raptors (cluster 0) and 3 vacuum Raptors (cluster 1) on 9 m.
+    const moreSeaLevel = applyAction(ship, { type: "set-engines", stageIndex: 1, engine: "raptor-2", count: 30, clusterIndex: 0 });
+    expect(overfitEngines(moreSeaLevel).map((o) => [o.clusterIndex, o.count, o.fits])).toEqual([[0, 30, 20]]);
+    const moreVacuum = applyAction(ship, { type: "set-engines", stageIndex: 1, engine: "raptor-vacuum", count: 10, clusterIndex: 1 });
+    const [o] = overfitEngines(moreVacuum);
+    expect([o.clusterIndex, o.count, o.fits]).toEqual([1, 10, 7]);
+    expect(o.fix).toEqual({ type: "set-engines", stageIndex: 1, engine: "raptor-vacuum", count: 7, clusterIndex: 1 });
+    expect(overfitEngines(applyAction(moreVacuum, o.fix!))).toEqual([]);
+  });
+
+  it("calls a rocket too heavy rather than asking for engines that don't fit", () => {
+    const heavy = { ...f9, payloadMassKg: 200_000 };
+    const { analysis, review: r } = review(heavy, partsFor(heavy));
+    expect(analysis.liftoffTwr).toBeLessThan(MIN_LIFTOFF_TWR);
+    expect(notes(r.marks).some((n) => /\+\d+ engines?$/.test(n))).toBe(false);
+    expect(notes(r.marks).some((n) => /too heavy$/.test(n))).toBe(true);
+    expect(r.summary).toContain("don't fit on its 3.7 m base");
   });
 });
 

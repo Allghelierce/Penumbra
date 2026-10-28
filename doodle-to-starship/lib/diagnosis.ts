@@ -4,8 +4,22 @@
 
 import { applyAction } from "./actions";
 import type { Analysis, Design, DesignAction, Part, RedPenMark, SketchReading } from "./design";
-import { analyze, ascentLossesMps, DESTINATIONS, ENGINES, km, kmShort, kmSpare } from "./physics";
-import { buildReview, DESTINATION_NAMES, hardwareNeeds, isIssueMark, massText, SAFE_TWR, vacuumOnPad, vacuumReason } from "./redpen";
+import { analyze, ascentLossesMps, baseFor, DESTINATIONS, ENGINES, enginesThatFit, km, kmShort, kmSpare, NOZZLE_EXIT_DIAMETER_M } from "./physics";
+import {
+  buildReview,
+  DESTINATION_NAMES,
+  type EngineOverfit,
+  hardwareNeeds,
+  isFitMark,
+  isIssueMark,
+  massText,
+  metres,
+  overfitEngines,
+  SAFE_TWR,
+  vacuumOnPad,
+  vacuumReason,
+  withinFit,
+} from "./redpen";
 import { MIN_LIFTOFF_TWR } from "./trade";
 
 export interface Issue {
@@ -46,13 +60,20 @@ export function diagnose(design: Design, analysis: Analysis, reading?: SketchRea
     return i >= 0 ? i : undefined;
   };
 
-  const drafts: Draft[] = [];
-  drafts.push(...payloadIssue(design, analysis, marks, markFor));
-  const liftoff = liftoffIssue(design, analysis, marks, markFor);
+  // Engines that don't fit on their base come first; the rest is judged on the rocket cut back
+  // to the engines that fit, as the red pen does.
+  const over = overfitEngines(design);
+  const fitted = withinFit(design, over);
+  const a = fitted === design ? analysis : analyze(fitted);
+  const cut = fitted !== design;
+
+  const drafts: Draft[] = over.map((o) => fitIssue(design, analysis, o, markFor));
+  drafts.push(...payloadIssue(fitted, a, marks, markFor));
+  const liftoff = liftoffIssue(fitted, a, marks, markFor, cut);
   drafts.push(liftoff.issue);
-  drafts.push(deltaVIssue(design, liftoff.flyable, marks, markFor));
-  drafts.push(...slowUpperStages(design, analysis));
-  drafts.push(...hardwareIssues(design, reading?.parts ?? [], markFor));
+  drafts.push(deltaVIssue(fitted, liftoff.flyable, marks, markFor, cut));
+  drafts.push(...slowUpperStages(fitted, a));
+  drafts.push(...hardwareIssues(fitted, reading?.parts ?? [], markFor));
 
   return drafts
     .map((d, i) => ({ d, i }))
@@ -61,6 +82,44 @@ export function diagnose(design: Design, analysis: Analysis, reading?: SketchRea
 }
 
 type MarkFinder = (test: (m: RedPenMark) => boolean) => number | undefined;
+
+/** Said before the other checks' physics when they're judged on the rocket cut back to what fits. */
+const CUT_PREFIX = "With only the engines that fit, ";
+
+// ---------------------------------------------------------------------------
+// Engines that don't fit
+
+function fitIssue(design: Design, a: Analysis, o: EngineOverfit, markFor: MarkFinder): Draft {
+  const name = ENGINES[o.engine].name;
+  const stage = design.stages[o.stageIndex];
+  const others = stage.engines.filter((_, j) => j !== o.clusterIndex);
+  const beside = others.length > 0 ? " beside its other engines" : "";
+  const nozzle = NOZZLE_EXIT_DIAMETER_M[o.engine] ?? 0;
+  const need = baseFor(o.engine, o.count, others);
+  const base = `the ${stage.label}'s ${metres(o.baseM)} m base${beside}`;
+  const why =
+    `Each ${name} nozzle is ${metres(nozzle)} m across, and the nozzles need room between them. ` +
+    (o.fits === 0
+      ? `Not even one fits on ${base}.`
+      : `Packed as tightly as circles go, ${o.fits} ${o.fits === 1 ? "fits" : "fit"} on ${base}` +
+        (need !== null ? `; ${o.count} need one about ${metres(need)} m across.` : "."));
+  const after = o.fix ? analyze(applyAction(design, o.fix)) : null;
+  const effect = after
+    ? `${o.fits > 0 ? `${o.fits} × ${name}` : `No ${name}`} → fits` +
+      (o.stageIndex === 0 ? `, TWR ${a.liftoffTwr.toFixed(2)} → ${after.liftoffTwr.toFixed(2)}` : "") +
+      `, ${signedMps(after.marginMps - a.marginMps)} of margin`
+    : "Use a smaller engine or a wider stage";
+  return {
+    severity: "no-go",
+    title: `${o.count} ${name} engines don't fit`,
+    why,
+    effect,
+    ...(o.fix && { fix: o.fix }),
+    markIndex: markFor(
+      (m) => isFitMark(m) && (o.fix ? m.fix?.type === "set-engines" && m.fix.stageIndex === o.stageIndex && m.fix.engine === o.engine : !m.fix),
+    ),
+  };
+}
 
 // ---------------------------------------------------------------------------
 // Payload
@@ -100,13 +159,14 @@ function liftoffIssue(
   a: Analysis,
   marks: RedPenMark[],
   markFor: MarkFinder,
+  cut = false,
 ): { issue: Draft; flyable: Design } {
   const twr = a.liftoffTwr.toFixed(2);
   const thrust = a.stages[0]?.thrustN ?? 0;
   const engines = design.stages[0]?.engines ?? [];
   const engineText = engines.map((c) => `${c.count} × ${ENGINES[c.engine].name}`).join(" + ") || "no engines";
   const why =
-    `${engineText} make ${tonnesForce(thrust)} of thrust against ${tonnes(a.liftoffMassKg)} on the pad, ` +
+    `${cut ? CUT_PREFIX : ""}${engineText} make ${tonnesForce(thrust)} of thrust against ${tonnes(a.liftoffMassKg)} on the pad, ` +
     `so thrust-to-weight is ${twr}` +
     (a.liftoffTwr < 1
       ? `. Below 1.0, weight beats thrust and it never leaves the pad.`
@@ -118,7 +178,7 @@ function liftoffIssue(
     return { issue: { severity: "ok", title: "Lifts off", why, effect: `TWR ${twr}` }, flyable: design };
   }
 
-  const markIndex = markFor((m) => m.fix?.type === "set-engines" || /engine|too heavy/.test(m.note));
+  const markIndex = markFor((m) => !isFitMark(m) && (m.fix?.type === "set-engines" || /engine|too heavy/.test(m.note)));
   const fix = markIndex !== undefined ? marks[markIndex].fix : undefined;
   const title = a.liftoffTwr < 1 ? "Can't lift off" : "Marginal liftoff";
   const severity = a.liftoffTwr < 1 ? "no-go" : "warning";
@@ -137,7 +197,7 @@ function liftoffIssue(
           `On the pad, ${engineText} make ${tonnesForce(thrust)} of thrust against ${tonnes(a.liftoffMassKg)}: thrust-to-weight ${twr}.`,
         effect: `Swap to ${vacuum.fix.count} × ${ENGINES[vacuum.swap].name} → TWR ${twr} → ${after.liftoffTwr.toFixed(2)}`,
         fix: vacuum.fix,
-        markIndex: markFor((m) => m.fix?.type === "set-engines"),
+        markIndex: markFor((m) => !isFitMark(m) && m.fix?.type === "set-engines"),
       },
       flyable: after.liftoffTwr >= 1 ? fixed : design,
     };
@@ -158,22 +218,27 @@ function liftoffIssue(
       flyable: fixed,
     };
   }
-  return {
-    issue: { severity, title, why, effect: "Needs a lighter design or bigger engines; 200+ more engines would be absurd", markIndex },
-    flyable: design,
-  };
+  // No more of its engines fit on the base, or it would take an absurd number more.
+  const main = engines.reduce((best, c, i, all) => (c.count > all[best].count ? i : best), 0);
+  const base = design.stages[0]?.diameterM ?? design.diameterM;
+  const room = engines[main] ? enginesThatFit(engines[main].engine, base, engines.filter((_, i) => i !== main)) : null;
+  const effect =
+    room !== null && engines[main].count >= room
+      ? `No more ${ENGINES[engines[main].engine].name} engines fit on its ${metres(base)} m base: lighten it or widen the booster`
+      : "Needs a lighter design or bigger engines; 200+ more engines would be absurd";
+  return { issue: { severity, title, why, effect, markIndex }, flyable: design };
 }
 
 // ---------------------------------------------------------------------------
 // Delta-v
 
-function deltaVIssue(design: Design, flyable: Design, marks: RedPenMark[], markFor: MarkFinder): Draft {
+function deltaVIssue(design: Design, flyable: Design, marks: RedPenMark[], markFor: MarkFinder, cut = false): Draft {
   // Judged on the engine-fixed design when it can't lift off, as the red pen does.
   const a = analyze(flyable);
   const dest = DESTINATION_NAMES[design.destination];
   const goal = design.destination === "leo" ? "orbit" : dest;
   const total = stageSum(a);
-  const prefix = flyable === design ? "" : "With the engine fix, ";
+  const prefix = flyable !== design ? "With the engine fix, " : cut ? CUT_PREFIX : "";
   const lossMps = ascentLossesMps(flyable, a.stages).reduce((sum, loss) => sum + loss, 0);
   const why =
     `${prefix}${rocketEquation(flyable, a)} You need ${km(a.requiredDeltaVMps)} km/s to reach ${goal}, ` +
@@ -248,6 +313,9 @@ function slowUpperStages(design: Design, a: Analysis): Draft[] {
     if (i === 0 || s.twrAtIgnition >= SLOW_UPPER_STAGE_TWR || s.thrustN <= 0 || engines.length === 0) return [];
     const main = engines.reduce((best, c, j, all) => (c.count > all[best].count ? j : best), 0);
     const engine = engines[main].engine;
+    // Only if one more fits on the stage's base.
+    const room = enginesThatFit(engine, design.stages[i].diameterM ?? design.diameterM, engines.filter((_, j) => j !== main));
+    if (room !== null && engines[main].count + 1 > room) return [];
     const fix: DesignAction = { type: "set-engines", stageIndex: i, engine, count: engines[main].count + 1, clusterIndex: main };
     const more = applyAction(design, fix);
     const after = analyze(more);

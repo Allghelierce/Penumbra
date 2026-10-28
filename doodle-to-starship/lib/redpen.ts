@@ -17,7 +17,7 @@ import {
   type Review,
   type SketchReading,
 } from "./design";
-import { analyze, ENGINES } from "./physics";
+import { analyze, ENGINES, enginesThatFit } from "./physics";
 import { maxPayloadKg, MIN_LIFTOFF_TWR } from "./trade";
 
 type Box = [x: number, y: number, w: number, h: number];
@@ -68,11 +68,18 @@ export const DESTINATION_NAMES: Record<DestinationId, string> = {
   europa: "Europa",
 };
 
-export function buildReview(reading: SketchReading, analysis: Analysis): Review {
-  const { design, parts } = reading;
+export function buildReview(reading: SketchReading, drawn: Analysis): Review {
+  const { parts } = reading;
   const sketch = new Sketch(parts);
   const side = sketch.openSide();
   const marks: RedPenMark[] = [];
+
+  // More engines than fit side by side on their base can't be built, so that comes first, and
+  // everything else is judged on the rocket cut back to the engines that fit.
+  const over = overfitEngines(reading.design);
+  for (const o of over) marks.push(fitMark(o, sketch, side));
+  const design = withinFit(reading.design, over);
+  const analysis = design === reading.design ? drawn : analyze(design);
 
   // When the rocket could make the trip carrying less, that's the first fix.
   const lighter = lighterPayload(design);
@@ -83,7 +90,9 @@ export function buildReview(reading: SketchReading, analysis: Analysis): Review 
   // A vacuum engine on the pad gives no thrust: the fix is its sea-level version, not more of it.
   const vacuum = stuck || marginal ? vacuumOnPad(design) : null;
   const extraEngines = (stuck || marginal) && !vacuum ? enginesForTwr(design, TARGET_TWR) : null;
-  const sensibleEngines = extraEngines !== null && extraEngines <= MAX_SENSIBLE_EXTRA_ENGINES;
+  // Engines only help if they fit on the booster's base.
+  const noRoom = extraEngines !== null && overfitEngines(withExtraEngines(design, extraEngines)).some((o) => o.stageIndex === 0);
+  const sensibleEngines = extraEngines !== null && extraEngines <= MAX_SENSIBLE_EXTRA_ENGINES && !noRoom;
   if (vacuum) {
     const use = `use ${ENGINES[vacuum.swap].name}`;
     marks.push({ ...arrowTo(sketch.enginesSide(), side, 0, `vacuum-only: ${use}`, use), fix: vacuum.fix });
@@ -114,19 +123,94 @@ export function buildReview(reading: SketchReading, analysis: Analysis): Review 
   if (needs.fins) marks.push(arrowTo(sketch.finSide(side), side, -0.04, FINS_NOTE));
 
   const issues = spreadNotes(marks.slice(0, MAX_MARKS));
+  const summary = summarize(design, analysis, {
+    lighter,
+    vacuum,
+    extraEngines,
+    sensibleEngines,
+    noRoom,
+    fix,
+    flyableAnalysis,
+    needsLegs: needs.legs,
+    needsShield: needs.shield,
+  });
   return {
     marks: issues.length > 0 ? issues : [passMark(sketch, analysis)],
-    summary: summarize(design, analysis, {
-      lighter,
-      vacuum,
-      extraEngines,
-      sensibleEngines,
-      fix,
-      flyableAnalysis,
-      needsLegs: needs.legs,
-      needsShield: needs.shield,
-    }),
+    summary: [...over.map(fitSentence), summary].join(" "),
   };
+}
+
+export type EngineOverfit = {
+  stageIndex: number;
+  clusterIndex: number;
+  engine: EngineId;
+  count: number;
+  /** How many fit on the base (0 when not even one does). */
+  fits: number;
+  baseM: number;
+  /** Back to as many as fit; none when not even one does. */
+  fix?: SetEngines;
+};
+
+/**
+ * Engine clusters with more engines than fit side by side on their stage's base: nozzle exits
+ * plus a gap, packed as tightly as circles go, the same limit the trade sweeps stop at. A real
+ * rocket's own clusters always fit. When a stage's clusters don't fit together, the one taking
+ * the most room is cut back to what's left beside the others. A vacuum engine on the pad is left
+ * to its own mark, whose fix swaps the engine.
+ */
+export function overfitEngines(design: Design): EngineOverfit[] {
+  return design.stages.flatMap((stage, stageIndex) => {
+    const baseM = stage.diameterM ?? design.diameterM;
+    const counts = stage.engines.map((c) => c.count);
+    const checked = stage.engines.map((c) => !(stageIndex === 0 && vacuumOnly(c.engine)));
+    /** Share of the base a cluster takes, 0 when its nozzle size isn't known. */
+    const share = (j: number) => {
+      const alone = checked[j] ? enginesThatFit(stage.engines[j].engine, baseM) : null;
+      return alone === null || counts[j] === 0 ? 0 : alone > 0 ? counts[j] / alone : Infinity;
+    };
+    const out: EngineOverfit[] = [];
+    for (let guard = 0; guard < stage.engines.length; guard++) {
+      const shares = stage.engines.map((_, j) => share(j));
+      if (shares.reduce((a, b) => a + b, 0) <= 1 + 1e-9) break;
+      const j = shares.indexOf(Math.max(...shares));
+      const { engine, count } = stage.engines[j];
+      const fits = enginesThatFit(engine, baseM, stage.engines.flatMap((c, k) => (k === j ? [] : [{ ...c, count: counts[k] }]))) ?? 0;
+      const several = stage.engines.length > 1;
+      // With other clusters beside it, none fitting means taking it off; alone, nothing will do.
+      const fix: SetEngines | undefined =
+        fits > 0 || several ? { type: "set-engines", stageIndex, engine, count: fits, ...(several && { clusterIndex: j }) } : undefined;
+      out.push({ stageIndex, clusterIndex: j, engine, count, fits, baseM, ...(fix && { fix }) });
+      counts[j] = fits;
+      checked[j] = false;
+    }
+    return out;
+  });
+}
+
+/** The design with each cluster that doesn't fit cut back to as many as do (the same object when all fit). */
+export function withinFit(design: Design, over = overfitEngines(design)): Design {
+  return over.reduce((d, o) => (o.fix ? applyAction(d, o.fix) : d), design);
+}
+
+/** Whether a mark is the "only N fit" correction. */
+export function isFitMark(mark: RedPenMark) {
+  return /^(only \d+ fits?|none fit)\b/.test(mark.note);
+}
+
+function fitMark(o: EngineOverfit, sketch: Sketch, side: 1 | -1): RedPenMark {
+  const short = o.fits === 0 ? "none fit" : `only ${o.fits} fit${o.fits === 1 ? "s" : ""}`;
+  return { ...arrowTo(sketch.stageEnginesSide(o.stageIndex), side, 0.04, `${short} (${metres(o.baseM)}m)`, short), ...(o.fix && { fix: o.fix }) };
+}
+
+function fitSentence(o: EngineOverfit): string {
+  const n = o.fits === 0 ? "not even one does" : `${o.fits} ${o.fits === 1 ? "does" : "do"}`;
+  return `${o.count} ${ENGINES[o.engine].name} engines don't fit on a ${metres(o.baseM)} m base; ${n}.`;
+}
+
+/** e.g. 3.7, 9 or 0.92. */
+export function metres(m: number): string {
+  return Number.isInteger(m) ? String(m) : m.toFixed(m < 1 ? 2 : 1);
 }
 
 /**
@@ -207,6 +291,9 @@ export function vacuumOnPad(design: Design): VacuumSwap | null {
   const { engine, count } = stage.engines[i];
   const swap = seaLevelEngine(engine, stage);
   if (vacuumOnly(swap)) return null;
+  // Never more of the swap than fit on the base.
+  const room = enginesThatFit(swap, stage.diameterM ?? design.diameterM, stage.engines.filter((_, j) => j !== i));
+  const most = room === null ? Infinity : Math.max(1, room);
   const edit = (n: number): SetEngines => ({
     type: "set-engines",
     stageIndex: 0,
@@ -215,9 +302,10 @@ export function vacuumOnPad(design: Design): VacuumSwap | null {
     ...(stage.engines.length > 1 && { clusterIndex: i }),
   });
   const twrWith = (n: number) => analyze(applyAction(design, edit(n))).liftoffTwr;
-  const cap = count + MAX_SENSIBLE_EXTRA_ENGINES;
-  if (twrWith(count) >= TARGET_TWR || twrWith(cap) < TARGET_TWR) return { engine, swap, fix: edit(count) };
-  let lo = count;
+  const start = Math.min(count, most);
+  const cap = Math.min(count + MAX_SENSIBLE_EXTRA_ENGINES, most);
+  if (twrWith(start) >= TARGET_TWR || twrWith(cap) < TARGET_TWR) return { engine, swap, fix: edit(start) };
+  let lo = start;
   let hi = cap;
   while (hi - lo > 1) {
     const mid = Math.floor((lo + hi) / 2);
@@ -315,8 +403,10 @@ function summarize(
     lighter: SetPayload | null;
     vacuum: VacuumSwap | null;
     extraEngines: number | null;
-    /** False when the engine count is absurd (or no count works). */
+    /** False when the engine count is absurd, more than fit on the base, or no count works. */
     sensibleEngines: boolean;
+    /** The engines it would need don't fit on the booster's base. */
+    noRoom: boolean;
     fix: ShortfallFix | null;
     /** The design's analysis, or the engine-fixed one if it was stuck. */
     flyableAnalysis: Analysis | null;
@@ -341,9 +431,12 @@ function summarize(
       return `${vacuumReason(engine)}, so ${stuck ? "it never leaves the pad" : `liftoff TWR is only ${twr}`}. ${options[0].toUpperCase()}${options.slice(1)}${then}.`;
     }
     const n = found.extraEngines;
-    const thrust = !found.sensibleEngines
-      ? `it needs ${MAX_SENSIBLE_EXTRA_ENGINES}+ more engines, so rethink the booster`
-      : `add ${n} engine${n === 1 ? "" : "s"} ${stuck ? "to clear the pad" : "for a safe liftoff"}`;
+    const base = design.stages[0]?.diameterM ?? design.diameterM;
+    const thrust = found.noRoom
+      ? `the engines it needs don't fit on its ${metres(base)} m base, so lighten it or widen the booster`
+      : !found.sensibleEngines
+        ? `it needs ${MAX_SENSIBLE_EXTRA_ENGINES}+ more engines, so rethink the booster`
+        : `add ${n} engine${n === 1 ? "" : "s"} ${stuck ? "to clear the pad" : "for a safe liftoff"}`;
     const start = stuck ? `Liftoff TWR is ${twr}, so it never leaves the pad` : `Liftoff TWR is ${twr}, too marginal to launch safely`;
     return `${start}: ${[carryLess, thrust].filter(Boolean).join(", or ")}${then}.`;
   }
@@ -421,6 +514,14 @@ class Sketch {
   enginesSide(): Point {
     const [x, y, w, h] = this.engines();
     return [this.openSide() > 0 ? x + w : x, y + h / 2];
+  }
+
+  /** A stage's engines: the ones drawn for it, else (for an upper stage) the bottom of its tank. */
+  stageEnginesSide(stageIndex: number): Point {
+    const own = this.ofKind("engine").filter((p) => p.stageIndex === stageIndex);
+    const tank = this.ofKind("tank").filter((p) => p.stageIndex === stageIndex);
+    const at = (box: Box | null, k: number): Point | null => (box ? [this.openSide() > 0 ? box[0] + box[2] : box[0], box[1] + box[3] * k] : null);
+    return at(union(own.map((p) => p.box)), 0.5) ?? (stageIndex > 0 ? at(union(tank.map((p) => p.box)), 0.9) : null) ?? this.enginesSide();
   }
 
   /** The middle of the fins' outer edge on `side`. */
