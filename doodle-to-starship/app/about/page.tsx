@@ -14,14 +14,14 @@ import {
   TANK_FILL,
 } from "@/lib/physics/data";
 import { VOICE_TOOLS } from "@/lib/voice/tools";
-import { IMAGE_MODEL, TEXT_MODEL, VIDEO_MODEL, VISION_MODEL } from "@/lib/xai";
+import { TEXT_MODEL, VISION_MODEL } from "@/lib/xai";
 
 // "How it works" for judges. Every table reads the same modules the app runs on, so the
 // page can't drift from the code.
 
 export const metadata: Metadata = {
   title: "How it works · Penumbra",
-  description: "How Penumbra turns a napkin sketch into a flight verdict: Grok reads and renders, code does the physics.",
+  description: "How Penumbra turns a napkin sketch into a flight verdict: Grok reads and talks, code does the physics.",
 };
 
 const PROPELLANT_NAMES: Record<PropellantId, string> = {
@@ -66,13 +66,13 @@ export default function About() {
             from the physics, and NASA papers showing where it&apos;s been tried.
           </h1>
           <p className="mt-6 max-w-[760px] text-[17px] leading-relaxed text-haze">
-            The first ten minutes of a concept review. Grok reads the sketch, renders it and runs Mission Control by
-            voice; deterministic code built on published engine data decides whether it flies. Every flight ends with a
-            recap of what to try next, already checked against the physics.
+            The first ten minutes of a concept review. Grok reads the sketch and runs Mission Control by voice;
+            deterministic code built on published engine data decides whether it flies. Every flight ends with a recap
+            of what to try next, already checked against the physics.
           </p>
         </section>
 
-        <Section title="The pipeline" lede="Grok does the seeing, talking and rendering. Code does every number.">
+        <Section title="The pipeline" lede="Grok does the seeing and talking. Code does every number.">
           <Pipeline />
         </Section>
 
@@ -200,7 +200,7 @@ export default function About() {
           </ul>
         </Section>
 
-        <Section title="How Penumbra uses Grok" lede="Four xAI APIs, each where it is strongest. None of them sets a number.">
+        <Section title="How Penumbra uses Grok" lede="Three xAI APIs, each where it is strongest. None of them sets a number.">
           <Table
             head={["API", "Model", "What it does"]}
             rows={[
@@ -213,16 +213,6 @@ export default function About() {
                 "Grok text",
                 <code key="m" className="whitespace-nowrap font-mono text-[13px]">{TEXT_MODEL}</code>,
                 "Rewrites the red pen's notes in a sharper voice. Any rewrite that changes a number is rejected.",
-              ],
-              [
-                "Grok Imagine, image",
-                <code key="m" className="whitespace-nowrap font-mono text-[13px]">{IMAGE_MODEL}</code>,
-                "Edits your actual sketch into a concept photo and, after launch, an outcome shot. Generates a mission patch for the design.",
-              ],
-              [
-                "Grok Imagine, video",
-                <code key="m" className="whitespace-nowrap font-mono text-[13px]">{VIDEO_MODEL}</code>,
-                "Animates the outcome shot into a short mission replay, only when you ask for one.",
               ],
               [
                 "Grok Voice",
@@ -249,7 +239,7 @@ export default function About() {
         <Section title="Built with" lede="">
           <ul className="max-w-[820px] space-y-2 text-[15px] leading-relaxed">
             <Item>Next.js 16 (App Router, Turbopack, Proxy), React 19, TypeScript, Tailwind CSS 4 and Vitest.</Item>
-            <Item>xAI Grok APIs: vision, text, Imagine image and video, and Voice realtime.</Item>
+            <Item>xAI Grok APIs: vision, text and Voice realtime.</Item>
             <Item>NASA Technical Reports Server API for prior art.</Item>
             <Item>Published engine, vehicle and delta-v figures, each linked to its source above.</Item>
             <Item>Cursor, used during the build.</Item>
@@ -330,7 +320,7 @@ const NODES: { title: string; lines: [string, string]; grok: boolean }[] = [
   { title: "Red pen", lines: ["tested fixes drawn", "on your sketch"], grok: false },
   { title: "Grok Voice", lines: ["GO/NO-GO poll,", "edits by voice"], grok: true },
   { title: "Launch sim", lines: ["your doodle flies", "the flight trace"], grok: false },
-  { title: "Grok Imagine", lines: ["photo, patch,", "replay video"], grok: true },
+  { title: "Recap", lines: ["what to try next,", "checked by physics"], grok: false },
 ];
 
 /** The pipeline as a technical drawing: Grok steps in flame, code steps in starlight. */
@@ -342,7 +332,7 @@ function Pipeline() {
   const x = (i: number) => i * (w + gap);
   const mid = (i: number) => x(i) + w / 2;
   return (
-    <svg viewBox="0 0 1116 220" className="w-full" role="img" aria-label="Pipeline: napkin sketch, Grok vision, physics, red pen, Grok Voice, launch sim, Grok Imagine">
+    <svg viewBox="0 0 1116 220" className="w-full" role="img" aria-label="Pipeline: napkin sketch, Grok vision, physics, red pen, Grok Voice, launch sim, recap">
       <defs>
         <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
           <path d="M0 0 L10 5 L0 10 z" className="fill-haze" />
