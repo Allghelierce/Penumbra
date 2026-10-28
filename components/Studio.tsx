@@ -195,7 +195,8 @@ export default function Studio() {
   const [narration, setNarration] = useState<string | null>(null);
   // Every launch of this sketch, oldest first: the visible record of iterating on it.
   const [attempts, setAttempts] = useState<Attempt[]>([]);
-  const flightRecap = useMemo(() => (attempts.length > 0 ? recap(attempts) : null), [attempts]);
+  // A real rocket on the napkin can't be drawn on, so its advice never asks for a drawing.
+  const flightRecap = useMemo(() => (attempts.length > 0 ? recap(attempts, template ? { drawable: false } : {}) : null), [attempts, template]);
   const [error, setError] = useState<string | null>(null);
 
   const analysis = useMemo(() => safeAnalyze(design), [design]);
@@ -211,11 +212,11 @@ export default function Studio() {
   const issues = useMemo<ReviewIssue[]>(() => {
     if (!design || !analysis || unreadable || !review || mission) return [];
     try {
-      return diagnose(design, analysis, reading ?? undefined).map((issue) => ({ ...issue, id: `issue-${issue.n}` }));
+      return diagnose(design, analysis, reading ?? undefined, template ? { drawable: false } : {}).map((issue) => ({ ...issue, id: `issue-${issue.n}` }));
     } catch {
       return [];
     }
-  }, [design, analysis, reading, review, unreadable, mission]);
+  }, [design, analysis, reading, review, unreadable, mission, template]);
   const trades = useMemo<Trade[]>(() => {
     if (!design || !analysis || unreadable) return [];
     try {
@@ -281,7 +282,7 @@ export default function Studio() {
     } catch {
       // The rules-based red pen runs locally, so a failed or rate-limited request still gets a review.
       try {
-        next = buildReview(nextReading, nextAnalysis);
+        next = buildReview(nextReading, nextAnalysis, latest.current.template ? { drawable: false } : {});
       } catch {
         if (id === runs.current.review) setError("The red-pen review didn't load. Press Check again.");
         return;
@@ -391,7 +392,7 @@ export default function Studio() {
     const nextAnalysis = safeAnalyze(nextDesign);
     // Checked already: the red pen re-marks it locally.
     if (nextAnalysis && latest.current.review) {
-      const next = buildReview(nextReading, nextAnalysis);
+      const next = buildReview(nextReading, nextAnalysis, { drawable: false });
       latest.current = { ...latest.current, review: next };
       setReview(next);
       setReviewKey((k) => k + 1);
@@ -614,7 +615,7 @@ export default function Studio() {
     // An edit during the sweep (voice, the destination chips) wins: mark the latest design.
     const final = latest.current.reading ?? read;
     const finalAnalysis = safeAnalyze(final.design) ?? currentAnalysis;
-    const marks = buildReview(final, finalAnalysis);
+    const marks = buildReview(final, finalAnalysis, { drawable: false });
     latest.current = { ...latest.current, review: marks };
     setReview(marks);
     setReviewKey((k) => k + 1);
