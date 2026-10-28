@@ -16,7 +16,9 @@ export const LAYERS: Layer[] = [
   { name: "Stratosphere", from: 12, to: 50, color: "#bdbdbd" },
   { name: "Mesosphere", from: 50, to: 80, color: "#949494" },
   { name: "Thermosphere", from: 80, to: 700, color: "#6b6b6b" },
-  { name: "Exosphere", from: 700, to: Infinity, color: "#474747" },
+  { name: "Exosphere", from: 700, to: 10_000, color: "#474747" },
+  { name: "Cislunar space", from: 10_000, to: 378_029, color: "#363636" },
+  { name: "Deep space", from: 378_029, to: Infinity, color: "#2a2a2a" },
 ];
 
 export interface Boundary {
@@ -39,16 +41,30 @@ export const BOUNDARIES: Boundary[] = [
   { km: 700, label: "Exobase", up: "Into the exosphere", down: "Back below the exosphere" },
 ];
 
+/** The Moon's distance as an altitude: 384,400 km centre to centre, less Earth's radius. */
+export const MOON_KM = 378_029;
+/** Where a probe bound for another planet is followed out to: Earth's pull has little hold left. */
+export const LEAVE_KM = 1_000_000;
+
 /** Marks far above, shown at the top of the ladder when the mission is headed there. */
 export const FAR_MARKS: { km: number; label: string }[] = [
   { km: 35_786, label: "GEO" },
-  { km: 384_400, label: "Moon" },
+  { km: MOON_KM, label: "Moon" },
+  { km: LEAVE_KM, label: "Leaving Earth" },
 ];
+
+/** Off the top of the ladder: where a trip past the Moon is really going. */
+export const BEYOND: Partial<Record<DestinationId, string>> = {
+  "mars-transfer": "Mars · ~78 million km",
+  "mars-surface": "Mars · ~78 million km",
+  europa: "Jupiter · ~630 million km",
+};
 
 /** Top of the ladder: room for the destination, log-compressed above 120 km. */
 export function ladderTop(dest: DestinationId): number {
   if (dest === "leo") return 2_000;
   if (dest === "gto") return 40_000;
+  if (BEYOND[dest]) return LEAVE_KM;
   return 400_000;
 }
 

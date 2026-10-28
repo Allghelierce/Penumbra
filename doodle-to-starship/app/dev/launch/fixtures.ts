@@ -16,7 +16,7 @@ import {
   type Verdict,
 } from "@/lib/design";
 import { DEMO_SKETCHES } from "@/lib/demo-sketches";
-import { analyze, simulateFlight } from "@/lib/physics";
+import { analyze, PROPELLANT_DENSITY_KG_M3, simulateFlight } from "@/lib/physics";
 import { readFromGeometry } from "@/lib/sketch/geometry";
 import { applyAction } from "@/lib/actions";
 import { drawTemplate, templateById, TEMPLATES } from "@/lib/templates";
@@ -352,6 +352,7 @@ function templateFixture(t: RocketTemplate, design: Design, id: string, title: s
 }
 
 const falcon9 = templateById("falcon9");
+const saturn = templateById("saturn-v");
 
 export const TEMPLATE_FIXTURES: LaunchFixture[] = [
   ...TEMPLATES.map((t) => templateFixture(t, t.design, `template-${t.id}`, t.name)),
@@ -364,5 +365,29 @@ export const TEMPLATE_FIXTURES: LaunchFixture[] = [
     },
     "template-falcon9-recovered",
     `${falcon9.name}, booster recovered`,
+  ),
+  // Past LEO: a parking orbit, a departure burn, then days of coasting.
+  templateFixture(saturn, { ...saturn.design, destination: "moon-orbit", payloadMassKg: 30_000 }, "template-saturn-v-moon", "Saturn V to the Moon"),
+  templateFixture(falcon9, { ...falcon9.design, destination: "mars-transfer", payloadMassKg: 1_000 }, "template-falcon9-mars", "Falcon 9 to Mars"),
+  // No real rocket here reaches Europa alone; a Centaur on top (as in the physics tests) sends 1 t.
+  templateFixture(
+    saturn,
+    {
+      ...saturn.design,
+      stages: [
+        ...saturn.design.stages,
+        {
+          label: "Centaur",
+          engines: [{ engine: "rl10c", count: 1 }],
+          propellant: "hydrolox",
+          tankVolumeM3: 20_800 / (PROPELLANT_DENSITY_KG_M3.hydrolox * 0.95),
+          dryMassKg: 2_250,
+        },
+      ],
+      destination: "europa",
+      payloadMassKg: 1_000,
+    },
+    "template-saturn-v-europa",
+    "Saturn V + Centaur to Europa",
   ),
 ];

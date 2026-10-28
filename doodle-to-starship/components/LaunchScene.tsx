@@ -13,7 +13,7 @@ import type {
   Stroke,
   TemplateId,
 } from "@/lib/design";
-import { BOUNDARIES, FAR_MARKS, LAYERS, ladderPos, ladderTop } from "./launch/atmosphere";
+import { BEYOND, BOUNDARIES, FAR_MARKS, LAYERS, ladderPos, ladderTop } from "./launch/atmosphere";
 import { PenumbraLockup } from "@/components/PenumbraLogo";
 import { templateById } from "@/lib/templates";
 import { createLaunchAudio, isLaunchAudioMuted, setLaunchAudioMuted, unlockLaunchAudio } from "./launch/audio";
@@ -102,7 +102,18 @@ const MARK_LABEL: Partial<Record<FlightEventKind, string>> = {
   apogee: "Apogee",
   impact: "Impact",
   orbit: "Orbit",
+  arrival: "Moon",
+  milestone: "Moon",
+  escape: "Escape",
 };
+
+/** "Trans-lunar injection: 10.9 km/s at 200 km" → "TLI". */
+const initials = (label: string) =>
+  label
+    .split(":")[0]
+    .split(/[\s-]+/)
+    .map((w) => w[0]?.toUpperCase() ?? "")
+    .join("");
 
 interface Mark {
   at: number;
@@ -118,7 +129,14 @@ function milestones(plan: Plan): Mark[] {
   let seps = 0;
   for (const c of plan.cues) {
     const k = c.event.kind;
-    const label = k === "engine-cutoff" ? (seps > 0 ? "SECO" : "MECO") : MARK_LABEL[k];
+    const label =
+      k === "engine-cutoff"
+        ? /injection/i.test(c.event.label ?? "")
+          ? initials(c.event.label)
+          : seps > 0
+            ? "SECO"
+            : "MECO"
+        : MARK_LABEL[k];
     if (k === "stage-sep") seps++;
     const at = (c.at - plan.liftoffAt) / span;
     if (!label || at < 0 || at > 1.001) continue;
@@ -319,6 +337,7 @@ function LaunchRun(props: RunProps) {
 
       <AltitudeLadder
         top={ladderTop(input.reading.design.destination)}
+        beyond={BEYOND[input.reading.design.destination]}
         boxRef={ladderRef}
         markerRef={markerRef}
         readoutRef={readoutRef}
@@ -424,16 +443,16 @@ function LaunchRun(props: RunProps) {
           <span
             className={`ls-fade mb-4 rounded-[3px] px-2.5 py-1 font-display text-sm font-semibold uppercase tracking-[0.2em] ${finale.ok ? "bg-go-signal/15 text-go-signal" : "bg-nogo/15 text-nogo"}`}
           >
-            {finale.ok ? (outcome === "destination" ? "Mission success" : "Orbit achieved") : "Vehicle lost"}
+            {finale.kicker ?? (finale.ok ? (outcome === "destination" ? "Mission success" : "Orbit achieved") : "Vehicle lost")}
           </span>
           <div
             className={`ls-write whitespace-nowrap font-display text-[min(20vw,24vh,10rem)] font-semibold uppercase leading-none tracking-[0.04em] ${finale.ok ? "text-starlight" : "text-nogo"} ${LIFT}`}
           >
             {finale.text}
           </div>
-          {!finale.ok && (
+          {(finale.sub || !finale.ok) && (
             <div className={`ls-fade mt-3 text-xs font-semibold uppercase tracking-[0.22em] text-haze [animation-delay:0.5s] ${LIFT}`}>
-              Rapid unscheduled disassembly
+              {finale.sub ?? "Rapid unscheduled disassembly"}
             </div>
           )}
         </div>
@@ -465,7 +484,8 @@ function LaunchRun(props: RunProps) {
 function clockText(sim: number): string {
   const secs = Math.max(0, Math.floor(sim));
   const two = (n: number) => String(n).padStart(2, "0");
-  return `T+ ${two(Math.floor(secs / 3600))}:${two(Math.floor(secs / 60) % 60)}:${two(secs % 60)}`;
+  const days = Math.floor(secs / 86_400);
+  return `T+ ${days > 0 ? `${days}d ` : ""}${two(Math.floor(secs / 3600) % 24)}:${two(Math.floor(secs / 60) % 60)}:${two(secs % 60)}`;
 }
 
 const kmLabel = (km: number) => km.toLocaleString("en-US");
@@ -477,11 +497,14 @@ const kmLabel = (km: number) => km.toLocaleString("en-US");
  */
 function AltitudeLadder({
   top,
+  beyond,
   boxRef,
   markerRef,
   readoutRef,
 }: {
   top: number;
+  /** Off the top of the scale: where the trip is really headed, e.g. "Jupiter · ~630 million km". */
+  beyond?: string;
   boxRef: Ref<HTMLDivElement>;
   markerRef: Ref<HTMLDivElement>;
   readoutRef: Ref<HTMLSpanElement>;
@@ -494,6 +517,19 @@ function AltitudeLadder({
     <div className="ls-fade pointer-events-none absolute bottom-32 right-8 top-20 hidden w-44 [animation-delay:1.6s] lg:block">
       <div ref={boxRef} className="relative h-full">
         <div className="absolute inset-y-0 left-0 w-px bg-white/15" />
+        {beyond && (
+          // Off the top of the scale: the arrow keeps going.
+          <div className={`absolute bottom-full left-0 mb-1 flex items-start gap-2 ${LIFT}`} title="Far off the top of this scale">
+            <div className="-ml-[5px] flex flex-col items-center">
+              <span className="h-0 w-0 border-x-[5px] border-b-[8px] border-x-transparent border-b-white/60" />
+              <span className="h-5 w-px border-l border-dashed border-white/40" />
+            </div>
+            <span className="-mt-1 whitespace-nowrap text-[11px] text-haze">
+              <span className="font-display font-semibold text-starlight/80">{beyond.split(" · ")[0]}</span> ·{" "}
+              {beyond.split(" · ").slice(1).join(" · ")}
+            </span>
+          </div>
+        )}
         {LAYERS.map((l) => {
           const a = ladderPos(l.from, top);
           const b = ladderPos(Math.min(l.to, top), top);

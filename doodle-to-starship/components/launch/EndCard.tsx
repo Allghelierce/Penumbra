@@ -69,7 +69,7 @@ const SHORT: Record<DestinationId, string> = {
 
 const kms = (mps: number) => (Math.abs(mps) / 1000).toFixed(1);
 
-function verdictCopy({ outcome, design, analysis, maxAltKm, lostAt }: EndCardProps): { go: boolean; headline: string; line: string } {
+function verdictCopy({ outcome, design, analysis, maxAltKm, lostAt, trace }: EndCardProps): { go: boolean; headline: string; line: string } {
   if (lostAt) {
     const s = Math.max(0, Math.round(lostAt.tS));
     return {
@@ -82,8 +82,12 @@ function verdictCopy({ outcome, design, analysis, maxAltKm, lostAt }: EndCardPro
   const budget = `${kms(analysis.totalDeltaVMps)} of ${kms(analysis.requiredDeltaVMps)} km/s`;
   const margin = analysis.marginMps;
   const history = launchRecord(design.name);
+  // Bound for Mars or Jupiter, the flight ends leaving Earth on a coast of months or years.
+  const escape = outcome === "destination" ? [...(trace.events ?? [])].reverse().find((e) => e.kind === "escape") : undefined;
   switch (outcome) {
     case "destination":
+      // The coast is the news here, not the rocket's launch record.
+      if (escape) return { go: true, headline: `On course for ${SHORT[dest]}`, line: `${escape.label}. ${budget}, ${kms(margin)} km/s to spare.` };
       return {
         go: true,
         headline: dest === "leo" ? "In orbit" : `Made it to ${SHORT[dest]}`,
@@ -137,7 +141,12 @@ export default function EndCard(props: EndCardProps) {
         </div>
 
         <dl className="grid grid-cols-2 gap-px border-t border-rule bg-rule sm:grid-cols-4">
-          <Stat label="Max altitude" value={fmtKm(maxAltKm)} unit="km" />
+          {/* A trip that leaves Earth has no top: say how far it was followed. */}
+          <Stat
+            label={(props.trace.events ?? []).some((e) => e.kind === "escape") ? "Followed out to" : "Max altitude"}
+            value={fmtKm(maxAltKm)}
+            unit="km"
+          />
           <Stat label="Max speed" value={Math.round(maxSpeedMps).toLocaleString("en-US")} unit="m/s" />
           <Stat label="Delta-v" value={`${kms(analysis.totalDeltaVMps)} / ${kms(analysis.requiredDeltaVMps)}`} unit="km/s" />
           <Stat label="Thrust-to-weight" value={analysis.liftoffTwr.toFixed(2)} />

@@ -8,7 +8,7 @@ import {
   type TemplateId,
   type Stroke,
 } from "@/lib/design";
-import { ladderPos, ladderTop, layerAt } from "./atmosphere";
+import { ladderPos, ladderTop, layerAt, MOON_KM } from "./atmosphere";
 import type { LaunchAudio } from "./audio";
 import { buildDoodle, unionBox, type Nozzle, type Vec } from "./geometry";
 import {
@@ -53,6 +53,7 @@ import {
   readPalette,
   rgba,
   seeded,
+  siteFor,
   targetBodyFor,
   type RGB,
 } from "./scenery";
@@ -266,7 +267,11 @@ export function startLaunch(
   // (18 m) about half that; a Saturn V (111 m) or Starship (121 m) towers over both.
   const sizeK = Math.min(1.35, Math.max(0.45, Math.sqrt(heightM / 70)));
   const orbitish = plan.outcome === "orbit" || plan.outcome === "destination";
-  const body = plan.outcome === "destination" ? targetBodyFor(design.destination) : null;
+  // A trip past LEO ends far out: no orbital sunrise to turn into, and its Moon is drawn on the
+  // way (on a trip to Mars or Jupiter the planet itself isn't there yet).
+  const depart = plan.depart;
+  const lowOrbit = orbitish && !depart;
+  const body = plan.outcome === "destination" && !depart ? targetBodyFor(design.destination) : null;
 
   const piecePaths = pieces.map((p) => pencilPath(p.lines));
   const padPath = polyPath(makePad(doodle, GROUND * Hn, seeded(11)));
@@ -568,6 +573,52 @@ export function startLaunch(
   }
 
   /** The first stage coming home, in a small panel at the bottom left. k runs 0..1 over the descent. */
+  /**
+   * Climbing out through the Moon's distance on the way to Mars or Jupiter: the Moon, 50,000 km
+   * off to the side, comes down from the top, passes level with the craft, and drops behind it.
+   */
+  function drawMoonPass(altKm: number) {
+    const ahead = MOON_KM - altKm;
+    const side = 50_000;
+    const phi = Math.atan2(ahead, side);
+    const y = H * 0.47 - (phi / (Math.PI / 2)) * H * 0.6;
+    const r = Math.max(2, (1_737 / Math.hypot(side, ahead)) * 1_036 * (Math.min(W, H) / 800));
+    if (y < -r - 40 || y > H + r + 40) return;
+    drawMoonDisc(W * 0.5 + Math.cos(phi) * W * 0.28, y, r);
+  }
+
+  /** The Moon as a lit sphere, lit from the right like the sunrise side of the Earth. */
+  function drawMoonDisc(x: number, y: number, r: number) {
+    const c = ctx!;
+    c.save();
+    c.globalCompositeOperation = "lighter";
+    c.globalAlpha = 0.18;
+    c.fillStyle = "rgb(205,201,186)";
+    c.beginPath();
+    c.arc(x, y, r * 1.6, 0, Math.PI * 2);
+    c.fill();
+    c.restore();
+    const g = c.createRadialGradient(x + r * 0.45, y - r * 0.3, r * 0.1, x, y, r);
+    g.addColorStop(0, "rgb(232,228,214)");
+    g.addColorStop(0.7, "rgb(176,171,156)");
+    g.addColorStop(1, "rgb(92,89,80)");
+    c.fillStyle = g;
+    c.beginPath();
+    c.arc(x, y, r, 0, Math.PI * 2);
+    c.fill();
+    c.fillStyle = "rgba(70,70,64,0.35)";
+    for (const [dx, dy, s] of [
+      [-0.3, -0.2, 0.22],
+      [0.2, 0.25, 0.16],
+      [-0.05, 0.4, 0.12],
+      [0.35, -0.35, 0.1],
+    ]) {
+      c.beginPath();
+      c.arc(x + dx * r, y + dy * r, s * r, 0, Math.PI * 2);
+      c.fill();
+    }
+  }
+
   function drawLanding(k: number, since: number) {
     const c = ctx!;
     const p0 = pieces[0];
@@ -753,7 +804,7 @@ export function startLaunch(
       const h = headingAt(plan, sim);
       if (h !== null) target = h;
     }
-    if (orbitish && t >= plan.finaleAt) target = Math.PI / 2;
+    if (lowOrbit && t >= plan.finaleAt) target = Math.PI / 2;
     pitch += angleDiff(target, pitch) * (1 - Math.exp(-dt * 2.5));
 
     let pose: Pose = { x: 0, y: Hn / 2, rot: 0 };
@@ -803,8 +854,11 @@ export function startLaunch(
       // Follow only once it flies, so the doodle starts exactly where it was drawn.
       const fw = toWorld(pose, focus);
       camX += fw[0];
+      // Out on the coast the craft eases right of centre, off the Earth shrinking below it.
+      if (depart && t > depart.cutAt) camX -= (0.08 * W * ease((t - depart.cutAt) / 2.5)) / Z;
       // Keep the rocket just above center; in orbit drop it lower to leave room for the verdict.
-      const followY = 0.47 + (orbitish ? 0.15 * ease((t - plan.finaleAt) / 1) : 0);
+      // (Far out, only a little, so it stays clear of the distant Earth below it.)
+      const followY = 0.47 + (orbitish ? (depart ? 0.08 : 0.15) * ease((t - plan.finaleAt) / 1) : 0);
       camY = Math.max(camY, fw[1] - ((0.5 - followY) * H) / Z);
     }
     // Camera shake from smooth noise: a rumble at ignition, building through Max-Q, a jolt at
@@ -981,22 +1035,28 @@ export function startLaunch(
     }
     drawSky(c, W, H, pal, altKm, night);
     const finaleK = orbitish ? Math.max(0, t - plan.finaleAt) : 0;
+    // Far out the stars hardly move: after the parking orbit, and above 200 km, the scroll that
+    // sells speed down low is damped to a drift (the trip covers 30,000 km downrange and days).
+    const downKm = flying ? s.down : 0;
+    const driftKm =
+      depart && sim > depart.parkSim ? depart.downAtPark + 40 * Math.log1p((downKm - depart.downAtPark) / 400) : downKm;
+    const driftAlt = altKm <= 200 ? altKm : 200 + 10 * Math.log2(altKm / 200);
     drawStars(
       c,
       stars,
       W,
       H,
-      -(flying ? s.down : 0) * 5 - finaleK * 70,
-      altKm * 26,
+      -driftKm * 5 - finaleK * 70,
+      driftAlt * 26,
       night * (0.08 + 0.92 * clamp01((altKm - 8) / 45)),
       t,
     );
 
     // The layers of the atmosphere, passing by at a readable pace.
     const layerCenter = H * 0.47;
-    const limbRise = orbitish ? easeOut((t - plan.finaleAt + 0.3) / 1.6) : 0;
+    const limbRise = lowOrbit ? easeOut((t - plan.finaleAt + 0.3) / 1.6) : 0;
     drawOzone(c, W, H, altKm, layerCenter);
-    drawAurora(c, W, H, clamp01((altKm - 85) / 25) * (1 - limbRise) * night, t, earthTopY(H, flying ? altKm : 0, limbRise) - 6);
+    drawAurora(c, W, H, clamp01((altKm - 85) / 25) * (1 - limbRise) * night, t, earthTopY(H, flying ? altKm : 0, limbRise) - 6, altKm);
     const meteorK = flying ? clamp01((altKm - 45) / 8) * clamp01((88 - altKm) / 8) : 0;
     if (meteorK > 0 && Math.random() < 7 * meteorK * dt) {
       const ang = rnd(0.55, 0.95) * Math.PI;
@@ -1034,9 +1094,16 @@ export function startLaunch(
       c.restore();
     }
     if (flying || plan.liftoffAt === null) drawBoundaries(c, W, H, altKm, layerCenter, displayFont, pal.chalk, night);
-    const downKm = flying ? s.down : 0;
-    drawEarth(c, W, H, flying ? altKm : 0, downKm / 6371 + finaleK * 0.01, limbRise, cityLights, t);
-    const issK = clamp01((altKm - 120) / 30) * (1 - limbRise);
+    drawEarth(c, W, H, flying ? altKm : 0, driftKm / 6371 + finaleK * 0.01, limbRise, cityLights, t);
+    // Moon trips watch the Moon grow from a speck to a disc as they close in; trips to Mars and
+    // Jupiter see it slide past as they climb through its distance.
+    if (depart && t >= depart.cutAt) {
+      if (depart.end === "escape") drawMoonPass(altKm);
+      // Short of the ladder, and clear of the verdict that lands beside it.
+      else drawMoonDisc(W * 0.72, H * 0.25, Math.max(1.5, Math.min(W, H) * 0.075 * clamp01(30_000 / Math.hypot(30_000, MOON_KM - altKm))));
+    }
+    // The ISS and other satellites are low-orbit traffic: gone well before the Moon.
+    const issK = clamp01((altKm - 120) / 30) * clamp01((1_200 - altKm) / 400) * (1 - limbRise);
     if (issK > 0) drawISS(c, ((t * 55) % (W + 300)) - 150, H * 0.3, 1.3, issK, displayFont);
     const deckAlpha = night * (flying ? 1 : 0);
     // Decks the rocket isn't inside are scenery behind it; the one it's punching through is drawn again in front.
@@ -1087,7 +1154,7 @@ export function startLaunch(
     const groundY = SY(groundLevel);
     drawHorizonGlow(c, W, H, Math.min(groundY, H * 1.02), padK * (1 - clamp01(altKm / 12)), 1 - clamp01(altKm / 15));
     if (body) drawTargetBody(c, W, H, body, easeOutBack((t - plan.finaleAt - 0.5) / 0.9), pal);
-    drawGround(c, W, H, groundY, padK, horizon, pal.chalk);
+    drawGround(c, W, H, groundY, padK, horizon, pal.chalk, siteFor(input.templateId));
     if (padK > 0.01 && groundY > -H && groundY < H * 3) {
       c.save();
       c.translate(SX(0), SY(0));
@@ -1272,7 +1339,13 @@ export function startLaunch(
       const neg = clock < 0;
       const secs = neg ? Math.ceil(-clock) : Math.floor(clock);
       const two = (n: number) => String(n).padStart(2, "0");
-      hudSet(hud.clock, "clock", `T${neg ? "−" : "+"} ${two(Math.floor(secs / 3600))}:${two(Math.floor(secs / 60) % 60)}:${two(secs % 60)}`);
+      // A coast that lasts days counts them: T+ 3d 00:36:10.
+      const days = Math.floor(secs / 86_400);
+      hudSet(
+        hud.clock,
+        "clock",
+        `T${neg ? "−" : "+"} ${days > 0 ? `${days}d ` : ""}${two(Math.floor(secs / 3600) % 24)}:${two(Math.floor(secs / 60) % 60)}:${two(secs % 60)}`,
+      );
       hudSet(hud.speed, "speed", Math.round(flying ? s.speed : 0).toLocaleString("en-US"));
       hudSet(hud.alt, "alt", altKm < 100 ? altKm.toFixed(1) : Math.round(altKm).toLocaleString("en-US"));
       if (hud.warp) {

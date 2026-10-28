@@ -8,7 +8,7 @@ import type {
   FlightTrace,
   Verdict,
 } from "@/lib/design";
-import { BOUNDARIES } from "./atmosphere";
+import { BOUNDARIES, MOON_KM } from "./atmosphere";
 
 // Playback timeline, in seconds of animation. The napkin fades to night, the camera
 // settles on the pad, the engines light, and then the trace plays compressed.
@@ -76,6 +76,23 @@ export interface Finale {
   at: number;
   text: string;
   ok: boolean;
+  /** The line above the big word, when it isn't the usual "Mission success" or "Orbit achieved". */
+  kicker?: string;
+  /** A line under the big word, e.g. "Leaving Earth at 8.8 km/s · ~2.7-year coast to Jupiter". */
+  sub?: string;
+}
+
+/** A trip past low Earth orbit, after the climb: playback seconds unless named sim. */
+export interface Departure {
+  /** Into the parking orbit, the departure burn lighting, and its cutoff. */
+  parkAt: number;
+  burnAt: number;
+  cutAt: number;
+  /** Sim seconds at the parking-orbit insertion, and the downrange km there. */
+  parkSim: number;
+  downAtPark: number;
+  /** At the Moon's distance, or leaving Earth on the long coast to another planet. */
+  end: "arrival" | "escape";
 }
 
 export interface Plan {
@@ -107,6 +124,8 @@ export interface Plan {
   hasDownrange: boolean;
   /** Sim seconds at playback time t. */
   simAt: (t: number) => number;
+  /** Set for a trip past low Earth orbit: the parking orbit, the departure burn and the coast. */
+  depart: Departure | null;
 }
 
 export interface Sample {
@@ -202,6 +221,7 @@ function padPlan(points: FlightPoint[], events: FlightEvent[], analysis: Analysi
     maxSpeedMps: 0,
     hasDownrange: false,
     simAt: () => 0,
+    depart: null,
   };
 }
 
@@ -221,6 +241,9 @@ function flightPlan(
   let T: number;
   // A breakup ends the flight right there, mid-air, whatever else the trace says.
   const breakup = events.find((e) => e.kind === "breakup" && e.tS > 0);
+  // Bound past low Earth orbit, the flight runs on through the parking orbit, the departure burn
+  // and the coast, to the Moon's distance or to where Earth lets go.
+  const trip = breakup ? null : departureOf(outcome, events);
   if (breakup) {
     T = breakup.tS;
   } else if (outcome === "suborbital") {
@@ -240,6 +263,7 @@ function flightPlan(
     }
   } else {
     const done =
+      trip?.end ??
       events.find((e) => e.kind === "orbit") ??
       events.find((e) => e.kind === "arrival") ??
       [...events].reverse().find((e) => e.kind === "engine-cutoff");
@@ -262,12 +286,29 @@ function flightPlan(
     }
   }
 
+  // The departure burn starts where the speed climbs again after the parking orbit.
+  let burnSim = 0;
+  if (trip) {
+    const parked = sampleAt(points, trip.park.tS).speed;
+    const i = points.findIndex((p) => p.tS > trip.park.tS && p.speedMps > parked + 1);
+    burnSim = i > 0 ? Math.min(trip.away.tS, Math.max(trip.park.tS, points[i - 1].tS)) : trip.away.tS;
+  }
+
   // Time warp: the dramatic beats get real seconds, the long burns and coasts between them
   // fast-forward. Built from the event timestamps, so it follows whatever the trace says.
   const karmanSims = crossingsFor(points, T, (sim) => sim)
     .filter((c) => c.hero)
     .map((c) => c.simT);
-  const warp = warpFor(T, [...events, ...synthetic], karmanSims, breakup ? "breakup" : outcome, scenario, events, clearS);
+  const warp = warpFor(
+    trip ? trip.park.tS : T,
+    [...events, ...synthetic],
+    karmanSims,
+    breakup ? "breakup" : outcome,
+    scenario,
+    events,
+    clearS,
+    trip ? departureBeats(points, trip.park.tS, burnSim, trip.away.tS, T, trip.end.kind === "escape") : [],
+  );
   const flightDur = warp.duration;
   const liftoffAt = T_LIFTOFF;
   const finaleAt = liftoffAt + flightDur;
@@ -300,20 +341,34 @@ function flightPlan(
       }
       on = c.at + 0.6;
     } else if (OFF_KINDS.has(k) && on !== null) {
-      const cut = k === "orbit" || k === "arrival" ? Math.max(c.at, finaleAt) + 0.45 : c.at;
-      burns.push({ from: on, to: cut, piece });
+      const final = (k === "orbit" || k === "arrival") && c.event !== trip?.park;
+      burns.push({ from: on, to: final ? Math.max(c.at, finaleAt) + 0.45 : c.at, piece });
       on = null;
     }
   }
   if (on !== null) burns.push({ from: on, to: finaleAt + 0.45, piece });
+  // The upper stage lights again for the departure burn.
+  if (trip) burns.push({ from: playOf(burnSim), to: playOf(trip.away.tS), piece });
 
   const crossings = crossingsFor(points, T, playOf);
   const sepsSeen = { n: 0 };
   const failed = outcome === "suborbital" || !!breakup;
+  // Past LEO the finale says where it's headed and how long the coast takes, never "arrived".
   const finale: Finale = breakup
     ? { at: finaleAt + 0.15, text: "RUD", ok: false }
-    : finaleFor(outcome, design, failed ? finaleAt + 0.15 : finaleAt + 0.35);
+    : trip
+      ? {
+          at: finaleAt + 0.35,
+          text: DEST_SHORT[design.destination] ?? "AWAY",
+          ok: true,
+          kicker: trip.end.kind === "escape" ? "On course for" : undefined,
+          sub: trip.end.label,
+        }
+      : finaleFor(outcome, design, failed ? finaleAt + 0.15 : finaleAt + 0.35);
   const maxDown = Math.max(...points.map((p) => Math.abs(p.downrangeKm)));
+  const burnCaption: CaptionCue[] = trip
+    ? [{ at: playOf(burnSim), text: trip.away.label.split(":")[0].trim(), sub: "Departure burn", tone: "flame" }]
+    : [];
 
   return {
     outcome,
@@ -324,8 +379,9 @@ function flightPlan(
     cues,
     // In orbit the finale has the stage; later events still reach onEvent but get no caption.
     captions: withKarman(
-      captionsFor(cues, maxAltKm, false, sepsSeen, outcome === "suborbital" ? Infinity : finaleAt - 0.2),
+      captionsFor(cues, maxAltKm, false, sepsSeen, outcome === "suborbital" ? Infinity : finaleAt - 0.2, trip),
       crossings,
+      burnCaption,
     ),
     transcripts: transcriptsFor(cues),
     crossings,
@@ -339,14 +395,70 @@ function flightPlan(
     // The end card follows the outcome closely: no long linger.
     // Debris needs a moment to tumble away after a breakup; a last quote gets to finish.
     endAt: Math.max(
-      finaleAt + (breakup ? (scenario === "crs7" ? 4.6 : 2.6) : 1.8),
+      finaleAt + (breakup ? (scenario === "crs7" ? 4.6 : 2.6) : trip ? 3.4 : 1.8),
       ...transcriptsFor(cues).map((tr) => tr.at + (tr.hold ?? 3) + 0.3),
     ),
     maxAltKm,
     maxSpeedMps: Math.max(0, ...points.filter((p) => p.tS <= T).map((p) => p.speedMps)),
     hasDownrange: maxDown > Math.max(0.5, maxAltKm * 0.02),
     simAt,
+    depart: trip
+      ? {
+          parkAt: playOf(trip.park.tS),
+          burnAt: playOf(burnSim),
+          cutAt: playOf(trip.away.tS),
+          parkSim: trip.park.tS,
+          downAtPark: sampleAt(points, trip.park.tS).down,
+          end: trip.end.kind === "escape" ? "escape" : "arrival",
+        }
+      : null,
   };
+}
+
+interface Trip {
+  /** Insertion into the parking orbit. */
+  park: FlightEvent;
+  /** Cutoff of the departure burn. */
+  away: FlightEvent;
+  /** At the Moon's distance ("arrival"), or leaving Earth ("escape"). */
+  end: FlightEvent;
+}
+
+/** A trip past low Earth orbit, if the trace flies one. */
+function departureOf(outcome: Verdict, events: FlightEvent[]): Trip | null {
+  if (outcome !== "destination") return null;
+  const park = events.find((e) => e.kind === "orbit");
+  const away = park && events.find((e) => e.kind === "engine-cutoff" && e.tS > park.tS);
+  const end = away && [...events].reverse().find((e) => (e.kind === "arrival" || e.kind === "escape") && e.tS > away.tS);
+  return park && away && end ? { park, away, end } : null;
+}
+
+/**
+ * Playback after the parking-orbit insertion: a short wait, the departure burn, then a coast that
+ * lasts days, played in even steps of altitude on a log scale (so the climb reads steadily on the
+ * ladder), a little slower as it passes the Moon's distance on the way out.
+ */
+function departureBeats(points: FlightPoint[], park: number, burn: number, cut: number, T: number, escape: boolean): Beat[] {
+  const beats: Beat[] = [];
+  if (burn > park) beats.push({ from: park, to: burn, play: 2.2 });
+  if (cut > burn) beats.push({ from: burn, to: cut, play: 3.2 });
+  const coast: Beat[] = [];
+  let from = cut;
+  let alt = Math.max(1, sampleAt(points, cut).alt);
+  for (const p of points) {
+    if (p.tS <= cut || p.tS > T) continue;
+    const a = Math.max(alt, p.altitudeKm);
+    // Past the Moon there's time to read that it was passed before Earth lets go.
+    const moon = escape ? 1.2 * Math.exp(-((Math.log10(a / MOON_KM) / 0.15) ** 2)) + (a > MOON_KM ? 0.8 : 0) : 0;
+    coast.push({ from, to: p.tS, play: Math.log(a / alt) * (1 + moon) + 1e-4 });
+    from = p.tS;
+    alt = a;
+  }
+  if (from < T) coast.push({ from, to: T, play: 1e-4 });
+  const total = coast.reduce((n, b) => n + b.play, 0) || 1;
+  const coastPlay = escape ? 12 : 10;
+  for (const b of coast) beats.push({ ...b, play: (b.play * coastPlay) / total });
+  return beats;
 }
 
 interface Beat {
@@ -372,8 +484,12 @@ function warpFor(
   quoteEvents: FlightEvent[],
   /** Sim seconds from liftoff until the vehicle has cleared its tower. */
   clearS: number,
+  /** Stretches after T with their own fixed play (a trip past LEO), laid out after the climb. */
+  tail: Beat[] = [],
 ) {
-  const budget = flightBudget(T, scenario);
+  const end = tail.length ? tail[tail.length - 1].to : T;
+  // A trip past LEO gives a few of the climb's seconds to its coast.
+  const budget = Math.max(Math.min(T, 24), flightBudget(T, scenario) - (tail.length ? 4 : 0));
   // Real time until a second past the tower (the ease into the warp starts as it clears), or
   // throughout for a flight short enough to fit its budget.
   const realS = budget >= T ? T : Math.min(T, Math.max(7, Math.min(14, clearS + 1)));
@@ -479,67 +595,80 @@ function warpFor(
   const weight = gaps.reduce((n, g) => n + Math.pow(g.to - g.from, 0.6), 0) || 1;
   gaps.forEach((g) => (g.play = Math.min(g.to - g.from, Math.max(0.12, (left * Math.pow(g.to - g.from, 0.6)) / weight))));
 
-  // Each stretch plays at its own rate (sim seconds per real second). The rates are blurred over
-  // about a second so the pace never jumps, then summed into a table from playback to sim time.
-  const knots = [0];
-  for (const g of segs) knots.push(knots[knots.length - 1] + (g.play ?? 0.12));
-  const duration = knots[knots.length - 1];
-  const n = Math.max(2, Math.ceil(duration / 0.02));
-  const h = duration / n;
-  const raw = new Float64Array(n);
-  for (let i = 0, k = 0; i < n; i++) {
-    while (k < segs.length - 1 && (i + 0.5) * h >= knots[k + 1]) k++;
-    raw[i] = (segs[k].to - segs[k].from) / Math.max(1e-6, knots[k + 1] - knots[k]);
+  // Each stretch plays at its own pace (sim seconds per real second); one too short to blend
+  // hands its time on to the next.
+  const stretches: { span: number; play: number }[] = [];
+  let span = 0;
+  let play = 0;
+  for (const g of [...segs.map((s) => ({ from: s.from, to: s.to, play: s.play ?? 0.12 })), ...tail]) {
+    span += g.to - g.from;
+    play += g.play;
+    if (play >= 0.03) {
+      stretches.push({ span, play });
+      span = 0;
+      play = 0;
+    }
   }
-  const r = Math.round(0.5 / h);
-  const rate = boxBlur(boxBlur(raw, r), r);
-  const sims = new Float64Array(n + 1);
-  for (let i = 0; i < n; i++) sims[i + 1] = sims[i] + rate[i] * h;
-  // The blur moves a little time between stretches: true the table up to end at T, leaving the
-  // real-time opening (everything the blur didn't reach) exactly as it is.
-  const first = segs[0];
-  const opening = first.from === 0 && first.play !== null && Math.abs(first.play - first.to) < 1e-6 ? first.to : 0;
-  const i0 = Math.max(0, Math.min(n, Math.floor((opening - 2 * r * h) / h)));
-  const fix = (T - sims[i0]) / Math.max(1e-9, sims[n] - sims[i0]);
-  for (let i = i0 + 1; i <= n; i++) sims[i] = sims[i0] + (sims[i] - sims[i0]) * fix;
-  const map = (x: number) => {
-    if (x <= 0) return 0;
-    if (x >= duration) return T;
-    const i = Math.min(n - 1, Math.floor(x / h));
-    return sims[i] + (sims[i + 1] - sims[i]) * (x / h - i);
+  if (stretches.length === 0) stretches.push({ span: end, play: Math.max(play, 1) });
+  else stretches[stretches.length - 1].span += span;
+  // Around each boundary the pace blends from one to the next along a smoothstep, centred on it,
+  // which leaves every stretch its own sim time; everything else is flat. So liftoff is exactly
+  // 1:1 until just before the ramp, and the pace never jumps.
+  const pieces: { x0: number; x1: number; s0: number; ra: number; rb: number }[] = [];
+  let x = 0;
+  let s = 0;
+  const push = (x1: number, ra: number, rb: number) => {
+    if (x1 <= x) return;
+    pieces.push({ x0: x, x1, s0: s, ra, rb });
+    s += ((x1 - x) * (ra + rb)) / 2;
+    x = x1;
+  };
+  stretches.forEach((g, k) => {
+    const pace = g.span / g.play;
+    const knot = x + g.play - (k > 0 ? Math.min(0.4, 0.45 * stretches[k - 1].play, 0.45 * g.play) : 0);
+    const next = stretches[k + 1];
+    if (!next) return push(knot, pace, pace);
+    const w = Math.min(0.4, 0.45 * g.play, 0.45 * next.play);
+    push(knot - w, pace, pace);
+    push(knot + w, pace, next.span / next.play);
+  });
+  const duration = x;
+  const at = (p: (typeof pieces)[number], u: number) =>
+    p.s0 + (p.x1 - p.x0) * (p.ra * u + (p.rb - p.ra) * (u * u * u - (u * u * u * u) / 2));
+  const find = (key: (p: (typeof pieces)[number]) => number, v: number) => {
+    let lo = 0;
+    let hi = pieces.length - 1;
+    while (lo < hi) {
+      const mid = (lo + hi + 1) >> 1;
+      if (key(pieces[mid]) <= v) lo = mid;
+      else hi = mid - 1;
+    }
+    return pieces[lo];
   };
   return {
     duration,
-    sim: map,
+    sim(t: number): number {
+      if (t <= 0) return 0;
+      if (t >= duration) return end;
+      const p = find((q) => q.x0, t);
+      return at(p, (t - p.x0) / (p.x1 - p.x0));
+    },
     /** Inverse of sim(): the playback second (from liftoff) at which sim time `s` plays. */
-    play(s: number): number {
-      if (s <= 0) return 0;
-      if (s >= T) return duration;
+    play(v: number): number {
+      if (v <= 0) return 0;
+      if (v >= end) return duration;
+      const p = find((q) => q.s0, v);
+      if (p.ra === p.rb) return Math.min(p.x1, p.x0 + (v - p.s0) / p.ra);
       let lo = 0;
-      let hi = n;
-      while (hi - lo > 1) {
-        const mid = (lo + hi) >> 1;
-        if (sims[mid] <= s) lo = mid;
+      let hi = 1;
+      for (let i = 0; i < 48; i++) {
+        const mid = (lo + hi) / 2;
+        if (at(p, mid) < v) lo = mid;
         else hi = mid;
       }
-      return (lo + (s - sims[lo]) / Math.max(1e-12, sims[lo + 1] - sims[lo])) * h;
+      return p.x0 + ((lo + hi) / 2) * (p.x1 - p.x0);
     },
   };
-}
-
-/** Moving average over ±r cells, the ends held flat. */
-function boxBlur(a: Float64Array, r: number): Float64Array {
-  const n = a.length;
-  if (r < 1) return a;
-  const out = new Float64Array(n);
-  const at = (i: number) => a[Math.min(n - 1, Math.max(0, i))];
-  let sum = 0;
-  for (let j = -r; j <= r; j++) sum += at(j);
-  for (let i = 0; i < n; i++) {
-    out[i] = sum / (2 * r + 1);
-    sum += at(i + r + 1) - at(i - r);
-  }
-  return out;
 }
 
 /** Every time the trace passes a layer boundary, either way, within the played part. */
@@ -561,10 +690,11 @@ function crossingsFor(points: FlightPoint[], T: number, playOf: (sim: number) =>
 }
 
 /** "Space begins" gets its own callout on the way up, slotted between the others. */
-function withKarman(captions: CaptionCue[], crossings: Crossing[]): CaptionCue[] {
+function withKarman(captions: CaptionCue[], crossings: Crossing[], extra: CaptionCue[] = []): CaptionCue[] {
   const karman = crossings.find((c) => c.hero && c.text.startsWith("Crossed"));
-  if (!karman) return captions;
-  const all = [...captions, { at: karman.at, text: "Kármán line", sub: "Space begins · 100 km", tone: "chalk" as Tone }];
+  if (!karman && !extra.length) return captions;
+  const all = [...captions, ...extra];
+  if (karman) all.push({ at: karman.at, text: "Kármán line", sub: "Space begins · 100 km", tone: "chalk" });
   all.sort((a, b) => a.at - b.at);
   let lastAt = -Infinity;
   for (const c of all) {
@@ -663,10 +793,25 @@ function transcriptsFor(cues: Cue[]): CaptionCue[] {
   return out;
 }
 
-function captionsFor(cues: Cue[], maxAltKm: number, onPad: boolean, sepsSeen = { n: 0 }, until = Infinity): CaptionCue[] {
+function captionsFor(
+  cues: Cue[],
+  maxAltKm: number,
+  onPad: boolean,
+  sepsSeen = { n: 0 },
+  until = Infinity,
+  trip: Trip | null = null,
+): CaptionCue[] {
   const out: CaptionCue[] = [];
   let lastAt = -Infinity;
   for (const c of cues) {
+    const special = trip ? tripCaption(c.event, trip) : null;
+    if (special) {
+      if (c.at >= until) continue;
+      const at = Math.max(c.at, lastAt + CAPTION_GAP);
+      lastAt = at;
+      out.push({ at, ...special });
+      continue;
+    }
     const base = captionText(c.event.kind, maxAltKm, sepsSeen.n, onPad);
     if (c.event.kind === "stage-sep") sepsSeen.n++;
     if (!base || c.at >= until) continue;
@@ -687,6 +832,24 @@ function captionsFor(cues: Cue[], maxAltKm: number, onPad: boolean, sepsSeen = {
     out.push({ at, text: base.text, sub, tone: base.tone });
   }
   return out;
+}
+
+/**
+ * Captions on a trip past LEO: "Parking orbit · 200 km, 7.8 km/s", "Engines off · 10.9 km/s at
+ * 200 km" after the departure burn, and a milestone's own words ("Passes the Moon's distance ·
+ * 28 hours after the burn"). Null for everything else.
+ */
+function tripCaption(e: FlightEvent, trip: Trip): { text: string; sub?: string; tone: Tone } | null {
+  const after = (label: string, mark: string) => label.slice(label.indexOf(mark) + 1).trim() || undefined;
+  if (e === trip.park) return { text: "Parking orbit", sub: after(e.label, ":"), tone: "chalk" };
+  if (e === trip.away) return { text: "Engines off", sub: after(e.label, ":"), tone: "chalk" };
+  if (e.kind === "milestone") {
+    const cut = e.label.indexOf(",");
+    return cut > 0
+      ? { text: e.label.slice(0, cut).trim(), sub: e.label.slice(cut + 1).trim(), tone: "chalk" }
+      : { text: e.label, tone: "chalk" };
+  }
+  return null;
 }
 
 function captionText(kind: FlightEventKind, maxAltKm: number, seps: number, onPad: boolean): { text: string; tone: Tone } | null {
