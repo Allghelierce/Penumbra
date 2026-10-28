@@ -2,7 +2,7 @@
 
 import { useMemo, useState, type ReactNode } from "react";
 import TradeChart from "@/components/TradeChart";
-import { payloadText } from "@/components/TemplatePicker";
+import { floorShown, payloadText } from "@/components/TemplatePicker";
 import { PLACE_NAMES } from "@/components/VerdictPanel";
 import { applyAction } from "@/lib/actions";
 import type { Analysis, Design, DesignAction, DestinationId, EngineCluster, RocketTemplate, Stage } from "@/lib/design";
@@ -81,11 +81,11 @@ function theStages(labels: string[]): string {
  */
 function publishedNote(t: RocketTemplate, modelLeoKg: number): string {
   const published = payloadText(t.realPayloadLeoKg);
-  const model = payloadText(modelLeoKg);
+  const model = payloadText(floorShown(modelLeoKg));
   switch (t.id) {
     case "saturn-v": {
       const topStage = t.design.stages.at(-1)?.dryMassKg ?? 0;
-      return `${published} to low Earth orbit, counting the S-IVB stage and its leftover propellant. This model gives ${model} above the S-IVB, or ${payloadText(modelLeoKg + topStage)} with the empty S-IVB counted in.`;
+      return `${published} to low Earth orbit, counting the S-IVB stage and its leftover propellant. This model gives ${model} above the S-IVB, or ${payloadText(floorShown(modelLeoKg + topStage))} with the empty S-IVB counted in.`;
     }
     case "starship":
       return `${published}, SpaceX's early Block 2 rating with both stages landing. From the published masses, this model gets ${model}. Real ratings also carry margins it doesn't model: dry-mass growth, leftover propellant, boil-off and caution on a new vehicle.`;
@@ -126,21 +126,38 @@ function changesOf(real: Design, yours: Design): string[] {
   return lines;
 }
 
-/** The plain-language answer: what yours carries there, against what the real rocket does. */
-function verdictLine(name: string, destination: DestinationId, yoursMax: number, realMax: number, empty: Analysis | null, changed: boolean): { text: string; good: boolean } {
+/**
+ * The plain-language answer: what yours carries there, against what the real rocket does. Capacities are
+ * rounded down as shown everywhere else, so the verdict, the table and "Most it can carry" agree.
+ */
+function verdictLine(
+  name: string,
+  destination: DestinationId,
+  payloadKg: number,
+  yoursMax: number,
+  realMax: number,
+  empty: Analysis | null,
+  changed: boolean,
+): { text: string; good: boolean } {
   const place = PLACE_NAMES[destination];
+  const yours = floorShown(yoursMax);
+  const realMost = floorShown(realMax);
+  // More on board than it can carry fails in flight, changed or not.
+  if (yours > 0 && payloadKg > yoursMax) {
+    return { text: `Too heavy for ${place}: ${payloadText(payloadKg)} on board, and it can carry ${payloadText(yours)} at most. Lower the payload to fly it there.`, good: false };
+  }
   if (!changed) {
-    return realMax > 0
-      ? { text: `This is the real ${name}: it carries ${payloadText(realMax)} to ${place}. Change something to see what it does.`, good: true }
+    return realMost > 0
+      ? { text: `This is the real ${name}: it carries ${payloadText(realMost)} to ${place}. Change something to see what it does.`, good: true }
       : { text: `This is the real ${name}, and it can't get to ${place}. Change something to see what would.`, good: false };
   }
-  const real = realMax > 0 ? `The real ${name} carries ${payloadText(realMax)} there.` : `The real ${name} can't get there either.`;
-  if (yoursMax > 0 && realMax === 0) return { text: `Reaches ${place} with ${payloadText(yoursMax)}. The real ${name} can't.`, good: true };
-  if (yoursMax > 0) {
-    const diff = yoursMax - realMax;
-    if (Math.abs(diff) < Math.max(10, realMax * 0.005)) return { text: `Carries ${payloadText(yoursMax)} to ${place}, the same as the real ${name}.`, good: true };
+  const real = realMost > 0 ? `The real ${name} carries ${payloadText(realMost)} there.` : `The real ${name} can't get there either.`;
+  if (yours > 0 && realMost === 0) return { text: `Reaches ${place} with ${payloadText(yours)}. The real ${name} can't.`, good: true };
+  if (yours > 0) {
+    const diff = yours - realMost;
+    if (diff === 0) return { text: `Carries ${payloadText(yours)} to ${place}, the same as the real ${name}.`, good: true };
     return {
-      text: `Carries ${payloadText(yoursMax)} to ${place}: ${payloadText(Math.abs(diff))} ${diff > 0 ? "more" : "less"} than the real ${name}.`,
+      text: `Carries ${payloadText(yours)} to ${place}: ${payloadText(Math.abs(diff))} ${diff > 0 ? "more" : "less"} than the real ${name}.`,
       good: diff > 0,
     };
   }
@@ -175,7 +192,7 @@ export default function ModifyPanel({ template, design, preview, onAction, onRes
     return labels.length > 0 ? { labels, costKg: recoveryCostKg(shown, destination) } : null;
   }, [shown, destination]);
   const changes = useMemo(() => changesOf(template.design, design), [template, design]);
-  const verdict = verdictLine(name, destination, yoursMax, realMax, empty, changes.length > 0 || preview !== null);
+  const verdict = verdictLine(name, destination, payloadMassKg, yoursMax, realMax, empty, changes.length > 0 || preview !== null);
 
   // The chart sweeps one real stage; find it in your rocket (stages you add have no real one to compare).
   const stageTabs = useMemo(
@@ -206,30 +223,41 @@ export default function ModifyPanel({ template, design, preview, onAction, onRes
   }
   const currentX = !tab || !chart ? 1 : sweep === "tank-stretch" ? stretchOf(shown, template.design, tab.i) : (shown.stages[tab.i]?.engines[chart.clusterIndex]?.count ?? 1);
 
-  const rows: { label: string; sub?: string; real: string; yours: string; delta: string | null; tone: string }[] = [];
-  const payloadDelta = yoursMax - realMax;
+  // A row in alert has your figure and its note in red: the reason this flight would fail.
+  const rows: { label: string; sub?: string; alert?: boolean; real: string; yours: string; delta: string | null; tone: string }[] = [];
+  const yoursMost = floorShown(yoursMax);
+  const realMost = floorShown(realMax);
+  const payloadDelta = yoursMost - realMost;
   rows.push({
     label: `Payload to ${PLACE_NAMES[destination]}`,
-    sub: "the most it can carry",
-    real: payloadText(realMax),
-    yours: payloadText(yoursMax),
-    delta: Math.abs(payloadDelta) < 10 ? null : signed(payloadDelta, payloadText(Math.abs(payloadDelta))),
+    sub:
+      payloadMassKg <= yoursMax
+        ? "the most it can carry"
+        : yoursMost > 0
+          ? `the most it can carry; ${payloadText(payloadMassKg)} is too heavy`
+          : "it can't get there with any payload",
+    alert: payloadMassKg > yoursMax,
+    real: payloadText(realMost),
+    yours: payloadText(yoursMost),
+    delta: payloadDelta === 0 ? null : signed(payloadDelta, payloadText(Math.abs(payloadDelta))),
     tone: payloadDelta > 0 ? "text-go-signal" : "text-nogo",
   });
   if (realA && yoursA) {
     const dv = yoursA.totalDeltaVMps - realA.totalDeltaVMps;
     rows.push({
       label: "Delta-v",
-      sub: `carrying ${payloadText(payloadMassKg)}, needs ${km(yoursA.requiredDeltaVMps)}`,
+      sub: `carrying ${payloadText(payloadMassKg)}, needs ${km(yoursA.requiredDeltaVMps)} km/s`,
+      alert: yoursA.totalDeltaVMps < yoursA.requiredDeltaVMps,
       real: `${km(realA.totalDeltaVMps)} km/s`,
       yours: `${km(yoursA.totalDeltaVMps)} km/s`,
-      delta: km(Math.abs(dv)) === "0.0" ? null : signed(dv, km(Math.abs(dv))),
+      delta: km(Math.abs(dv)) === "0.0" ? null : signed(dv, `${km(Math.abs(dv))} km/s`),
       tone: dv > 0 ? "text-go-signal" : "text-nogo",
     });
     const twr = yoursA.liftoffTwr - realA.liftoffTwr;
     rows.push({
       label: "Liftoff thrust / weight",
       sub: `${MIN_LIFTOFF_TWR} or more to leave the pad safely`,
+      alert: yoursA.liftoffTwr < MIN_LIFTOFF_TWR,
       real: realA.liftoffTwr.toFixed(2),
       yours: yoursA.liftoffTwr.toFixed(2),
       delta: Math.abs(twr) < 0.005 ? null : signed(twr, Math.abs(twr).toFixed(2)),
@@ -336,10 +364,10 @@ export default function ModifyPanel({ template, design, preview, onAction, onRes
               <tr key={row.label}>
                 <th scope="row" className="px-4 py-2 text-left font-normal">
                   <span className="block text-white/90">{row.label}</span>
-                  {row.sub && <span className="block text-[11px] text-haze">{row.sub}</span>}
+                  {row.sub && <span className={`block text-[11px] ${row.alert ? "text-nogo" : "text-haze"}`}>{row.sub}</span>}
                 </th>
                 <td className="whitespace-nowrap px-2 py-2 text-right font-space tabular-nums text-white/70">{row.real}</td>
-                <td className="whitespace-nowrap px-2 py-2 text-right font-space text-[15px] font-medium tabular-nums text-white">{row.yours}</td>
+                <td className={`whitespace-nowrap px-2 py-2 text-right font-space text-[15px] font-medium tabular-nums ${row.alert ? "text-nogo" : "text-white"}`}>{row.yours}</td>
                 <td className={`whitespace-nowrap py-2 pl-2 pr-4 text-right font-space text-[12px] tabular-nums ${row.delta ? row.tone : "text-haze/60"}`}>
                   {row.delta ?? "·"}
                 </td>
@@ -429,8 +457,8 @@ function PayloadField({ payloadKg, maxKg, small, onSet }: { payloadKg: number; m
     else setDraft(shown);
   };
   const tooHeavy = payloadKg > maxKg;
-  // Rounded down, so "the most it can carry" always still reaches.
-  const most = small ? Math.floor(maxKg / 10) * 10 : Math.floor(maxKg / 100) * 100;
+  // Rounded down as the table shows it, so "the most it can carry" always still reaches.
+  const most = floorShown(maxKg);
   return (
     <div className="flex items-center gap-3">
       <label htmlFor="payload-mass" className="w-20 shrink-0 text-[10px] uppercase tracking-[0.18em] text-haze">

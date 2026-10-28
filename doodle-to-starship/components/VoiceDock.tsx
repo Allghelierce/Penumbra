@@ -742,8 +742,9 @@ export default function VoiceDock({
           setLaunchAudioMuted(next);
           setMuted(next);
         }}
-        // Above the launch overlay (z-50); during a flight, tucked under its top-right controls.
-        className={`fixed ${phase === "launch" ? "right-4 top-14" : "bottom-4 right-4"} z-[70] flex h-8 w-8 items-center justify-center rounded-full border border-white/70 bg-black/60 text-[14px] leading-none text-white transition-colors hover:bg-white hover:text-black`}
+        // Above the launch overlay (z-50); during a flight, tucked under its top-right controls. Otherwise
+        // bottom-left, on the open sky: bottom-right would sit on the side panel's controls.
+        className={`fixed ${phase === "launch" ? "right-4 top-14" : "bottom-4 left-4"} z-[70] flex h-8 w-8 items-center justify-center rounded-full border border-white/70 bg-black/60 text-[14px] leading-none text-white transition-colors hover:bg-white hover:text-black`}
       >
         {muted ? "🔇" : "🔊"}
       </button>
