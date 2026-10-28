@@ -255,3 +255,19 @@ describe("set-recover", () => {
     expect(applyAction(landed, { type: "set-recover", stageIndex: 7, recover: true })).toBe(landed);
   });
 });
+
+describe("remove-stage", () => {
+  it.each(TEMPLATES.map((t) => [t.id, t] as const))("%s: adding a booster and removing it gives back the real rocket exactly", (_, t) => {
+    const added = applyAction(t.design, { type: "add-stage" });
+    expect(applyAction(added, { type: "remove-stage", stageIndex: 0 })).toEqual(t.design);
+  });
+
+  it("narrows the vehicle back to its widest remaining stage", () => {
+    const f9 = TEMPLATES.find((t) => t.id === "falcon9")!.design;
+    const added = applyAction(f9, { type: "add-stage" });
+    expect(added.diameterM).toBeGreaterThan(f9.diameterM);
+    const removed = applyAction(added, { type: "remove-stage", stageIndex: 0 });
+    expect(removed.diameterM).toBe(f9.diameterM);
+    expect(analyze(removed)).toEqual(analyze(f9));
+  });
+});

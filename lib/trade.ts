@@ -24,6 +24,11 @@ export type SweptCurve = TradeCurve & {
   realOnCurve?: boolean;
   /** The real rocket's most payload to the destination, flown with your recovery choices. */
   realPayloadKg?: number;
+  /**
+   * How that real rocket flies when it isn't as built, e.g. "landing its booster": then
+   * realPayloadKg differs from the real rocket's headline figure, and captions should say why.
+   */
+  realFlownAs?: string;
 };
 
 const STRETCH_FROM = 0.6;
@@ -155,7 +160,8 @@ export function tradeCurve(
   const reference = flownLike(real, design);
   const realOnCurve = sameVehicle(build(realX), reference);
   const realPayloadKg = maxPayloadKg(reference, destination);
-  const extra = { ...(limit && { limit }), realOnCurve, realPayloadKg };
+  const realFlownAs = flownAs(reference, real);
+  const extra = { ...(limit && { limit }), realOnCurve, realPayloadKg, ...(realFlownAs && { realFlownAs }) };
   if (points.length === 0) return { label, unit, points, realX, bestX: realX, ...extra };
   // The most payload; on a tie, the point nearest the real rocket.
   const best = points.reduce((b, p) =>
@@ -172,6 +178,18 @@ function flownLike(real: Design, yours: Design): Design {
     if (r) recover.set(r, yours.stages[i].recover);
   });
   return { ...real, stages: real.stages.map((s) => (recover.has(s) ? { ...s, recover: recover.get(s) } : s)) };
+}
+
+/** How `flown` lands its stages, when that differs from the real rocket as built; undefined when it doesn't. */
+function flownAs(flown: Design, real: Design): string | undefined {
+  if (flown.stages.every((s, i) => !!s.recover === !!real.stages[i]?.recover)) return undefined;
+  const n = flown.stages.length;
+  const landing = flown.stages.flatMap((s, i) => (s.recover ? [i] : []));
+  if (landing.length === 0) return n === 1 ? "expended" : "landing no stages";
+  if (landing.length === n) return n === 1 ? "landing itself" : n === 2 ? "landing both stages" : `landing all ${n} stages`;
+  if (landing.length === 1 && landing[0] === 0) return "landing its booster";
+  if (landing.length === 1 && landing[0] === n - 1) return "landing its upper stage";
+  return `landing ${landing.length} of its ${n} stages`;
 }
 
 /** Same stages, engines, tanks, structure, recovery and widths: the physics can't tell them apart. */
@@ -234,22 +252,27 @@ function explainShape(curve: SweptCurve): string {
   // parameter as built, and the real rocket gets its own sentence.
   const onReal = curve.realOnCurve !== false;
   const asBuilt = stretch ? "this stage's tanks as built" : "the real engine count";
-  const realLine = !onReal && curve.realPayloadKg !== undefined ? ` The real rocket carries ${capacityText(curve.realPayloadKg)}.` : "";
+  // "The real rocket, landing its booster," when it isn't flown as built, so its figure can't be
+  // mistaken for the real rocket's headline payload beside it.
+  const theReal = curve.realFlownAs ? `The real rocket, ${curve.realFlownAs},` : "The real rocket";
+  const realLine = !onReal && curve.realPayloadKg !== undefined ? ` ${theReal} carries ${capacityText(curve.realPayloadKg)}.` : "";
 
   const gain = real.payloadKg > 0 ? (best.payloadKg - real.payloadKg) / real.payloadKg : Infinity;
   if (Math.abs(curve.bestX - curve.realX) < (stretch ? 0.051 : 1) || gain < 0.02) {
     if (atLimit) {
       return onReal
-        ? `The real rocket already carries the most: ${capacityText(real.payloadKg)} at ${fmtX(curve.realX)}. Fewer carry less, and ${fit}.`
+        ? `${theReal} already carries the most: ${capacityText(real.payloadKg)} at ${fmtX(curve.realX)}. Fewer carry less, and ${fit}.`
         : `Yours already carries the most at ${fmtX(curve.realX)}: ${capacityText(real.payloadKg)}. Fewer carry less, and ${fit}.${realLine}`;
     }
     return onReal
-      ? `The real rocket already sits at the peak: ${capacityText(real.payloadKg)} at ${fmtX(curve.realX)}. Change it either way and it carries less.`
+      ? `${theReal} already sits at the peak: ${capacityText(real.payloadKg)} at ${fmtX(curve.realX)}. Change it either way and it carries less.`
       : `With ${asBuilt}, yours already sits at the peak: ${capacityText(real.payloadKg)}. Change it either way and it carries less.${realLine}`;
   }
   // The percentage comes from the figures as shown, so a caption's numbers agree with each other.
   const shownGain = (shownKg(best.payloadKg) - shownKg(real.payloadKg)) / shownKg(real.payloadKg);
-  const against = onReal ? `the real ${capacityText(real.payloadKg)}` : `${capacityText(real.payloadKg)} with ${asBuilt}`;
+  const against = onReal
+    ? `the real ${capacityText(real.payloadKg)}${curve.realFlownAs ? ` (${curve.realFlownAs})` : ""}`
+    : `${capacityText(real.payloadKg)} with ${asBuilt}`;
   const more = Number.isFinite(gain) ? `${capacityText(best.payloadKg)}, ${Math.round(shownGain * 100)}% more than ${against}` : capacityText(best.payloadKg);
   const why = stretch
     ? curve.bestX > curve.realX

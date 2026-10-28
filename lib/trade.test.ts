@@ -334,3 +334,20 @@ describe("the real rocket on a curve of a modified design", () => {
     expect(curve.realPayloadKg).toBe(maxPayloadKg(recovered, "leo"));
   });
 });
+
+describe("a real rocket flown differently from how it's built", () => {
+  it("says how it flies, so its figure can't be mistaken for the real rocket's headline payload", () => {
+    const f9 = template("falcon9");
+    const recovered = withRecovery(f9.design, [0]);
+    const curve = tradeCurve(recovered, { kind: "engine-count", stageIndex: 0 }, { destination: "leo", real: f9.design });
+    expect(curve.realFlownAs).toBe("landing its booster");
+    expect(explainCurve(curve)).toMatch(/^The real rocket, landing its booster, already carries the most: 17\.5 t/);
+    // As built, nothing to say.
+    expect(tradeCurve(f9.design, { kind: "engine-count", stageIndex: 0 }, { destination: "leo", real: f9.design }).realFlownAs).toBeUndefined();
+    // Off the real rocket too.
+    const stretched = stretchFromReal(recovered, f9.design, 1, 1.2);
+    const off = tradeCurve(stretched, { kind: "tank-stretch", stageIndex: 0 }, { destination: "leo", real: f9.design });
+    expect(off.realOnCurve).toBe(false);
+    expect(explainCurve(off)).toContain(`The real rocket, landing its booster, carries ${capacityText(maxPayloadKg(recovered, "leo"))}.`);
+  });
+});

@@ -122,7 +122,7 @@ function designChanges(before: Design, after: Design): string[] {
   if (engines(after) !== engines(before)) changes.push(`engines ${engines(before)} → ${engines(after)}`);
 
   if (Math.round(after.payloadMassKg) !== Math.round(before.payloadMassKg)) {
-    changes.push(`payload ${tonnes(before.payloadMassKg)} → ${tonnes(after.payloadMassKg)}`);
+    changes.push(`payload ${capacityText(before.payloadMassKg)} → ${capacityText(after.payloadMassKg)}`);
   }
   if (after.destination !== before.destination) {
     changes.push(`target ${DESTINATION_NAMES[before.destination]} → ${DESTINATION_NAMES[after.destination]}`);
@@ -244,26 +244,14 @@ function levelUps(design: Design, analysis: Analysis): Improvement[] {
   return out;
 }
 
+/** The most it could carry here, as the panel shows it (rounded down), when that's more than it has aboard. */
 function morePayload(design: Design): Improvement | null {
-  const worksWith = (kg: number) => works(analyze({ ...design, payloadMassKg: kg }));
-  const start = design.payloadMassKg;
-  let extra = 1_000;
-  while (worksWith(start + extra)) {
-    extra *= 2;
-    if (extra > 1e8) return null;
-  }
-  let lo = 0;
-  let hi = extra;
-  for (let i = 0; i < 40; i++) {
-    const mid = (lo + hi) / 2;
-    if (worksWith(start + mid)) lo = mid;
-    else hi = mid;
-  }
-  const shown = floorForDisplay(lo);
-  if (shown < 100) return null;
-  const fix: DesignAction = { type: "set-payload", payloadMassKg: start + shown };
+  const most = shownKg(maxPayloadKg(design));
+  const extra = most - design.payloadMassKg;
+  if (extra < 100) return null;
+  const fix: DesignAction = { type: "set-payload", payloadMassKg: most };
   if (!works(analyze(applyAction(design, fix)))) return null;
-  return { text: `You could carry ${tonnes(shown)} more to ${DESTINATION_NAMES[design.destination]}`, fix };
+  return { text: `You could carry ${capacityText(extra)} more to ${DESTINATION_NAMES[design.destination]}`, fix };
 }
 
 /** The next harder destination, and the cheapest edit that reaches it. */
@@ -289,7 +277,7 @@ function goFarther(design: Design, analysis: Analysis): Improvement | null {
   // When it gets there carrying less, that's the first thing to say: no rebuild needed. Both the
   // payload and the target change, more than one edit does, so it's advice without a button.
   const lighter = shownKg(maxPayloadKg(design, next));
-  if (lighter >= 100) return { text: `Carry ${capacityText(lighter)} and it reaches ${name}` };
+  if (lighter > 0) return { text: `Carry ${capacityText(lighter)} and it reaches ${name}` };
 
   // Otherwise the smallest tank stretch on any stage, or failing that, a new stage.
   let best: { percent: number; stageIndex: number } | null = null;
@@ -365,15 +353,3 @@ function tankName(design: Design, stageIndex: number) {
   return design.stages.length > 1 ? `${design.stages[stageIndex].label} tanks` : "tanks";
 }
 
-/** Rounds down to what's shown, so a suggested payload is never more than the rocket can carry. */
-function floorForDisplay(kg: number) {
-  if (kg >= 10_000) return Math.floor(kg / 1000) * 1000;
-  if (kg >= 100) return Math.floor(kg / 100) * 100;
-  return Math.floor(kg);
-}
-
-function tonnes(kg: number) {
-  if (kg >= 10_000) return `${Math.round(kg / 1000).toLocaleString("en-US")} t`;
-  if (kg >= 100) return `${(Math.round(kg / 100) / 10).toFixed(1)} t`;
-  return `${Math.round(kg)} kg`;
-}

@@ -31,7 +31,7 @@ export function applyAction(design: Design, action: DesignAction): Design {
 
     case "remove-stage":
       if (design.stages.length <= 1 || !hasStage(design, action.stageIndex)) return design;
-      return { ...design, stages: design.stages.filter((_, i) => i !== action.stageIndex) };
+      return withWidths(design, design.stages.filter((_, i) => i !== action.stageIndex));
 
     case "set-engines":
       return updateStage(design, action.stageIndex, (stage) => setEngines(stage, action));
@@ -50,6 +50,22 @@ export function applyAction(design: Design, action: DesignAction): Design {
     case "review":
       return design;
   }
+}
+
+/**
+ * `stages` on `design`, with the vehicle's diameter (which sets its drag) back to its widest
+ * remaining stage, and stage widths that only repeat it dropped: adding a booster and removing
+ * it again gives back the rocket you had.
+ */
+function withWidths(design: Design, stages: Stage[]): Design {
+  const diameterM = Math.max(...stages.map((s) => s.diameterM ?? design.diameterM));
+  const plain = (s: Stage): Stage => {
+    if (s.diameterM === undefined || Math.abs(s.diameterM - diameterM) > 1e-9) return s;
+    const copy = { ...s };
+    delete copy.diameterM;
+    return copy;
+  };
+  return { ...design, diameterM, stages: stages.map(plain) };
 }
 
 function hasStage(design: Design, index: number) {

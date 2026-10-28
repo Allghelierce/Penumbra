@@ -266,3 +266,23 @@ describe("going farther", () => {
     expect(there.marginMps).toBeGreaterThanOrEqual(0);
   });
 });
+
+describe("at the most it can carry", () => {
+  it("offers no more payload once it's at the panel's rounded-down maximum", () => {
+    for (const id of ["saturn-v", "starship", "falcon9", "electron"] as const) {
+      const boosted = applyAction(templateById(id).design, { type: "add-stage" });
+      const full: Design = { ...boosted, destination: "leo", payloadMassKg: shownKg(maxPayloadKg(boosted, "leo")) };
+      const texts = recap(attempts(full), { drawable: false }).improvements.map((i) => i.text);
+      expect(texts.some((t) => /could carry .* more/.test(t)), `${id}: ${texts.join(" | ")}`).toBe(false);
+    }
+  });
+
+  it("offers a small payload first too: Electron reaches GTO with a few dozen kilograms", () => {
+    const electron = templateById("electron").design;
+    const full: Design = { ...electron, destination: "leo", payloadMassKg: shownKg(maxPayloadKg(electron, "leo")) };
+    const gto = maxPayloadKg(electron, "gto");
+    expect(gto).toBeGreaterThan(0);
+    const texts = recap(attempts(full), { drawable: false }).improvements.map((i) => i.text);
+    expect(texts[0]).toBe(`Carry ${capacityText(gto)} and it reaches GTO`);
+  });
+});
