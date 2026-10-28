@@ -106,6 +106,15 @@ const MARK_LABEL: Partial<Record<FlightEventKind, string>> = {
   escape: "Escape",
 };
 
+/** "Engine 1 loses pressure and shuts down" → "Engine out"; "" when there's no short word for it. */
+function milestoneWord(label: string): string {
+  if (/moon/i.test(label)) return "Moon";
+  if (/engine/i.test(label) && /\b(loses|lost|fail)/i.test(label)) return "Engine out";
+  if (/engine/i.test(label) && /\b(off|shuts?)\b/i.test(label)) return "Engine off";
+  if (/pogo/i.test(label)) return "Pogo";
+  return "";
+}
+
 /** "Trans-lunar injection: 10.9 km/s at 200 km" → "TLI". */
 const initials = (label: string) =>
   label
@@ -129,9 +138,9 @@ function milestones(plan: Plan): Mark[] {
   let seps = 0;
   for (const c of plan.cues) {
     const k = c.event.kind;
-    // A milestone says its own thing (a pogo, an engine out, the Moon's distance): the Moon gets
-    // its name on the rail, anything else a plain mark (its words are in the callout).
-    const milestone = k === "milestone" ? (/moon/i.test(c.event.label ?? "") ? "Moon" : "") : null;
+    // A milestone says its own thing in the callout; the rail gets a word for it when there's a
+    // short one (the Moon's distance, an engine lost or shut down early, pogo), else a plain mark.
+    const milestone = k === "milestone" ? milestoneWord(c.event.label ?? "") : null;
     const label =
       milestone ??
       (k === "engine-cutoff"

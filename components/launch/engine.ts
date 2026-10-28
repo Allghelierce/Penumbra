@@ -250,13 +250,20 @@ export function startLaunch(
   const landingCue = plan.cues.find((cue) => /\b(lands|landed|landing|caught|catch)\b/i.test(cue.event.label ?? ""));
   // A real flight from history says for itself how its booster came home (a catch, or a splashdown).
   const catchMode = (input.templateId === "starship" && !input.mission) || /\b(caught|catch)\b/i.test(landingCue?.event.label ?? "");
-  const recovers = design.stages?.[0]?.recover ?? (!input.templateId && !!design.features?.includes("landing-legs"));
-  const landsByDesign = pieces.length >= 2 && plan.seps.length >= 1 && recovers;
+  // The stage that comes home: the lowest one set to recover (with a booster added under a Falcon 9,
+  // that's the Falcon 9 first stage, one up), or the bottom one for a sketch with landing legs and
+  // for a mission whose timeline says so.
+  const setToRecover = design.stages?.findIndex((st) => st.recover) ?? -1;
+  const saysRecover = !!design.stages?.some((st) => st.recover !== undefined);
+  const legs = !saysRecover && !input.templateId && !!design.features?.includes("landing-legs");
+  const lander = landingCue ? 0 : setToRecover >= 0 ? setToRecover : legs ? 0 : -1;
+  // It has to come away from something: there's a stage above it, and its separation is in the plan.
+  const landsByDesign = !landingCue && lander >= 0 && lander < pieces.length - 1 && plan.seps.length > lander;
   // It touches down when real boosters do: at the mission's own event, or about 5 minutes after
-  // separation for a pad landing (Falcon 9 lands around T+7:45) and a little over 4 for a tower
+  // its separation for a pad landing (Falcon 9 lands around T+7:45) and a little over 4 for a tower
   // catch (T+7:00 on the first one), within the flight. The inset plays the last minute of the
   // descent, landing burn included, and holds a moment after touchdown.
-  const sepSim = plan.cues.find((cue) => cue.event.kind === "stage-sep")?.event.tS ?? null;
+  const sepSim = plan.cues.filter((cue) => cue.event.kind === "stage-sep")[Math.max(0, lander)]?.event.tS ?? null;
   const designTouch = landsByDesign && sepSim !== null ? Math.min(plan.T - 2, sepSim + (catchMode ? 255 : 320)) : null;
   const touchSim = landingCue
     ? landingCue.event.tS
@@ -382,7 +389,7 @@ export function startLaunch(
       dx: dir * 0.04 * Hn * d,
       dy: 0.06 * Hn * d + 0.32 * Hn * d * d,
       // A booster that's coming home flips around for its boostback instead of tumbling.
-      rot: i === 0 && touchAt !== null ? dir * Math.PI * ease(d / 1.8) : dir * (0.35 * d + 0.18 * d * d),
+      rot: i === lander && touchAt !== null ? dir * Math.PI * ease(d / 1.8) : dir * (0.35 * d + 0.18 * d * d),
       alpha: 1 - clamp01((d - 1.6) / 1.4),
     };
   };
@@ -640,7 +647,7 @@ export function startLaunch(
   /** k runs 0 to LAND_TOUCH through the descent, then on past it after touchdown. */
   function drawLanding(k: number, fade: number) {
     const c = ctx!;
-    const p0 = pieces[0];
+    const p0 = pieces[Math.max(0, lander)];
     if (!p0) return;
     if (fade <= 0) return;
     const iw = Math.round(Math.min(190, W * 0.3));
@@ -719,7 +726,7 @@ export function startLaunch(
     c.scale(Zi, Zi);
     c.translate(-p0.nozzle.x, -p0.box.maxY);
     if (k > 0.42 && k < touch + 0.02) drawFlame(p0.nozzle, 0.7, 0, 1, Zi, 7);
-    strokeDoodle(piecePaths[0], 1, 1, Zi);
+    strokeDoodle(piecePaths[Math.max(0, lander)], 1, 1, Zi);
     c.restore();
     // Touchdown (or the catch): a flash, and dust off the pad.
     if (landed) {

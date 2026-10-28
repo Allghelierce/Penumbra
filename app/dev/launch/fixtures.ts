@@ -354,6 +354,13 @@ export const TEMPLATE_FIXTURES: LaunchFixture[] = [
     "template-falcon9-recovered",
     `${falcon9.name}, booster recovered`,
   ),
+  // A booster added under the Falcon 9, whose own first stage (now one up) flies back.
+  templateFixture(
+    falcon9,
+    applyAction(applyAction(falcon9.design, { type: "add-stage" }), { type: "set-recover", stageIndex: 1, recover: true }),
+    "template-falcon9-booster-recovered",
+    `${falcon9.name} + booster, first stage recovered`,
+  ),
   // Past LEO: a parking orbit, a departure burn, then days of coasting.
   templateFixture(saturn, { ...saturn.design, destination: "moon-orbit", payloadMassKg: 30_000 }, "template-saturn-v-moon", "Saturn V to the Moon"),
   templateFixture(falcon9, { ...falcon9.design, destination: "mars-transfer", payloadMassKg: 1_000 }, "template-falcon9-mars", "Falcon 9 to Mars"),
