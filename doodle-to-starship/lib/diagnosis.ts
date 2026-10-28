@@ -32,6 +32,8 @@ export interface Sensitivity {
 const G0 = 9.80665;
 /** Upper stages that start slower than this spend a long time fighting gravity. */
 const SLOW_UPPER_STAGE_TWR = 0.5;
+/** ...but that's only worth flagging when one more engine there buys at least this much margin. */
+const SLOW_STAGE_MIN_GAIN_MPS = 50;
 const SEVERITY_ORDER = { "no-go": 0, warning: 1, ok: 2 } as const;
 
 type Draft = Omit<Issue, "n">;
@@ -49,7 +51,7 @@ export function diagnose(design: Design, analysis: Analysis, reading?: SketchRea
   const liftoff = liftoffIssue(design, analysis, marks, markFor);
   drafts.push(liftoff.issue);
   drafts.push(deltaVIssue(design, liftoff.flyable, marks, markFor));
-  drafts.push(...slowUpperStages(analysis));
+  drafts.push(...slowUpperStages(design, analysis));
   drafts.push(...hardwareIssues(design, reading?.parts ?? [], markFor));
 
   return drafts
@@ -109,7 +111,7 @@ function liftoffIssue(
     (a.liftoffTwr < 1
       ? `. Below 1.0, weight beats thrust and it never leaves the pad.`
       : a.liftoffTwr < SAFE_TWR
-        ? `: it accelerates at only ${((a.liftoffTwr - 1) * G0).toFixed(1)} m/s² off the pad, so gravity eats the climb. Launchers start at 1.2–1.5.`
+        ? `: it accelerates at only ${((a.liftoffTwr - 1) * G0).toFixed(1)} m/s² off the pad, so gravity eats the climb. Launchers start at ${SAFE_TWR}–1.5.`
         : `, a healthy ${((a.liftoffTwr - 1) * G0).toFixed(1)} m/s² of net acceleration off the pad.`);
 
   if (a.liftoffTwr >= SAFE_TWR) {
@@ -233,20 +235,41 @@ function stageSum(a: Analysis) {
   return a.stages.reduce((sum, s) => sum + s.deltaVMps, 0);
 }
 
-function slowUpperStages(a: Analysis): Draft[] {
-  return a.stages.slice(1).flatMap((s): Draft[] => {
-    if (s.twrAtIgnition >= SLOW_UPPER_STAGE_TWR || s.thrustN <= 0) return [];
+/**
+ * Upper stages that light at a low thrust-to-weight spend a long burn holding themselves up.
+ * The physics counts that loss stage by stage. It's flagged only when one more of the stage's
+ * engines would win back more than its own mass costs (the Saturn V's single-J-2 S-IVB doesn't),
+ * with how big the loss is and what the engine buys.
+ */
+function slowUpperStages(design: Design, a: Analysis): Draft[] {
+  const losses = ascentLossesMps(design, a.stages);
+  return a.stages.flatMap((s, i): Draft[] => {
+    const engines = design.stages[i]?.engines ?? [];
+    if (i === 0 || s.twrAtIgnition >= SLOW_UPPER_STAGE_TWR || s.thrustN <= 0 || engines.length === 0) return [];
+    const main = engines.reduce((best, c, j, all) => (c.count > all[best].count ? j : best), 0);
+    const engine = engines[main].engine;
+    const fix: DesignAction = { type: "set-engines", stageIndex: i, engine, count: engines[main].count + 1, clusterIndex: main };
+    const more = applyAction(design, fix);
+    const after = analyze(more);
+    const gain = after.marginMps - a.marginMps;
+    if (a.liftoffTwr < 1 || gain < SLOW_STAGE_MIN_GAIN_MPS) return [];
+    const lossAfter = ascentLossesMps(more, after.stages)[i];
     return [
       {
         severity: "warning",
         title: `Slow ${s.label}`,
         why:
-          `The ${s.label} lights at thrust-to-weight ${s.twrAtIgnition.toFixed(2)} and burns for ${Math.round(s.burnTimeS / 60)} min. ` +
-          `Gravity pulls on it the whole time, so real losses run higher than this estimate's flat budget.`,
-        effect: "More or bigger upper-stage engines shorten the burn",
+          `Low thrust-to-weight: the ${s.label} lights at ${s.twrAtIgnition.toFixed(2)} and fights gravity through its whole ${minutes(s.burnTimeS)} burn. ` +
+          `That costs ${km(losses[i])} km/s, already counted in the ${km(a.requiredDeltaVMps)} km/s it needs.`,
+        effect: `+1 ${ENGINES[engine].name}: a ${minutes(after.stages[i]?.burnTimeS ?? 0)} burn, ${km(lossAfter)} km/s lost instead of ${km(losses[i])}, ${signedMps(gain)} of margin`,
+        fix,
       },
     ];
   });
+}
+
+function minutes(seconds: number) {
+  return `${Math.max(1, Math.round(seconds / 60))}-min`;
 }
 
 // ---------------------------------------------------------------------------

@@ -5,6 +5,7 @@ import type { Design } from "./design";
 import { diagnose, sensitivities } from "./diagnosis";
 import { analyze } from "./physics";
 import { buildReview } from "./redpen";
+import { templateById } from "./templates";
 import { maxPayloadKg } from "./trade";
 
 function falconLike(overrides: Partial<Design> = {}): Design {
@@ -119,6 +120,36 @@ describe("diagnose", () => {
     const list = issues(crowded);
     expect(list.map((i) => i.title)).toEqual(expect.arrayContaining(["No landing legs", "Fins are dead weight"]));
     expect(list.find((i) => i.title === "Fins are dead weight")?.markIndex).toBeUndefined();
+  });
+
+  it("flags a slow upper stage with what its long burn costs, and what one more engine buys", () => {
+    const slow = falconLike({
+      stages: [falconLike().stages[0], { ...falconLike().stages[1], tankVolumeM3: 200 }],
+    });
+    const analysis = analyze(slow);
+    expect(analysis.stages[1].twrAtIgnition).toBeLessThan(0.5);
+    const issue = issues(slow).find((i) => i.title === "Slow Stage 2")!;
+    expect(issue.severity).toBe("warning");
+    expect(issue.why).toMatch(
+      /^Low thrust-to-weight: the Stage 2 lights at 0\.\d\d and fights gravity through its whole \d+-min burn\. That costs \d+\.\d km\/s, already counted in the \d+\.\d km\/s it needs\.$/,
+    );
+    expect(issue.effect).toMatch(/^\+1 Merlin Vacuum: a \d+-min burn, \d+\.\d km\/s lost instead of \d+\.\d, \+[\d,]+ m\/s of margin$/);
+    expect(issue.fix).toEqual({ type: "set-engines", stageIndex: 1, engine: "merlin-vacuum", count: 2, clusterIndex: 0 });
+    const gain = Number(issue.effect.match(/\+([\d,]+) m\/s of margin$/)![1].replace(/,/g, ""));
+    expect(analyze(applyAction(slow, issue.fix!)).marginMps - analysis.marginMps).toBeCloseTo(gain, -1);
+  });
+
+  it("leaves a slow upper stage alone when another engine wouldn't pay for itself, like the Saturn V's S-IVB", () => {
+    const saturn = templateById("saturn-v").design;
+    const a = analyze(saturn);
+    expect(a.stages[2].twrAtIgnition).toBeLessThan(0.5);
+    expect(issues(saturn).map((i) => i.title)).not.toContain("Slow S-IVB");
+  });
+
+  it("never claims a flat loss budget", () => {
+    for (const d of [falconLike(), stuck, hopper, falconLike({ stages: [falconLike().stages[0], { ...falconLike().stages[1], tankVolumeM3: 250 }] })]) {
+      for (const i of issues(d)) expect(`${i.why} ${i.effect}`).not.toMatch(/budget/i);
+    }
   });
 
   it("orders no-gos first, then warnings, then passes, numbered from 1", () => {

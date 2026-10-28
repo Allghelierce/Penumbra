@@ -4,6 +4,7 @@ import { applyAction } from "./actions";
 import { NAPKIN_ASPECT, type Design, type Part, type RedPenMark, type SketchReading } from "./design";
 import { analyze } from "./physics";
 import { buildReview } from "./redpen";
+import { TEMPLATES } from "./templates";
 import { maxPayloadKg, MIN_LIFTOFF_TWR } from "./trade";
 
 function falconLike(overrides: Partial<Design> = {}): Design {
@@ -116,6 +117,14 @@ describe("a rocket that works", () => {
     }
     expectOnNapkin(tick);
     expect(r.summary).toMatch(/^\d+\.\d of \d+\.\d km\/s: it reaches low Earth orbit with \d+\.\d km\/s to spare\.$/);
+  });
+
+  it("checks off every real rocket as flown, the Saturn V's 1.18 liftoff included", () => {
+    for (const t of TEMPLATES) {
+      const { analysis, review: r } = review(t.design, []);
+      expect(r.marks.map((m) => m.kind), t.id).toEqual(["tick"]);
+      expect(analysis.liftoffTwr, t.id).toBeGreaterThanOrEqual(MIN_LIFTOFF_TWR);
+    }
   });
 
   it("puts the check on the left, clear of the drawing, when the rocket sits on the right", () => {

@@ -18,15 +18,18 @@ import {
   type SketchReading,
 } from "./design";
 import { analyze, ENGINES } from "./physics";
-import { maxPayloadKg } from "./trade";
+import { maxPayloadKg, MIN_LIFTOFF_TWR } from "./trade";
 
 type Box = [x: number, y: number, w: number, h: number];
 type SetEngines = Extract<DesignAction, { type: "set-engines" }>;
 type SetPayload = Extract<DesignAction, { type: "set-payload" }>;
 
 const MAX_MARKS = 3;
-/** Real launchers lift off at about 1.2 or more; below that the red pen calls it marginal. */
-export const SAFE_TWR = 1.2;
+/**
+ * Below this liftoff thrust-to-weight the red pen calls it marginal: the Saturn V's margin, the
+ * same floor the payload ratings use, so a real rocket is never told it needs another engine.
+ */
+export const SAFE_TWR = MIN_LIFTOFF_TWR;
 /** "+N engines" aims for this liftoff thrust-to-weight. */
 const TARGET_TWR = 1.3;
 /** Past this many extra engines the advice is to rethink the booster, not to add engines. */
@@ -526,7 +529,7 @@ function hasFeature(design: Design, parts: Part[], feature: "fins" | "landing-le
 
 /**
  * Two decimals, like the rest of the screen (four below 0.01), but never rounded up across
- * a threshold: 0.996 reads "0.99", not "1.00", and 1.199 reads "1.19", not "1.20".
+ * a threshold: 0.996 reads "0.99", not "1.00", and 1.149 reads "1.14", not "1.15".
  */
 function formatTwr(twr: number) {
   if (twr !== 0 && twr < 0.01) return twr.toFixed(4);
