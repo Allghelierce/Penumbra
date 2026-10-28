@@ -250,6 +250,8 @@ export default function TradeChart({ curve, currentX, onPick, caption, context, 
         const x = key === "real" ? curve.realX : key === "best" ? curve.bestX : currentX;
         const kg = at(x);
         let value = allZero ? "" : kg > 0 ? capacityText(kg) : "can't reach";
+        // The real rocket flown your way (say, landing its booster) carries less than its rating: say which.
+        if (key === "real" && curve.realFlownAs) value += `, ${curve.realFlownAs}`;
         if (key === "you" && kg > 0 && realKg > 0 && (!realOn || Math.abs(currentX - curve.realX) > 1e-6)) {
           const p = pct(kg, realKg);
           if (p !== 0) value += ` ${signedPct(p)}`;
@@ -378,24 +380,8 @@ export default function TradeChart({ curve, currentX, onPick, caption, context, 
               </g>
             )}
             {g.area && !g.allZero && <path d={g.area} fill="#fff" fillOpacity={0.06} />}
-          {/* The real rocket isn't on this sweep of yours: its capacity is a level to beat, not a point. */}
-          {g.refY != null && g.refKg != null && (
-            <g>
-              <line x1={g.padL} x2={g.padL + g.plotW} y1={g.refY} y2={g.refY} stroke="#fff" strokeOpacity={0.45} />
-              <text
-                x={g.padL + 6}
-                y={g.refY - 14 < g.top ? g.refY + 13 : g.refY - 5}
-                fontSize={10}
-                letterSpacing="0.06em"
-                fill="rgba(255,255,255,0.8)"
-                stroke="#000"
-                strokeWidth={4}
-                paintOrder="stroke"
-              >
-                REAL ROCKET {capacityText(g.refKg)}
-              </text>
-            </g>
-          )}
+          {/* The real rocket isn't on this sweep of yours: its capacity is a level to beat, not a point. Its key is under the axis. */}
+          {g.refY != null && <line x1={g.padL} x2={g.padL + g.plotW} y1={g.refY} y2={g.refY} stroke="#fff" strokeOpacity={0.45} />}
             <path d={g.line} fill="none" stroke={g.allZero ? "#555" : "#d9d9d9"} strokeWidth={2} strokeLinejoin="round" strokeLinecap="round" />
             {/* Engine counts are whole numbers: a dot on each one says the line only joins them up. */}
             {curve.unit !== "×" &&
@@ -487,6 +473,14 @@ export default function TradeChart({ curve, currentX, onPick, caption, context, 
         </p>
       </div>
 
+      {g.refKg != null && (
+        <p className="flex items-center gap-2 px-4 pb-1.5 font-mono text-[10px] uppercase tracking-[0.08em] text-white/80">
+          <span aria-hidden className="h-px w-4 shrink-0 bg-white/60" />
+          <span>
+            Real rocket{curve.realFlownAs ? `, ${curve.realFlownAs}` : ""} · <span className="normal-case">{capacityText(g.refKg)}</span>
+          </span>
+        </p>
+      )}
       {text && <p className="px-4 pt-1 pb-3 text-[14px] leading-snug text-white/85">{text}</p>}
 
       {n > 0 && (

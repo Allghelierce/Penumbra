@@ -3,6 +3,7 @@
 import { useState } from "react";
 import TradeChart from "@/components/TradeChart";
 import type { DestinationId, TradeCurve } from "@/lib/design";
+import { applyAction } from "@/lib/actions";
 import { TEMPLATES } from "@/lib/templates";
 import { stretchFromReal, tradeCurve, type TradeSweep } from "@/lib/trade";
 
@@ -32,6 +33,16 @@ function modifiedCurve(): TradeCurve {
   return tradeCurve(yours, { kind: "tank-stretch", stageIndex: 1 }, { real: t.design });
 }
 
+// Falcon 9 landing its booster: the real reference flies that way too, so it carries 17.5 t, not 23.1 t.
+function recoveredCurves(): TradeCurve[] {
+  const t = TEMPLATES.find((x) => x.id === "falcon9")!;
+  const landed = applyAction(t.design, { type: "set-recover", stageIndex: 0, recover: true });
+  return [
+    tradeCurve(landed, { kind: "engine-count", stageIndex: 0 }, { real: t.design }),
+    tradeCurve(stretchFromReal(landed, t.design, 1, 1.2), { kind: "tank-stretch", stageIndex: 0 }, { real: t.design }),
+  ];
+}
+
 function Demo({ title, curve, start, compact }: { title: string; curve: TradeCurve; start?: number; compact?: boolean }) {
   const [x, setX] = useState(start ?? curve.realX);
   const xs = curve.points.map((p) => p.x);
@@ -54,10 +65,14 @@ export default function TradeDevPage() {
     <main className="min-h-screen bg-black p-6 text-white">
       <div className="mx-auto grid max-w-5xl gap-8 lg:grid-cols-2">
         <Demo title="Electron · stage 2 stretch, after stage 1 ×1.55" curve={modifiedCurve()} start={1} />
+        <Demo title="Falcon 9 landing its booster · stage 1 engines" curve={recoveredCurves()[0]} start={9} />
+        <Demo title="F9 landing booster, stage 2 ×1.2 · stage 1 stretch" curve={recoveredCurves()[1]} start={1} />
         {curves.map((c) => (
           <Demo key={c.title} title={c.title} curve={c.curve} start={c.start} />
         ))}
         <div className="w-[428px] space-y-6">
+          <Demo title="Compact · F9 landing booster, stage 1 engines" curve={recoveredCurves()[0]} start={9} compact />
+          <Demo title="Compact · F9 landing booster, stage 2 ×1.2" curve={recoveredCurves()[1]} start={1} compact />
           <Demo title="Compact · Falcon 9 stage 1" curve={curves[0].curve} start={1.45} compact />
           <Demo title="Compact · Electron engines" curve={curves[7].curve} start={7} compact />
         </div>
