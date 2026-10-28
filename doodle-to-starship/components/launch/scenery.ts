@@ -238,6 +238,8 @@ function drawLandmarks(ctx: CanvasRenderingContext2D, W: number, H: number, alt:
   ctx.font = `600 11px ${displayFont()}`;
   if ("letterSpacing" in ctx) (ctx as CanvasRenderingContext2D & { letterSpacing: string }).letterSpacing = "1.4px";
   ctx.textBaseline = "middle";
+  // While the ISS is up (the engine fades it out past 1,000 km), labels keep out of its lane.
+  const issLane = alt > 120 && alt < 1200 ? H * ISS_LANE : null;
   for (const m of LANDMARKS) {
     let y = featureY(alt, m.km, centerY, H);
     if (y < -20 || y > H + 20) continue;
@@ -246,8 +248,11 @@ function drawLandmarks(ctx: CanvasRenderingContext2D, W: number, H: number, alt:
       const by = layerY(alt, b.km, centerY, (H * 2.6) / b.km);
       if (Math.abs(by - y) < 26) y = by + 26;
     }
-    // Fade near the top and bottom, where the header and the readouts sit.
-    const edge = clamp01(Math.min((y - H * 0.08) / (H * 0.08), (H * 0.84 - y) / (H * 0.08)));
+    // The station's label sits above it, so the lane runs from there to just under the arrays.
+    if (issLane !== null && y > issLane - 34 && y < issLane + 18) y = issLane + 30;
+    // Fade under the header and the mission log in the top-left corner (DOM, fixed px), and near
+    // the readouts at the bottom.
+    const edge = clamp01(Math.min((y - 140) / 40, (H * 0.84 - y) / (H * 0.08)));
     if (edge <= 0) continue;
     const label = `${m.label.toUpperCase()} · ${m.km < 1 ? m.km.toFixed(1) : m.km.toLocaleString("en-US")} KM`;
     const x = 30;
@@ -2413,8 +2418,8 @@ const AURORA_RAYS: [number, number, number, number][] = (() => {
  * bright lower edge that fades upward, a violet fringe on top, and uneven vertical rays.
  */
 export function drawAurora(ctx: CanvasRenderingContext2D, W: number, H: number, k: number, t: number, base: number, altKm?: number) {
-  // Far out, the curtains would hang off a globe; they fade between 1,500 and 3,000 km.
-  if (altKm !== undefined) k *= clamp01((3000 - altKm) / 1500);
+  // Far out, the curtains would hang off a globe; they fade between 1,000 and 2,000 km.
+  if (altKm !== undefined) k *= clamp01((2000 - altKm) / 1000);
   if (k <= 0.01) return;
   const wave = (x: number, ph: number, amp: number) => Math.sin(x * 0.006 + ph) * amp + Math.sin(x * 0.017 + ph * 1.7) * amp * 0.35;
   const ribbon = (top: (x: number) => number, bottom: (x: number) => number) => {
@@ -2995,6 +3000,9 @@ export function drawEarth(
     ctx.globalAlpha = 1;
   }
 }
+
+/** Where the engine flies the ISS across the screen, as a fraction of H; landmark labels keep out of it. */
+export const ISS_LANE = 0.3;
 
 /** A small crisp ISS silhouette crossing the sky, with its label. */
 export function drawISS(ctx: CanvasRenderingContext2D, x: number, y: number, s: number, alpha: number, font: string) {
