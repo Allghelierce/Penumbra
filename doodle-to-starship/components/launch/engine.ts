@@ -97,7 +97,7 @@ export interface HudRefs {
   speed: HTMLElement | null;
   alt: HTMLElement | null;
   stage: HTMLElement | null;
-  /** Fast-forward readout ("▸▸ 40×"), shown while the warp is skipping a long stretch. */
+  /** How fast the flight is playing against the real one ("Real time", "Time ×15"); data-mode is real or warp. */
   warp?: HTMLElement | null;
   /** Timeline fill, scaled 0..1 along x. */
   fill: HTMLElement | null;
@@ -732,10 +732,11 @@ export function startLaunch(
 
   function frame(now: number) {
     raf = requestAnimationFrame(frame);
-    const dt = Math.min(0.05, Math.max(0, (now - last) / 1000));
+    const dt = Math.min(0.1, Math.max(0, (now - last) / 1000));
     last = now;
     // Held to 1× while a recorded quote or a spoken callout plays, so speech is never cut off.
-    t += dt * (t < quoteUntil || now / 1000 < speechUntil ? Math.min(speed, 1) : speed);
+    const pace = t < quoteUntil || now / 1000 < speechUntil ? Math.min(speed, 1) : speed;
+    t += dt * pace;
     resize();
     const c = ctx!;
 
@@ -1036,7 +1037,7 @@ export function startLaunch(
     const downKm = flying ? s.down : 0;
     drawEarth(c, W, H, flying ? altKm : 0, downKm / 6371 + finaleK * 0.01, limbRise, cityLights, t);
     const issK = clamp01((altKm - 120) / 30) * (1 - limbRise);
-    if (issK > 0) drawISS(c, ((t * 55) % (W + 300)) - 150, H * 0.17, 1.3, issK, displayFont);
+    if (issK > 0) drawISS(c, ((t * 55) % (W + 300)) - 150, H * 0.3, 1.3, issK, displayFont);
     const deckAlpha = night * (flying ? 1 : 0);
     // Decks the rocket isn't inside are scenery behind it; the one it's punching through is drawn again in front.
     const crossing = decks.filter((d) => Math.abs(deckY(d, altKm, layerCenter, H) - layerCenter) < d.thick * 0.55);
@@ -1275,14 +1276,13 @@ export function startLaunch(
       hudSet(hud.speed, "speed", Math.round(flying ? s.speed : 0).toLocaleString("en-US"));
       hudSet(hud.alt, "alt", altKm < 100 ? altKm.toFixed(1) : Math.round(altKm).toLocaleString("en-US"));
       if (hud.warp) {
-        const rate = flying && t < plan.finaleAt ? (plan.simAt(t + 0.05) - plan.simAt(t - 0.05)) / 0.1 : 0;
-        const fast = rate >= 25;
-        if (fast) hudSet(hud.warp, "warp", `▸▸ ${Math.round(rate / 5) * 5}×`);
-        const op = fast ? "1" : "0";
-        if (hudShown.warpOp !== op) {
-          hudShown.warpOp = op;
-          hud.warp.style.opacity = op;
-        }
+        // How much faster than the real flight this is playing, playback speed included.
+        const live = t < (plan.liftoffAt === null ? (plan.explodeAt ?? 0) : plan.finaleAt);
+        const x = (flying ? (plan.simAt(t + 0.05) - plan.simAt(t - 0.05)) / 0.1 : 1) * pace;
+        const real = x > 0.95 && x < 1.05;
+        hudSet(hud.warp, "warp", live ? (real ? "Real time" : `Time ×${timesText(x)}`) : "");
+        const mode = real ? "real" : "warp";
+        if (hud.warp.dataset.mode !== mode) hud.warp.dataset.mode = mode;
       }
       hudSet(hud.stage, "stage", `Stage ${(flying ? s.stage : 0) + 1} · ${layerAt(altKm).name}`);
       const lad = hud.ladder;
@@ -1370,6 +1370,14 @@ export function startLaunch(
       t = Math.max(t, plan.endAt);
     },
   };
+}
+
+/** A time-compression factor, rounded so it reads at a glance: 0.5, 1.3, 7, 15, 2,400. */
+function timesText(x: number): string {
+  if (x < 3) return x.toFixed(1);
+  if (x < 10) return String(Math.round(x));
+  if (x < 100) return String(Math.round(x / 5) * 5);
+  return Number(x.toPrecision(2)).toLocaleString("en-US");
 }
 
 /** Peak numbers for the end card, straight from the trace. */

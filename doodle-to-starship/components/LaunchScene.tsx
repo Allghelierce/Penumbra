@@ -294,7 +294,8 @@ function LaunchRun(props: RunProps) {
       <style>{KEYFRAMES}</style>
       <canvas ref={canvasRef} className="absolute inset-0 h-full w-full" />
 
-      <div className="ls-fade pointer-events-none absolute left-4 top-4 flex items-center gap-3 [animation-delay:1.3s] sm:left-6 sm:top-5">
+      {/* Phones give the top edge to the controls. */}
+      <div className="ls-fade pointer-events-none absolute left-4 top-4 hidden items-center gap-3 [animation-delay:1.3s] sm:left-6 sm:top-5 sm:flex">
         <PenumbraLockup size={13} />
         <span className="h-3 w-px bg-white/25" />
         <span className="max-w-[40vw] truncate text-[11px] font-semibold uppercase tracking-[0.18em] text-haze">
@@ -325,7 +326,13 @@ function LaunchRun(props: RunProps) {
 
       {/* Overlay chrome waits for the sky to cover the studio, so it never overlaps the studio's header. */}
       {!ended && (
-        <div className="ls-fade absolute right-4 top-4 flex items-center gap-5 text-[11px] font-semibold uppercase tracking-[0.18em] text-haze [animation-delay:1.3s] sm:right-6 sm:top-5">
+        <div className="ls-fade absolute right-4 top-4 flex items-center gap-3 whitespace-nowrap text-[11px] font-semibold uppercase tracking-[0.18em] text-haze [animation-delay:1.3s] sm:right-6 sm:top-5 sm:gap-5">
+          {/* 1× is the playback speed, not real time: this says how fast the real flight is going by. */}
+          <span
+            ref={warpRef}
+            className="tabular-nums data-[mode=real]:text-go-signal data-[mode=warp]:text-flame-hot max-sm:absolute max-sm:right-0 max-sm:top-full max-sm:mt-2"
+            title="How much faster than the real flight you are watching"
+          />
           <div className="flex items-center gap-1" role="group" aria-label="Playback speed">
             {[0.5, 1, 2, 4, 8].map((x) => (
               <button
@@ -379,14 +386,7 @@ function LaunchRun(props: RunProps) {
             </div>
           )}
           <div className="ml-auto text-right">
-            <div className="flex items-baseline justify-end gap-3">
-              <span
-                ref={warpRef}
-                className="font-display text-sm font-semibold tracking-wide text-flame-hot opacity-0 transition-opacity duration-300"
-                title="Fast-forwarding a long stretch of the flight"
-              />
-              <div ref={clockRef} className={`font-display text-2xl font-semibold tracking-wide sm:text-3xl ${LIFT}`} />
-            </div>
+            <div ref={clockRef} className={`font-display text-2xl font-semibold tracking-wide sm:text-3xl ${LIFT}`} />
             <div ref={stageRef} className="text-[11px] font-semibold uppercase tracking-[0.18em] text-haze" />
           </div>
         </div>

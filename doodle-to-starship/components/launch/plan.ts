@@ -18,10 +18,22 @@ export const T_FRAMED = 1.7;
 export const T_IGNITE = 1.55;
 export const T_LIFTOFF = 3.3;
 
-/** Real seconds the flight itself gets, liftoff to the final event, before the outcome plays. */
-const FLIGHT_PLAY = 10;
 /** Minimum real seconds between two callouts. */
 const CAPTION_GAP = 1.2;
+const G0 = 9.81;
+/** The pad's tower stands a little taller than the vehicle; past this many vehicle heights it's clear. */
+const TOWER_CLEAR = 1.1;
+/** Flight seconds, after the tower is cleared, over which the launch's own pad climb hands over to the trace. */
+const HANDOVER_S = 25;
+
+/**
+ * Real seconds the flight gets at 1×, liftoff to the outcome: 30–40 s for your own rocket, 45–60 s
+ * for a real flight from history, and never longer than the flight itself took.
+ */
+function flightBudget(T: number, scenario?: string): number {
+  const budget = scenario ? Math.min(60, Math.max(45, 40 + T / 30)) : Math.min(40, Math.max(30, 26 + T / 60));
+  return Math.min(budget, T);
+}
 
 export type Tone = "chalk" | "flame" | "red" | "go";
 
@@ -148,7 +160,7 @@ export function buildPlan(trace: FlightTrace, analysis: Analysis, design: Design
   const events = (trace.events ?? []).filter((e) => Number.isFinite(e.tS)).sort((a, b) => a.tS - b.tS);
 
   if (outcome === "stuck-on-pad") return padPlan(points, events, analysis, design);
-  return flightPlan(outcome, points, events, trace, design, pieceCount, scenario);
+  return flightPlan(outcome, points, events, trace, analysis, design, pieceCount, scenario);
 }
 
 function padPlan(points: FlightPoint[], events: FlightEvent[], analysis: Analysis, design: Design): Plan {
@@ -198,6 +210,7 @@ function flightPlan(
   points: FlightPoint[],
   events: FlightEvent[],
   trace: FlightTrace,
+  analysis: Analysis,
   design: Design,
   pieceCount: number,
   scenario?: string,
@@ -235,6 +248,11 @@ function flightPlan(
   if (!(T > 0)) T = Math.max(1, points[points.length - 1].tS);
   maxAltKm = Math.max(maxAltKm, ...points.filter((p) => p.tS <= T).map((p) => p.altitudeKm));
 
+  // Off the pad at the real pace: a heavy rocket crawls past its tower.
+  const accel = G0 * (Math.max(1.05, analysis.liftoffTwr || 1.3) - 1);
+  const clearS = Math.sqrt((2 * TOWER_CLEAR * (design.heightM > 0 ? design.heightM : 50)) / accel);
+  points = withPadClimb(points, accel, clearS, T);
+
   // Separations the trace implies through stageIndex but never announces.
   if (!events.some((e) => e.kind === "stage-sep")) {
     for (let i = 1; i < points.length; i++) {
@@ -249,7 +267,7 @@ function flightPlan(
   const karmanSims = crossingsFor(points, T, (sim) => sim)
     .filter((c) => c.hero)
     .map((c) => c.simT);
-  const warp = warpFor(T, [...events, ...synthetic], karmanSims, breakup ? "breakup" : outcome, scenario, events);
+  const warp = warpFor(T, [...events, ...synthetic], karmanSims, breakup ? "breakup" : outcome, scenario, events, clearS);
   const flightDur = warp.duration;
   const liftoffAt = T_LIFTOFF;
   const finaleAt = liftoffAt + flightDur;
@@ -339,29 +357,39 @@ interface Beat {
 }
 
 /**
- * Maps playback seconds (from liftoff) to sim seconds and back. Beats around each event
- * play slowly; the gaps between them share what's left of FLIGHT_PLAY and fast-forward.
- * A monotone cubic through the knots keeps the speed changes smooth.
+ * Maps playback seconds (from liftoff) to sim seconds and back. Liftoff plays in real time until
+ * the tower is cleared, then eases into the warp: beats around each event play slowly, and the
+ * gaps between them share what's left of the flight's budget and fast-forward. A monotone cubic
+ * through the knots keeps the speed changes smooth.
  */
 function warpFor(
   T: number,
   events: FlightEvent[],
   karmanSims: number[],
   outcome: Verdict | "breakup",
-  scenario?: string,
+  scenario: string | undefined,
   /** The trace's own events: quotes run to the next of these, not to a synthetic marker. */
-  quoteEvents: FlightEvent[] = events,
+  quoteEvents: FlightEvent[],
+  /** Sim seconds from liftoff until the vehicle has cleared its tower. */
+  clearS: number,
 ) {
-  const beat = (s: number, before: number, after: number, play: number): Beat => ({
-    from: Math.max(0, s - before),
-    to: Math.min(T, s + after),
-    play,
-  });
-  const lift = Math.min(T * 0.05, 10);
-  const beats: Beat[] = [
-    { from: 0, to: lift, play: 1.5 },
-    { from: lift, to: Math.max(lift, Math.min(T * 0.12, 32)), play: 1.2 },
-  ];
+  const budget = flightBudget(T, scenario);
+  // Real time until a second past the tower (the ease into the warp starts as it clears), or
+  // throughout for a flight short enough to fit its budget.
+  const realS = budget >= T ? T : Math.min(T, Math.max(7, Math.min(14, clearS + 1)));
+  const rampTo = Math.min(T, 3 * realS);
+  const fixed: Beat[] = [{ from: 0, to: realS, play: realS }];
+  if (rampTo > realS) fixed.push({ from: realS, to: rampTo, play: (rampTo - realS) / 3.5 });
+  const rest = Math.max(0, budget - fixed.reduce((n, b) => n + b.play, 0));
+  // Event beats grow with the time there is to give them.
+  const pace = Math.min(4, Math.max(1, rest / 9));
+  const beat = (s: number, before: number, after: number, play: number): Beat => {
+    const from = Math.max(0, s - before);
+    const to = Math.min(T, s + after);
+    const cut = Math.max(from, rampTo);
+    return { from: cut, to, play: to > cut ? (play * pace * (to - cut)) / (to - from) : 0 };
+  };
+  const beats: Beat[] = [];
   for (const e of events) {
     if (e.tS <= 0 || e.tS > T) continue;
     if (e.kind === "max-q") beats.push(beat(e.tS, 6, 6, 0.9));
@@ -383,50 +411,55 @@ function warpFor(
   );
 
   // Real dialog gets the time it takes to say it: the next event waits until the quote is done.
+  // Where the real-time opening already gives it that long, nothing needs to change.
   const sorted = quoteEvents.filter((e) => e.tS >= 0 && e.tS <= T).sort((a, b) => a.tS - b.tS);
   const quotes: Beat[] = [];
+  const overlap = (a: number, b: number, c: number, d: number) => Math.max(0, Math.min(b, d) - Math.max(a, c));
   sorted.forEach((e, k) => {
     const hold = quoteHold(e.label);
-    if (!hold) return;
     const next = sorted.slice(k + 1).find((o) => o.tS > e.tS)?.tS ?? T;
-    if (next > e.tS) quotes.push({ from: e.tS, to: next, play: hold });
+    if (!hold || next <= e.tS || overlap(e.tS, next, 0, realS) >= hold) return;
+    // About what the span would get anyway, and never less than the time to say it.
+    const usual =
+      overlap(e.tS, next, 0, realS) +
+      overlap(e.tS, next, realS, rampTo) / 3.5 +
+      (overlap(e.tS, next, rampTo, T) * rest) / Math.max(1e-6, T - rampTo);
+    quotes.push({ from: e.tS, to: next, play: Math.max(hold, usual) });
   });
-  // Other beats give way where a quote is playing.
-  const free = beats.flatMap((b) => {
-    let parts = [b];
-    for (const q of quotes) {
-      parts = parts.flatMap((p) => {
-        if (p.to <= q.from || p.from >= q.to) return [p];
-        const span = p.to - p.from;
-        const out: Beat[] = [];
-        if (p.from < q.from) out.push({ from: p.from, to: q.from, play: (p.play * (q.from - p.from)) / span });
-        if (p.to > q.to) out.push({ from: q.to, to: p.to, play: (p.play * (p.to - q.to)) / span });
-        return out;
-      });
-    }
-    return parts;
-  });
-  beats.length = 0;
-  beats.push(...free);
-  beats.sort((a, b) => a.from - b.from);
+  // Everything else gives way where a quote is playing.
+  const carve = (list: Beat[]) =>
+    list.flatMap((b) => {
+      let parts = [b];
+      for (const q of quotes) {
+        parts = parts.flatMap((p) => {
+          if (p.to <= q.from || p.from >= q.to) return [p];
+          const span = p.to - p.from;
+          const out: Beat[] = [];
+          if (p.from < q.from) out.push({ from: p.from, to: q.from, play: (p.play * (q.from - p.from)) / span });
+          if (p.to > q.to) out.push({ from: q.to, to: p.to, play: (p.play * (p.to - q.to)) / span });
+          return out;
+        });
+      }
+      return parts;
+    });
+  const free = carve(beats).sort((a, b) => a.from - b.from);
   const merged: Beat[] = [];
-  for (const b of beats) {
+  for (const b of free) {
     if (b.to <= b.from) continue;
     const last = merged[merged.length - 1];
     if (last && b.from < last.to) {
       last.to = Math.max(last.to, b.to);
-      last.play = Math.min(3, last.play + 0.6 * b.play);
+      last.play = Math.min(3 * pace, last.play + 0.6 * b.play);
     } else {
       merged.push({ ...b });
     }
   }
-  // Historic replays get a calmer pace than your own design's flight.
-  const flightPlay = scenario ? 22 : FLIGHT_PLAY;
   const beatPlay = merged.reduce((n, b) => n + b.play, 0);
-  const squeeze = Math.min(1, (flightPlay * 0.8) / Math.max(beatPlay, 1e-6));
-  merged.forEach((b) => (b.play *= squeeze));
+  const squeeze = Math.min(1, (rest * 0.8) / Math.max(beatPlay, 1e-6));
+  // Never slower than the real flight, outside a quote.
+  merged.forEach((b) => (b.play = Math.min(b.play * squeeze, b.to - b.from)));
   // Quotes are never squeezed; a dialog-heavy replay simply runs longer.
-  merged.push(...quotes);
+  merged.push(...carve(fixed), ...quotes);
   merged.sort((a, b) => a.from - b.from);
 
   // Lay out beats and the gaps between them over [0, T].
@@ -442,18 +475,39 @@ function warpFor(
   }
   if (cursor < T) segs.push({ from: cursor, to: T, play: null });
   const gaps = segs.filter((g) => g.play === null);
-  const left = Math.max(0.5, flightPlay - merged.reduce((n, b) => n + b.play, 0));
+  const left = Math.max(0.5, budget - merged.reduce((n, b) => n + b.play, 0));
   const weight = gaps.reduce((n, g) => n + Math.pow(g.to - g.from, 0.6), 0) || 1;
-  gaps.forEach((g) => (g.play = Math.max(0.12, (left * Math.pow(g.to - g.from, 0.6)) / weight)));
+  gaps.forEach((g) => (g.play = Math.min(g.to - g.from, Math.max(0.12, (left * Math.pow(g.to - g.from, 0.6)) / weight))));
 
-  const xs = [0];
-  const ys = [0];
-  for (const g of segs) {
-    xs.push(xs[xs.length - 1] + (g.play ?? 0.12));
-    ys.push(g.to);
+  // Each stretch plays at its own rate (sim seconds per real second). The rates are blurred over
+  // about a second so the pace never jumps, then summed into a table from playback to sim time.
+  const knots = [0];
+  for (const g of segs) knots.push(knots[knots.length - 1] + (g.play ?? 0.12));
+  const duration = knots[knots.length - 1];
+  const n = Math.max(2, Math.ceil(duration / 0.02));
+  const h = duration / n;
+  const raw = new Float64Array(n);
+  for (let i = 0, k = 0; i < n; i++) {
+    while (k < segs.length - 1 && (i + 0.5) * h >= knots[k + 1]) k++;
+    raw[i] = (segs[k].to - segs[k].from) / Math.max(1e-6, knots[k + 1] - knots[k]);
   }
-  const map = monotoneCubic(xs, ys);
-  const duration = xs[xs.length - 1];
+  const r = Math.round(0.5 / h);
+  const rate = boxBlur(boxBlur(raw, r), r);
+  const sims = new Float64Array(n + 1);
+  for (let i = 0; i < n; i++) sims[i + 1] = sims[i] + rate[i] * h;
+  // The blur moves a little time between stretches: true the table up to end at T, leaving the
+  // real-time opening (everything the blur didn't reach) exactly as it is.
+  const first = segs[0];
+  const opening = first.from === 0 && first.play !== null && Math.abs(first.play - first.to) < 1e-6 ? first.to : 0;
+  const i0 = Math.max(0, Math.min(n, Math.floor((opening - 2 * r * h) / h)));
+  const fix = (T - sims[i0]) / Math.max(1e-9, sims[n] - sims[i0]);
+  for (let i = i0 + 1; i <= n; i++) sims[i] = sims[i0] + (sims[i] - sims[i0]) * fix;
+  const map = (x: number) => {
+    if (x <= 0) return 0;
+    if (x >= duration) return T;
+    const i = Math.min(n - 1, Math.floor(x / h));
+    return sims[i] + (sims[i + 1] - sims[i]) * (x / h - i);
+  };
   return {
     duration,
     sim: map,
@@ -462,57 +516,30 @@ function warpFor(
       if (s <= 0) return 0;
       if (s >= T) return duration;
       let lo = 0;
-      let hi = duration;
-      for (let i = 0; i < 40; i++) {
-        const mid = (lo + hi) / 2;
-        if (map(mid) < s) lo = mid;
+      let hi = n;
+      while (hi - lo > 1) {
+        const mid = (lo + hi) >> 1;
+        if (sims[mid] <= s) lo = mid;
         else hi = mid;
       }
-      return (lo + hi) / 2;
+      return (lo + (s - sims[lo]) / Math.max(1e-12, sims[lo + 1] - sims[lo])) * h;
     },
   };
 }
 
-/** Fritsch–Carlson monotone cubic through (xs, ys): never runs backwards, no overshoot. */
-function monotoneCubic(xs: number[], ys: number[]): (x: number) => number {
-  const n = xs.length;
-  if (n < 2) return () => ys[0] ?? 0;
-  const d: number[] = [];
-  for (let i = 0; i < n - 1; i++) d.push((ys[i + 1] - ys[i]) / (xs[i + 1] - xs[i] || 1e-9));
-  const m: number[] = [d[0]];
-  for (let i = 1; i < n - 1; i++) m.push(d[i - 1] * d[i] <= 0 ? 0 : (d[i - 1] + d[i]) / 2);
-  m.push(d[n - 2]);
-  for (let i = 0; i < n - 1; i++) {
-    if (d[i] === 0) {
-      m[i] = 0;
-      m[i + 1] = 0;
-      continue;
-    }
-    const a = m[i] / d[i];
-    const b = m[i + 1] / d[i];
-    const h = a * a + b * b;
-    if (h > 9) {
-      const tau = 3 / Math.sqrt(h);
-      m[i] = tau * a * d[i];
-      m[i + 1] = tau * b * d[i];
-    }
+/** Moving average over ±r cells, the ends held flat. */
+function boxBlur(a: Float64Array, r: number): Float64Array {
+  const n = a.length;
+  if (r < 1) return a;
+  const out = new Float64Array(n);
+  const at = (i: number) => a[Math.min(n - 1, Math.max(0, i))];
+  let sum = 0;
+  for (let j = -r; j <= r; j++) sum += at(j);
+  for (let i = 0; i < n; i++) {
+    out[i] = sum / (2 * r + 1);
+    sum += at(i + r + 1) - at(i - r);
   }
-  return (x: number) => {
-    if (x <= xs[0]) return ys[0];
-    if (x >= xs[n - 1]) return ys[n - 1];
-    let i = 0;
-    while (i < n - 2 && x > xs[i + 1]) i++;
-    const h = xs[i + 1] - xs[i];
-    const t = (x - xs[i]) / h;
-    const t2 = t * t;
-    const t3 = t2 * t;
-    return (
-      (2 * t3 - 3 * t2 + 1) * ys[i] +
-      (t3 - 2 * t2 + t) * h * m[i] +
-      (-2 * t3 + 3 * t2) * ys[i + 1] +
-      (t3 - t2) * h * m[i + 1]
-    );
-  };
+  return out;
 }
 
 /** Every time the trace passes a layer boundary, either way, within the played part. */
@@ -545,6 +572,30 @@ function withKarman(captions: CaptionCue[], crossings: Crossing[]): CaptionCue[]
     lastAt = c.at;
   }
   return all;
+}
+
+/**
+ * The trace takes its altitude from its speed, which leaves the pad far too fast (a Falcon 9 would
+ * be 370 m up at T+1.6 s). Until the tower is cleared the launch flies a plain vertical climb at the
+ * liftoff thrust-to-weight instead, then hands over to the trace.
+ */
+function withPadClimb(points: FlightPoint[], accel: number, clearS: number, T: number): FlightPoint[] {
+  const end = Math.min(T, clearS + HANDOVER_S);
+  if (!(end > 0) || !(accel > 0)) return points;
+  const out: FlightPoint[] = [];
+  for (let tS = 0; tS < end; tS += 0.25) {
+    const tr = sampleAt(points, tS);
+    const k = end > clearS ? clamp01((tS - clearS) / (end - clearS)) : 0;
+    const w = k * k * (3 - 2 * k);
+    out.push({
+      tS,
+      altitudeKm: ((1 - w) * 0.5 * accel * tS * tS) / 1000 + w * tr.alt,
+      downrangeKm: w * tr.down,
+      speedMps: (1 - w) * accel * tS + w * tr.speed,
+      stageIndex: tr.stage,
+    });
+  }
+  return [...out, ...points.filter((p) => p.tS >= end)];
 }
 
 /** If a suborbital trace stops in mid-air, finish the fall ballistically so it can hit the ground. */
