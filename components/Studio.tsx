@@ -5,7 +5,7 @@ import AttractMode from "@/components/AttractMode";
 import CleanProfile from "@/components/CleanProfile";
 import EditHandles, { type Stretch } from "@/components/EditHandles";
 import LaunchScene, { unlockLaunchAudio } from "@/components/LaunchScene";
-import ModifyPanel, { applyStretch, realIndex } from "@/components/ModifyPanel";
+import ModifyPanel, { applyStretch, chartKey, realIndex } from "@/components/ModifyPanel";
 import NapkinCanvas from "@/components/NapkinCanvas";
 import NapkinAssist from "@/components/NapkinAssist";
 import { PenumbraLockup } from "@/components/PenumbraLogo";
@@ -177,7 +177,7 @@ export default function Studio() {
   const [template, setTemplate] = useState<RocketTemplate | null>(null);
   // A tank stretch still being dragged on the napkin, for live numbers before it's applied.
   const [stretch, setStretch] = useState<Stretch | null>(null);
-  // The real stage the trade chart sweeps: the one last touched.
+  // The stage the trade chart sweeps (as ModifyPanel's chartKey gives it): the one last touched.
   const [chartStage, setChartStage] = useState(0);
   // Earlier versions of the real rocket being modified, oldest first, for Undo.
   const [edits, setEdits] = useState<Design[]>([]);
@@ -421,8 +421,7 @@ export default function Studio() {
             : applyAction(current, action);
       if (real) {
         if (action.type === "scale-tanks" || action.type === "set-engines") {
-          const j = realIndex(current, real.design, action.stageIndex);
-          if (j >= 0) setChartStage(j);
+          setChartStage(chartKey(realIndex(current, real.design, action.stageIndex), action.stageIndex));
         }
         showTemplateDesign(real, nextDesign, action.type !== "review");
         return;

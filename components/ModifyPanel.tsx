@@ -10,7 +10,7 @@ import type { Analysis, Design, DesignAction, DestinationId, EngineCluster, Hist
 import { analyze, DESTINATIONS, ENGINES } from "@/lib/physics";
 import { km } from "@/lib/physics/format";
 import { metres, overfitEngines, vacuumOnPad, vacuumReason, type EngineOverfit } from "@/lib/redpen";
-import { capacityText, maxPayloadKg, MIN_LIFTOFF_TWR, realStageFor, recoveryCostKg, shownKg, stretchFromReal, tradeCurve, type TradeSweep } from "@/lib/trade";
+import { capacityText, maxPayloadKg, MIN_LIFTOFF_TWR, realStageFor, recoveryCostKg, shownKg, stretchFromReal, tradeCurve, type SweptCurve, type TradeSweep } from "@/lib/trade";
 
 /** Index of the real stage your stage i was made from, or -1 for a stage you added. */
 export function realIndex(yours: Design, real: Design, i: number): number {
@@ -43,9 +43,9 @@ interface ModifyPanelProps {
   onAction: (action: DesignAction) => void;
   /** Put the rocket back as it was built, keeping the destination and payload. */
   onReset: () => void;
-  /** The real stage the trade chart sweeps: an index into template.design.stages. */
+  /** The stage the trade chart sweeps, as chartKey gives it. */
   chartStage: number;
-  onChartStage: (realIndex: number) => void;
+  onChartStage: (key: number) => void;
   /** Above everything else: the red pen's findings on Check, the flight log after a flight. */
   top?: ReactNode;
   /** This rocket's real flights, last: each opens its replay. */
@@ -115,6 +115,25 @@ function leoNote(t: RocketTemplate, modelLeoKg: number): string {
       ? `${published} to low Earth orbit thrown away, ${payloadText(t.realPayloadLeoReusableKg)} with the booster landing`
       : `${published} to low Earth orbit${landing.length > 0 ? `, with ${theStages(landing)} landing` : ""}`;
   return `${figure}. This model gives the real ${shortName(t.name)} ${model}.`;
+}
+
+/**
+ * Which stage the trade chart sweeps, kept steady across edits: a real stage by its index in the real
+ * rocket (adding or removing stages doesn't move it), a stage you added as −1 − its index in yours.
+ */
+export const chartKey = (realIndex: number, index: number) => (realIndex >= 0 ? realIndex : -1 - index);
+
+/** The chart's caption for a stage you added: there's no real stage to set it against, only the real rocket's figure. */
+function addedCaption(label: string, name: string, curve: SweptCurve, sweep: TradeSweep["kind"]): string {
+  const best = curve.points.find((p) => p.x === curve.bestX);
+  const what = sweep === "tank-stretch" ? "its tanks from where they are now (1×)" : "how many engines it has";
+  const most =
+    best && best.payloadKg > 0
+      ? ` The most payload is ${capacityText(best.payloadKg)}, at ${sweep === "tank-stretch" ? `${best.x}×` : `${best.x} engines`}.`
+      : " No setting gets it there.";
+  const realKg = curve.realPayloadKg ?? 0;
+  const real = realKg > 0 ? ` The line is the real ${name}'s ${capacityText(realKg)}.` : ` The real ${name} can't get there.`;
+  return `${label} is yours: the real ${name} has none, so this sweeps ${what}.${most}${real}`;
 }
 
 /** The cluster an engine-count sweep changes: the stage's biggest. */
@@ -246,34 +265,47 @@ export default function ModifyPanel({ template, design, preview, onAction, onRes
   const changes = useMemo(() => changesOf(template.design, design, overfit), [template, design, overfit]);
   const verdict = verdictLine({ template, design: shown, yoursMax, realMax, empty, changed: changes.length > 0 || preview !== null, overfit });
 
-  // The chart sweeps one real stage; find it in your rocket (stages you add have no real one to compare).
+  // One tab per stage of your rocket, each under its own label. A real stage sweeps against the real
+  // rocket's; a stage you added has none, so it sweeps from where it is, with the real rocket as a line.
   const stageTabs = useMemo(
     () =>
-      template.design.stages
-        .map((stage, j) => ({ j, label: stage.label, i: design.stages.findIndex((_, i) => realIndex(design, template.design, i) === j) }))
-        .filter((tab) => tab.i >= 0),
+      design.stages.map((stage, i) => {
+        const j = realIndex(design, template.design, i);
+        return { key: chartKey(j, i), i, label: stage.label, added: j < 0 };
+      }),
     [template, design],
   );
-  const tab = stageTabs.find((t) => t.j === chartStage) ?? stageTabs[0];
+  const tab = stageTabs.find((t) => t.key === chartStage) ?? stageTabs.find((t) => !t.added) ?? stageTabs[0];
   const chart = useMemo(() => {
     if (!tab) return null;
     const stage = design.stages[tab.i];
     const clusterIndex = mainCluster(stage.engines);
-    const curve = tradeCurve(design, { kind: sweep, stageIndex: tab.i, clusterIndex }, { real: template.design, destination: design.destination });
-    return { curve, clusterIndex };
-  }, [design, tab, sweep, template]);
+    const spec = { kind: sweep, stageIndex: tab.i, clusterIndex };
+    if (!tab.added) return { curve: tradeCurve(design, spec, { real: template.design, destination: design.destination }), clusterIndex };
+    const own = tradeCurve(design, spec, { real: design, destination: design.destination });
+    const curve = { ...own, realOnCurve: false, realPayloadKg: realMax };
+    return { curve, clusterIndex, caption: addedCaption(stage.label, shortName(template.name), curve, sweep) };
+  }, [design, tab, sweep, template, realMax]);
 
   function pick(x: number) {
     if (!tab || !chart) return;
     if (sweep === "tank-stretch") {
-      const factor = x / stretchOf(design, template.design, tab.i);
+      // An added stage's chart is in times its tanks as they are; a real stage's, in times the real stage's.
+      const factor = tab.added ? x : x / stretchOf(design, template.design, tab.i);
       if (Math.abs(factor - 1) > 1e-6) onAction({ type: "scale-tanks", stageIndex: tab.i, factor });
       return;
     }
     const cluster = design.stages[tab.i].engines[chart.clusterIndex];
     if (cluster && cluster.count !== x) onAction({ type: "set-engines", stageIndex: tab.i, clusterIndex: chart.clusterIndex, engine: cluster.engine, count: x });
   }
-  const currentX = !tab || !chart ? 1 : sweep === "tank-stretch" ? stretchOf(shown, template.design, tab.i) : (shown.stages[tab.i]?.engines[chart.clusterIndex]?.count ?? 1);
+  const currentX =
+    !tab || !chart
+      ? 1
+      : sweep === "engine-count"
+        ? (shown.stages[tab.i]?.engines[chart.clusterIndex]?.count ?? 1)
+        : tab.added
+          ? (shown.stages[tab.i]?.tankVolumeM3 ?? 0) / design.stages[tab.i].tankVolumeM3
+          : stretchOf(shown, template.design, tab.i);
 
   // A row in alert has your figure and its note in red: the reason this flight would fail.
   const rows: { label: string; sub?: string; alert?: boolean; real: string; yours: string; delta: string | null; tone: string }[] = [];
@@ -464,13 +496,13 @@ export default function ModifyPanel({ template, design, preview, onAction, onRes
             <div role="tablist" aria-label="Stage to sweep" className="flex gap-1">
               {stageTabs.map((t) => (
                 <button
-                  key={t.j}
+                  key={t.key}
                   type="button"
                   role="tab"
-                  aria-selected={t.j === tab.j}
-                  onClick={() => onChartStage(t.j)}
+                  aria-selected={t.key === tab.key}
+                  onClick={() => onChartStage(t.key)}
                   className={`h-7 border px-2.5 text-[10px] font-semibold uppercase tracking-[0.16em] transition-colors ${
-                    t.j === tab.j ? "border-white text-white" : "border-rule text-haze hover:border-white/60 hover:text-white"
+                    t.key === tab.key ? "border-white text-white" : "border-rule text-haze hover:border-white/60 hover:text-white"
                   }`}
                 >
                   {t.label}
@@ -493,7 +525,7 @@ export default function ModifyPanel({ template, design, preview, onAction, onRes
             </div>
           </div>
           {/* Its own caption reads the curve and your point on it; what landing costs is already said above. */}
-          <TradeChart curve={chart.curve} currentX={currentX} onPick={pick} plotHeight={96} />
+          <TradeChart curve={chart.curve} currentX={currentX} onPick={pick} plotHeight={96} caption={chart.caption} />
         </div>
       )}
 
