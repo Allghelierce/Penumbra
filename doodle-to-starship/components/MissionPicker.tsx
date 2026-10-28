@@ -1,7 +1,8 @@
 "use client";
 
 import type { HistoricMission } from "@/lib/design";
-import { DEMO_CONCEPTS } from "@/lib/demo-assets";
+import { DEMO_SKETCHES } from "@/lib/demo-sketches";
+import { ChalkDrawing } from "@/components/TemplatePicker";
 
 interface MissionPickerProps {
   missions: HistoricMission[];
@@ -12,13 +13,13 @@ interface MissionPickerProps {
 const formatDate = (iso: string) =>
   new Date(`${iso}T12:00:00Z`).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric", timeZone: "UTC" });
 
-/** The first step: real missions to diagnose, each with its pinned render, plus a blank napkin. */
+/** The first step: real missions to diagnose, each drawn as its napkin sketch, plus a blank napkin. */
 export default function MissionPicker({ missions, onPick, onDrawOwn }: MissionPickerProps) {
   return (
     <section aria-label="Pick a mission" className="w-full font-ui text-white">
       <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
         {missions.map((m) => {
-          const photo = DEMO_CONCEPTS[m.sketchId];
+          const sketch = DEMO_SKETCHES.find((d) => d.id === m.sketchId);
           return (
             <button
               key={m.id}
@@ -26,15 +27,11 @@ export default function MissionPicker({ missions, onPick, onDrawOwn }: MissionPi
               onClick={() => onPick(m)}
               className="group flex flex-col border border-white/15 bg-black/35 text-left backdrop-blur-[1px] transition-colors hover:border-white focus-visible:border-white"
             >
-              <div className="cutout-well relative aspect-[3/4] w-full overflow-hidden">
-                {photo && (
-                  // eslint-disable-next-line @next/next/no-img-element
-                  <img
-                    src={photo}
-                    alt={`${m.vehicle}, rendered`}
-                    draggable={false}
-                    className="absolute inset-0 h-full w-full object-contain transition-transform duration-500 group-hover:scale-[1.03]"
-                  />
+              <div className="relative aspect-[3/4] w-full overflow-hidden">
+                {sketch && (
+                  <div className="absolute inset-0 transition-transform duration-500 group-hover:scale-[1.02]">
+                    <ChalkDrawing strokes={sketch.strokes} />
+                  </div>
                 )}
                 {m.outcome === "lost" && (
                   <span className="absolute left-3 top-3 bg-redpen px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-[0.2em] text-white">Lost</span>

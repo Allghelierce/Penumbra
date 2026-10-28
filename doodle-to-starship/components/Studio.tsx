@@ -2,12 +2,12 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import AttractMode from "@/components/AttractMode";
+import CleanProfile from "@/components/CleanProfile";
 import EditHandles, { type Stretch } from "@/components/EditHandles";
 import LaunchScene, { unlockLaunchAudio } from "@/components/LaunchScene";
 import ModifyPanel, { applyStretch, realIndex } from "@/components/ModifyPanel";
 import NapkinCanvas from "@/components/NapkinCanvas";
 import NapkinAssist from "@/components/NapkinAssist";
-import NapkinRender from "@/components/NapkinRender";
 import { PenumbraLockup } from "@/components/PenumbraLogo";
 import PollConsole from "@/components/PollConsole";
 import RedPenOverlay from "@/components/RedPenOverlay";
@@ -33,8 +33,6 @@ import type {
   PriorArtResult,
   ReadRequest,
   ReadResponse,
-  RenderRequest,
-  RenderResponse,
   Review,
   ReviewRequest,
   ReviewResponse,
@@ -47,8 +45,6 @@ import TemplatePicker from "@/components/TemplatePicker";
 import { strokesToPng } from "@/lib/napkin";
 import { buildReview } from "@/lib/redpen";
 import { readFromGeometry } from "@/lib/sketch/geometry";
-import { cutoutBlack } from "@/lib/cutout";
-import { DEMO_CONCEPTS } from "@/lib/demo-assets";
 import { COMEBACK, defectStrokes, fixNote, fixStrokes, historicReading, historicReview, historicTrace } from "@/lib/history";
 import { prefetchNarration } from "@/lib/voice/tts";
 import { ALL_MISSIONS } from "@/lib/mission-catalog";
@@ -92,21 +88,6 @@ function safeAnalyze(design: Design | null): Analysis | null {
   }
 }
 
-/**
- * The demo sketch these strokes are, untouched: the very same stroke objects, all of them. A sample
- * button, ?demo= and attract mode all hand over the demo's own strokes; drawing or undo breaks the match.
- */
-function untouchedDemo(strokes: Stroke[]) {
-  const drawn = strokes.filter((s) => s.points.length > 0);
-  if (drawn.length === 0) return null;
-  return (
-    DEMO_SKETCHES.find((d) => {
-      const own = d.strokes.filter((s) => s.points.length > 0);
-      return own.length === drawn.length && own.every((s, i) => s === drawn[i]);
-    }) ?? null
-  );
-}
-
 /** The three flights the demo walks through, shown as big cards; every other flight is listed below them. */
 const FEATURED = ["falcon1-f1", "crs7", "ift1"];
 const FEATURED_MISSIONS = FEATURED.map((id) => ALL_MISSIONS.find((m) => m.id === id)).filter((m): m is HistoricMission => Boolean(m));
@@ -118,7 +99,7 @@ const FAMILIES = [
   { sketchId: "mars-ship", label: "Starship" },
 ];
 
-/** NapkinRender drops its render when its reset key is an empty array: used below the Build step. */
+/** CleanProfile drops its profile when its reset key is an empty array: used below the Build step. */
 const NO_STROKES: Stroke[] = [];
 
 /** Flight events after which only the end card is left: the step bar moves on to Debrief. */
@@ -207,15 +188,8 @@ export default function Studio() {
   const [review, setReview] = useState<Review | null>(null);
   const [reviewKey, setReviewKey] = useState(0);
   const [stale, setStale] = useState(false);
-  const [concept, setConcept] = useState<{ url: string | null; loading: boolean }>({ url: null, loading: false });
   const [priorArt, setPriorArt] = useState<PriorArtResult[]>([]);
-  const [patchUrl, setPatchUrl] = useState<string | null>(null);
-  const [flight, setFlight] = useState<{
-    trace: FlightTrace;
-    renderUrl: string | null;
-    renderState: "loading" | "done" | "none";
-    napkinRect: NapkinRect | null;
-  } | null>(null);
+  const [flight, setFlight] = useState<{ trace: FlightTrace; napkinRect: NapkinRect | null } | null>(null);
   const [narration, setNarration] = useState<string | null>(null);
   // Every launch of this sketch, oldest first: the visible record of iterating on it.
   const [attempts, setAttempts] = useState<Attempt[]>([]);
@@ -286,10 +260,8 @@ export default function Studio() {
   const [revealed, setRevealed] = useState(0);
   const [offer, setOffer] = useState<{ line: string; fix?: DesignAction } | null>(null);
   // One counter per async stream: a response only lands if no newer request (or Clear) superseded it.
-  const runs = useRef({ check: 0, review: 0, concept: 0, patch: 0, priorArt: 0, launch: 0 });
+  const runs = useRef({ check: 0, review: 0, priorArt: 0 });
   const checking = useRef(false);
-  // The sketch the current concept and patch renders came from, so re-checking it doesn't pay for new ones.
-  const rendered = useRef<{ strokes: Stroke[]; destination: DestinationId } | null>(null);
   // Wraps the napkin so the launch can lift off from exactly where the doodle sits on screen.
   const napkinArea = useRef<HTMLDivElement>(null);
 
@@ -312,33 +284,6 @@ export default function Studio() {
     setReview(next);
     setReviewKey((k) => k + 1);
     setNarration(next.summary);
-  }, []);
-
-  const fetchConcept = useCallback(async (nextDesign: Design, nextAnalysis: Analysis, sketch: string) => {
-    const id = ++runs.current.concept;
-    setConcept({ url: null, loading: true });
-    try {
-      const body: RenderRequest = { design: nextDesign, analysis: nextAnalysis, kind: "concept", sketch };
-      const { url } = await postJson<RenderResponse>("/api/render", body);
-      if (id === runs.current.concept) {
-        setConcept({ url, loading: false });
-        // Cut the vehicle out now, so the launch can fly the render without a pop.
-        if (url) void cutoutBlack(url);
-      }
-    } catch {
-      if (id === runs.current.concept) setConcept({ url: null, loading: false });
-    }
-  }, []);
-
-  const fetchPatch = useCallback(async (nextDesign: Design, nextAnalysis: Analysis) => {
-    const id = ++runs.current.patch;
-    try {
-      const body: RenderRequest = { design: nextDesign, analysis: nextAnalysis, kind: "patch" };
-      const { url } = await postJson<RenderResponse>("/api/render", body);
-      if (id === runs.current.patch) setPatchUrl(url);
-    } catch {
-      if (id === runs.current.patch) setPatchUrl(null);
-    }
   }, []);
 
   const fetchPriorArt = useCallback(async (nextDesign: Design) => {
@@ -388,20 +333,6 @@ export default function Studio() {
         setError("The physics engine couldn't size this design. Redraw the tanks and engines more clearly, then check again.");
         return;
       }
-      // An untouched demo sketch has its concept pinned: free, instant and offline, no /api/render call.
-      const demo = untouchedDemo(strokes);
-      const pinned = demo ? DEMO_CONCEPTS[demo.id] : undefined;
-      if (pinned) {
-        runs.current.concept++; // anything still in flight is for another sketch
-        setConcept({ url: pinned, loading: false });
-        void cutoutBlack(pinned);
-      }
-      const same = rendered.current?.strokes === strokes && rendered.current.destination === target;
-      if (!same) {
-        rendered.current = { strokes, destination: target };
-        if (!pinned) void fetchConcept(nextDesign, nextAnalysis, image);
-        void fetchPatch(nextDesign, nextAnalysis);
-      }
       void fetchPriorArt(nextDesign);
       await requestReview(nextReading, nextAnalysis);
     } catch {
@@ -418,36 +349,19 @@ export default function Studio() {
     if (checking.current) return;
     // Inside the click or key press that launched, so Safari lets the launch audio play.
     unlockLaunchAudio();
-    const { design: current, reading: read, strokes: drawn } = latest.current;
+    const { design: current, reading: read } = latest.current;
     const currentAnalysis = safeAnalyze(current);
     if (!current || !read || !currentAnalysis) return;
     const box = napkinArea.current?.querySelector(".napkin")?.getBoundingClientRect();
     const napkinRect = box ? { left: box.left, top: box.top, width: box.width, height: box.height } : null;
     const flown = latest.current.mission;
-    // A real flight already has its photo, and a real rocket flies its drawing: no outcome render to pay for.
-    const unrendered = Boolean(flown || latest.current.template);
     const trace = flown ? historicTrace(flown) : simulateFlight(current, currentAnalysis);
     prefetchNarration(trace.events.map((e) => calloutFor(e, current, trace)));
-    setFlight({ trace, renderUrl: null, renderState: unrendered ? "none" : "loading", napkinRect });
+    setFlight({ trace, napkinRect });
     setFlightId((n) => n + 1);
     setStep(4);
     setAttempts((prev) => [...prev, { n: prev.length + 1, design: current, analysis: currentAnalysis, maxAltitudeKm: trace.maxAltitudeKm }]);
     setPhase("launch");
-    if (unrendered) return;
-    const body: RenderRequest = {
-      design: current,
-      analysis: currentAnalysis,
-      kind: "outcome",
-      sketch: strokesToPng(drawn),
-    };
-    const id = ++runs.current.launch;
-    postJson<RenderResponse>("/api/render", body)
-      .then(({ url }) => {
-        if (id === runs.current.launch) setFlight((f) => (f ? { ...f, renderUrl: url, renderState: url ? "done" : "none" } : f));
-      })
-      .catch(() => {
-        if (id === runs.current.launch) setFlight((f) => (f ? { ...f, renderState: "none" } : f));
-      });
   }, []);
 
   // The pending "Fix it & fly again" comeback launch; anything that moves the flow on cancels it.
@@ -583,7 +497,6 @@ export default function Studio() {
     // Anything still in flight belongs to the old sketch.
     for (const key of Object.keys(runs.current) as (keyof typeof runs.current)[]) runs.current[key]++;
     checking.current = false;
-    rendered.current = null;
     setAttempts([]);
     setPoll(null);
     setOffer(null);
@@ -592,9 +505,7 @@ export default function Studio() {
     setDesign(null);
     setReview(null);
     setStale(false);
-    setConcept({ url: null, loading: false });
     setPriorArt([]);
-    setPatchUrl(null);
     setError(null);
     setIdentified(null);
     setFix(null);
@@ -856,15 +767,9 @@ export default function Studio() {
     if (!latest.current.reading) setStep(1);
   }
 
-  /** Build: the clean profile draws on, then the rendered vehicle. */
+  /** Build: the sketch is inked over with its clean profile. */
   function build() {
     setStep(3);
-    if (mission) {
-      const url = DEMO_CONCEPTS[mission.sketchId] ?? null;
-      runs.current.concept++;
-      setConcept({ url, loading: false });
-      if (url) void cutoutBlack(url);
-    }
   }
 
   // A bump of this counter asks for a check of whatever is on the napkin in that render.
@@ -968,7 +873,7 @@ export default function Studio() {
             "Choose a real rocket",
             mission ? "The engineer's napkin" : "Draw your spacecraft",
             !mission ? "Red pen reviews your design" : mission.outcome === "lost" ? "Red pen finds what failed" : "See what made it work",
-            "See it real",
+            "Ink it clean",
             mission ? "Relive the flight" : "Fly your design",
             mission ? (mission.outcome === "lost" ? "What SpaceX learned" : "How it came together") : "How it flew",
           ]}
@@ -1051,23 +956,8 @@ export default function Studio() {
                   </div>
                 }
               >
-                <NapkinRender
-                  reading={step >= 3 && reviewed && !unreadable ? reading : null}
-                  url={step >= 3 ? concept.url : null}
-                  loading={step >= 3 && concept.loading}
-                  resetKey={step >= 3 ? strokes : NO_STROKES}
-                  sticker={
-                    !mission && patchUrl ? (
-                      // eslint-disable-next-line @next/next/no-img-element
-                      <img
-                        src={patchUrl}
-                        alt="Grok Imagine mission patch"
-                        className="sticker-in absolute right-[5%] top-[3%] aspect-square w-[24%] rounded-full object-cover shadow-[0_6px_14px_-4px_rgba(0,0,0,0.45)]"
-                      />
-                    ) : null
-                  }
-                >
-                  {/* From Build on, a real flight keeps only the failed part's outline: a red highlight over the photo. */}
+                <CleanProfile reading={step >= 3 && reviewed && !unreadable ? reading : null} resetKey={step >= 3 ? strokes : NO_STROKES}>
+                  {/* From Build on, a real flight keeps only the failed part's outline, glowing red on the drawing. */}
                   <div className={`absolute inset-0 transition-opacity duration-300 ${stale ? "opacity-30" : ""} ${highlightOnly ? "failed-highlight" : ""}`}>
                     <RedPenOverlay
                       parts={reviewed && !highlightOnly && (!template || review) ? reading.parts : []}
@@ -1081,7 +971,7 @@ export default function Studio() {
                       problem={reviewed && unreadable ? unreadable.problem : null}
                     />
                   </div>
-                </NapkinRender>
+                </CleanProfile>
                 {!mission && !template && <NapkinAssist strokes={strokes} destination={destination} onKeep={changeStrokes} active={phase === "draw"} />}
                 {fix && <FixOverlay strokes={fix.strokes} note={fix.note} />}
                 {template && design && drawing && step === 1 && phase !== "poll" && (
@@ -1246,8 +1136,6 @@ export default function Studio() {
                 design={design}
                 analysis={analysis}
                 review={review}
-                conceptUrl={concept.url}
-                conceptLoading={concept.loading}
                 priorArt={priorArt}
               />
             )}
@@ -1422,7 +1310,6 @@ function MissionBrief({ mission, step, identified }: { mission: HistoricMission;
           </ul>
         </section>
       )}
-      {step === 3 && <p className="px-1 text-[12px] leading-snug text-haze">Grok Imagine built this vehicle from the napkin sketch.</p>}
     </aside>
   );
 }

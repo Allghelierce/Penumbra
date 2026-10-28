@@ -1,7 +1,7 @@
 "use client";
 
 import { useMemo } from "react";
-import type { RocketTemplate } from "@/lib/design";
+import type { RocketTemplate, Stroke } from "@/lib/design";
 import { drawTemplate } from "@/lib/templates";
 
 interface TemplatePickerProps {
@@ -19,6 +19,11 @@ export function payloadText(kg: number): string {
 /** The real rocket as drawn on the napkin, at its true proportions. */
 function Outline({ template }: { template: RocketTemplate }) {
   const strokes = useMemo(() => drawTemplate(template, template.design).strokes, [template]);
+  return <ChalkDrawing strokes={strokes} />;
+}
+
+/** Napkin strokes in chalk, filling a 3:4 box: a card's picture of its rocket. */
+export function ChalkDrawing({ strokes }: { strokes: Stroke[] }) {
   return (
     <svg viewBox="0 0 300 400" className="absolute inset-0 h-full w-full" aria-hidden>
       {strokes.map((s, i) => (

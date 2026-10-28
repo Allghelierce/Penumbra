@@ -34,8 +34,6 @@ interface VerdictPanelProps {
   design: Design | null;
   analysis: Analysis | null;
   review: Review | null;
-  conceptUrl: string | null;
-  conceptLoading: boolean;
   priorArt: PriorArtResult[];
 }
 
@@ -143,26 +141,11 @@ export default function VerdictPanel(props: VerdictPanelProps) {
           </span>
         }
       >
-        <div className="flex gap-4 px-4 py-3">
-          <div className="min-w-0 flex-1">
-            <p className="text-[13px] text-haze">Target: {target.name}</p>
-            <TypeOut key={title} as="h2" text={title} cps={40} className="mt-1 block font-space text-[24px] font-semibold uppercase leading-[1.1] tracking-[0.06em] text-white" />
-            {review?.summary && (
-              <TypeOut key={review.summary} as="p" text={review.summary} delay={title.length * 25 + 200} cps={90} linger={0} className="mt-2 block text-[14px] leading-snug text-haze" />
-            )}
-          </div>
-          {(props.conceptUrl || props.conceptLoading) && (
-            <figure className="w-[112px] shrink-0">
-              <div className="cutout-well aspect-[4/3] w-full overflow-hidden">
-                {props.conceptUrl ? (
-                  // eslint-disable-next-line @next/next/no-img-element
-                  <img src={props.conceptUrl} alt={`Grok Imagine render of ${design.name}`} className="h-full w-full object-cover" />
-                ) : (
-                  <div className="developing h-full w-full" />
-                )}
-              </div>
-              <figcaption className="mt-1 text-[11px] leading-tight text-haze">Grok Imagine render</figcaption>
-            </figure>
+        <div className="px-4 py-3">
+          <p className="text-[13px] text-haze">Target: {target.name}</p>
+          <TypeOut key={title} as="h2" text={title} cps={40} className="mt-1 block font-space text-[24px] font-semibold uppercase leading-[1.1] tracking-[0.06em] text-white" />
+          {review?.summary && (
+            <TypeOut key={review.summary} as="p" text={review.summary} delay={title.length * 25 + 200} cps={90} linger={0} className="mt-2 block text-[14px] leading-snug text-haze" />
           )}
         </div>
       </Module>
@@ -285,7 +268,7 @@ export default function VerdictPanel(props: VerdictPanelProps) {
 }
 
 const OUTCOME: Record<Verdict, { text: string; tone: string }> = {
-  destination: { text: "Arrived", tone: "text-go-signal" },
+  destination: { text: "On course", tone: "text-go-signal" },
   orbit: { text: "Orbit", tone: "text-white" },
   suborbital: { text: "Suborbital", tone: "text-nogo" },
   "stuck-on-pad": { text: "On the pad", tone: "text-nogo" },
