@@ -109,6 +109,8 @@ const LAST_EVENTS: FlightEventKind[] = ["impact", "orbit", "arrival", "breakup",
 
 /** The flow, one step at a time, one primary button per step. */
 const STEPS = ["Pick", "Sketch", "Diagnose", "Build", "Fly", "Debrief"];
+/** Your own drawing is checked, like a modified rocket; a real flight is diagnosed. */
+const OWN_STEPS = ["Pick", "Sketch", "Check", "Build", "Fly", "Debrief"];
 /** Modifying a real rocket has no Build: its steps are 0, 1, 2, 4 and 5 of the flow above. */
 const TEMPLATE_STEPS = ["Pick", "Modify", "Check", "Fly", "Recap"];
 const TEMPLATE_PURPOSES = ["Choose a real rocket", "Stretch, swap, add a stage", "Red pen checks your changes", "Fly your version", "What your changes did"];
@@ -872,7 +874,7 @@ export default function Studio() {
         <StepBar steps={TEMPLATE_STEPS} current={toBar(step)} onStep={(i) => jumpTo(fromBar(i))} purposes={TEMPLATE_PURPOSES} />
       ) : (
         <StepBar
-          steps={STEPS}
+          steps={mission ? STEPS : OWN_STEPS}
           current={step}
           onStep={jumpTo}
           purposes={[
@@ -1026,7 +1028,7 @@ export default function Studio() {
                     disabled={replaying || strokes.length === 0 || phase === "reading"}
                     className="btn-solid h-11 px-8 text-[12px]"
                   >
-                    Diagnose →
+                    {mission ? "Diagnose →" : "Check design →"}
                   </button>
                 )}
                 {!template && step === 2 && (
@@ -1036,7 +1038,7 @@ export default function Studio() {
                     disabled={phase !== "reviewed" || !reading || Boolean(unreadable)}
                     className="btn-solid h-11 px-8 text-[12px]"
                   >
-                    {phase === "reading" ? "Diagnosing…" : "Build it →"}
+                    {phase === "reading" ? (mission ? "Diagnosing…" : "Checking…") : "Build it →"}
                   </button>
                 )}
                 {!template && step === 3 && (
@@ -1056,7 +1058,7 @@ export default function Studio() {
                 (!mission && reviewed && issues.some((issue) => issue.severity !== "ok")
                   ? template
                     ? "Go back to Modify to fix the numbered issues, or fly it as it is."
-                    : "Redraw to fix the numbered issues, then diagnose again."
+                    : "Redraw to fix the numbered issues, then check again."
                   : "")}
             </p>
           </section>
