@@ -1843,12 +1843,34 @@ function drawSea(ctx: CanvasRenderingContext2D, W: number, H: number, y: number,
   ctx.globalAlpha = 1;
 }
 
+/** Distant cumulus on the horizon, built on first use (Path2D needs a browser). */
+let horizonClouds: { x: number; shape: Omit<CloudShape, "x" | "dy"> }[] | null = null;
+
+/** Far-off fair-weather cumulus sitting on the horizon behind the ridges, hazy with distance. */
+function drawHorizonClouds(ctx: CanvasRenderingContext2D, W: number, H: number, y: number) {
+  if (!horizonClouds) {
+    const rand = seeded(5151);
+    // Clear of the pad in the middle, where the chalk rocket and tower stand.
+    horizonClouds = [0.19, 0.34, 0.69, 0.93].map((x) => ({ x: x + (rand() - 0.5) * 0.03, shape: cumulusShape(rand, 0.26 + rand() * 0.14) }));
+  }
+  for (const c of horizonClouds) {
+    ctx.save();
+    ctx.translate(Math.round(W * c.x), Math.round(y - H * 0.016));
+    ctx.fillStyle = "rgb(150,190,228)";
+    ctx.fill(c.shape.body);
+    ctx.fillStyle = "rgb(192,218,242)";
+    ctx.fill(c.shape.light);
+    ctx.restore();
+  }
+}
+
 /**
  * Flat, hazy ridges and the spaceport on the horizon, for the rocket's real launch site:
  * Cape Canaveral, Rocket Lab's pad on the Mahia Peninsula, or Starbase on the Texas coast.
  */
 function drawSkyline(ctx: CanvasRenderingContext2D, W: number, H: number, y: number, alpha: number, site: LaunchSite) {
   const land = SITES[site];
+  drawHorizonClouds(ctx, W, H, y);
   land.ridges.forEach((ridge, i) => {
     ctx.fillStyle = land.colors[i];
     ctx.beginPath();
