@@ -296,3 +296,41 @@ describe("capacityText", () => {
     }
   });
 });
+
+describe("the real rocket on a curve of a modified design", () => {
+  const electron = template("electron");
+
+  it("marks the real rocket on the curve while only the swept parameter differs", () => {
+    for (const t of TEMPLATES) {
+      const curve = tradeCurve(t.design, { kind: "tank-stretch", stageIndex: 0 }, { destination: "leo", real: t.design });
+      expect(curve.realOnCurve, t.id).toBe(true);
+      expect(curve.realPayloadKg, t.id).toBe(maxPayloadKg(t.design, "leo"));
+      const atReal = curve.points.find((p) => p.x === curve.realX)!;
+      expect(atReal.payloadKg, t.id).toBe(curve.realPayloadKg);
+    }
+    // Sweeping the very stage you stretched still passes through the real rocket at ×1.
+    const stretched = stretchFromReal(electron.design, electron.design, 0, 1.55);
+    expect(tradeCurve(stretched, { kind: "tank-stretch", stageIndex: 0 }, { destination: "leo", real: electron.design }).realOnCurve).toBe(true);
+  });
+
+  it("calls the as-built point yours once another stage changed, and names the real rocket's payload", () => {
+    const stretched = stretchFromReal(electron.design, electron.design, 0, 1.55);
+    for (const sweep of [{ kind: "tank-stretch", stageIndex: 1 }, { kind: "engine-count", stageIndex: 1 }] as const) {
+      const curve = tradeCurve(stretched, sweep, { destination: "leo", real: electron.design });
+      expect(curve.realOnCurve).toBe(false);
+      expect(curve.realPayloadKg).toBe(maxPayloadKg(electron.design, "leo"));
+      const text = explainCurve(curve);
+      expect(text).not.toMatch(/the real rocket already|than the real/i);
+      expect(text).toMatch(/yours|with this stage's tanks as built|with the real engine count/i);
+      expect(text).toContain(`The real rocket carries ${capacityText(maxPayloadKg(electron.design, "leo"))}.`);
+    }
+  });
+
+  it("compares a recovered booster with the real rocket flown the same way", () => {
+    const f9 = template("falcon9");
+    const recovered = withRecovery(f9.design, [0]);
+    const curve = tradeCurve(recovered, { kind: "tank-stretch", stageIndex: 0 }, { destination: "leo", real: f9.design });
+    expect(curve.realOnCurve).toBe(true);
+    expect(curve.realPayloadKg).toBe(maxPayloadKg(recovered, "leo"));
+  });
+});

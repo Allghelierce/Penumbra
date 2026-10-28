@@ -15,7 +15,16 @@ export interface FitLimit {
 }
 
 /** A trade curve, plus the base-fit limit when that is what ends an engine sweep. */
-export type SweptCurve = TradeCurve & { limit?: FitLimit };
+export type SweptCurve = TradeCurve & {
+  limit?: FitLimit;
+  /**
+   * Whether the point at realX is the real rocket: true only when your design differs from it in
+   * nothing but the swept parameter. Otherwise realX is yours with that parameter as built.
+   */
+  realOnCurve?: boolean;
+  /** The real rocket's most payload to the destination, flown with your recovery choices. */
+  realPayloadKg?: number;
+};
 
 const STRETCH_FROM = 0.6;
 const STRETCH_TO = 1.8;
@@ -141,12 +150,47 @@ export function tradeCurve(
     const at = analyze({ ...built, destination, payloadMassKg: payloadKg });
     return { x, payloadKg, totalDeltaVMps: at.totalDeltaVMps, liftoffTwr: at.liftoffTwr };
   });
-  if (points.length === 0) return { label, unit, points, realX, bestX: realX, ...(limit && { limit }) };
+  // The real rocket, flown the way you fly yours (a recovered booster carries less), and whether
+  // the curve passes through it.
+  const reference = flownLike(real, design);
+  const realOnCurve = sameVehicle(build(realX), reference);
+  const realPayloadKg = maxPayloadKg(reference, destination);
+  const extra = { ...(limit && { limit }), realOnCurve, realPayloadKg };
+  if (points.length === 0) return { label, unit, points, realX, bestX: realX, ...extra };
   // The most payload; on a tie, the point nearest the real rocket.
   const best = points.reduce((b, p) =>
     p.payloadKg > b.payloadKg || (p.payloadKg === b.payloadKg && Math.abs(p.x - realX) < Math.abs(b.x - realX)) ? p : b,
   );
-  return { label, unit, points, realX, bestX: best.x, ...(limit && { limit }) };
+  return { label, unit, points, realX, bestX: best.x, ...extra };
+}
+
+/** The real rocket with each stage recovered or expended as yours is (stages matched as in realStageFor). */
+function flownLike(real: Design, yours: Design): Design {
+  const recover = new Map<Stage, boolean | undefined>();
+  yours.stages.forEach((_, i) => {
+    const r = realStageFor(yours, real, i);
+    if (r) recover.set(r, yours.stages[i].recover);
+  });
+  return { ...real, stages: real.stages.map((s) => (recover.has(s) ? { ...s, recover: recover.get(s) } : s)) };
+}
+
+/** Same stages, engines, tanks, structure, recovery and widths: the physics can't tell them apart. */
+function sameVehicle(a: Design, b: Design): boolean {
+  const near = (x: number | undefined, y: number | undefined) =>
+    x === y || (x !== undefined && y !== undefined && Math.abs(x - y) <= 1e-6 * Math.max(1, Math.abs(x), Math.abs(y)));
+  if (a.stages.length !== b.stages.length || !near(a.diameterM, b.diameterM)) return false;
+  return a.stages.every((s, i) => {
+    const t = b.stages[i];
+    return (
+      s.propellant === t.propellant &&
+      near(s.tankVolumeM3, t.tankVolumeM3) &&
+      near(s.dryMassKg, t.dryMassKg) &&
+      near(s.diameterM, t.diameterM) &&
+      !!s.recover === !!t.recover &&
+      s.engines.length === t.engines.length &&
+      s.engines.every((c, k) => c.engine === t.engines[k].engine && c.count === t.engines[k].count)
+    );
+  });
 }
 
 /** Payload given up by landing the stages that recover, compared with throwing them away. */
@@ -186,14 +230,27 @@ function explainShape(curve: SweptCurve): string {
   const atLimit = limit !== undefined && curve.bestX === limit.x;
   const atEnd = curve.bestX === curve.points[curve.points.length - 1].x;
 
+  // Off the real rocket (something else changed too), the realX point is yours with this
+  // parameter as built, and the real rocket gets its own sentence.
+  const onReal = curve.realOnCurve !== false;
+  const asBuilt = stretch ? "this stage's tanks as built" : "the real engine count";
+  const realLine = !onReal && curve.realPayloadKg !== undefined ? ` The real rocket carries ${capacityText(curve.realPayloadKg)}.` : "";
+
   const gain = real.payloadKg > 0 ? (best.payloadKg - real.payloadKg) / real.payloadKg : Infinity;
   if (Math.abs(curve.bestX - curve.realX) < (stretch ? 0.051 : 1) || gain < 0.02) {
-    if (atLimit) return `The real rocket already carries the most: ${capacityText(real.payloadKg)} at ${fmtX(curve.realX)}. Fewer carry less, and ${fit}.`;
-    return `The real rocket already sits at the peak: ${capacityText(real.payloadKg)} at ${fmtX(curve.realX)}. Change it either way and it carries less.`;
+    if (atLimit) {
+      return onReal
+        ? `The real rocket already carries the most: ${capacityText(real.payloadKg)} at ${fmtX(curve.realX)}. Fewer carry less, and ${fit}.`
+        : `Yours already carries the most at ${fmtX(curve.realX)}: ${capacityText(real.payloadKg)}. Fewer carry less, and ${fit}.${realLine}`;
+    }
+    return onReal
+      ? `The real rocket already sits at the peak: ${capacityText(real.payloadKg)} at ${fmtX(curve.realX)}. Change it either way and it carries less.`
+      : `With ${asBuilt}, yours already sits at the peak: ${capacityText(real.payloadKg)}. Change it either way and it carries less.${realLine}`;
   }
   // The percentage comes from the figures as shown, so a caption's numbers agree with each other.
   const shownGain = (shownKg(best.payloadKg) - shownKg(real.payloadKg)) / shownKg(real.payloadKg);
-  const more = Number.isFinite(gain) ? `${capacityText(best.payloadKg)}, ${Math.round(shownGain * 100)}% more than the real ${capacityText(real.payloadKg)}` : capacityText(best.payloadKg);
+  const against = onReal ? `the real ${capacityText(real.payloadKg)}` : `${capacityText(real.payloadKg)} with ${asBuilt}`;
+  const more = Number.isFinite(gain) ? `${capacityText(best.payloadKg)}, ${Math.round(shownGain * 100)}% more than ${against}` : capacityText(best.payloadKg);
   const why = stretch
     ? curve.bestX > curve.realX
       ? `More propellant adds speed until the heavier rocket lifts off at thrust-to-weight ${best.liftoffTwr.toFixed(2)}; past that it can't leave the pad safely.`
@@ -205,7 +262,7 @@ function explainShape(curve: SweptCurve): string {
           ? `More engines cut the time spent fighting gravity.`
           : `More engines cut the time spent fighting gravity; past that, each one is weight it barely needs.`
       : `Fewer engines save weight while it still lifts off at thrust-to-weight ${best.liftoffTwr.toFixed(2)}; any fewer and it's too sluggish.`;
-  return `The most payload is at ${fmtX(curve.bestX)}: ${more}. ${why}`;
+  return `The most payload is at ${fmtX(curve.bestX)}: ${more}. ${why}${realLine}`;
 }
 
 /** e.g. "9 Merlin 1D engines are all that fit on its 3.7 m base". */
