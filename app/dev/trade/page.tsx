@@ -4,7 +4,7 @@ import { useState } from "react";
 import TradeChart from "@/components/TradeChart";
 import type { DestinationId, TradeCurve } from "@/lib/design";
 import { TEMPLATES } from "@/lib/templates";
-import { maxPayloadKg, stretchFromReal, tradeCurve, type TradeSweep } from "@/lib/trade";
+import { stretchFromReal, tradeCurve, type TradeSweep } from "@/lib/trade";
 
 // Real trade curves from lib/trade.ts on the real-rocket templates, plus one that can't get anywhere.
 
@@ -25,13 +25,11 @@ function curveFor(c: (typeof CASES)[number]): TradeCurve {
   return tradeCurve(t.design, c.sweep, { destination: c.destination, real: t.design });
 }
 
-// After a change elsewhere (Electron's stage 1 at ×1.55), the stage 2 sweep's as-built point isn't the real
-// rocket any more. Filled in by hand until tradeCurve sets realOnCurve and realPayloadKg itself.
+// After a change elsewhere (Electron's stage 1 at ×1.55), the stage 2 sweep's as-built point isn't the real rocket.
 function modifiedCurve(): TradeCurve {
   const t = TEMPLATES.find((x) => x.id === "electron")!;
   const yours = stretchFromReal(t.design, t.design, 0, 1.55);
-  const curve = tradeCurve(yours, { kind: "tank-stretch", stageIndex: 1 }, { real: t.design });
-  return { ...curve, realOnCurve: false, realPayloadKg: maxPayloadKg(t.design) } as TradeCurve;
+  return tradeCurve(yours, { kind: "tank-stretch", stageIndex: 1 }, { real: t.design });
 }
 
 function Demo({ title, curve, start, compact }: { title: string; curve: TradeCurve; start?: number; compact?: boolean }) {

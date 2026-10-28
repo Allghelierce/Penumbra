@@ -108,14 +108,7 @@ const fmtX = (x: number, unit: string) => (unit === "×" ? `${trim(x)}×` : `${t
 const pct = (a: number, b: number) => Math.round((a / b - 1) * 100);
 const signedPct = (p: number) => `${p > 0 ? "+" : "−"}${Math.abs(p)}%`;
 
-/**
- * A sweep of the user's design, plus (optionally) whether its as-built point is the real rocket. After other
- * changes it isn't: the as-built point is then "yours with this part as built", and the real rocket's own
- * capacity comes in `realPayloadKg`.
- */
-type Curve = SweptCurve & { realOnCurve?: boolean; realPayloadKg?: number };
-
-/** One sentence on the user's rocket against the real one; empty while it is the real one. */
+/** One sentence on the user's rocket against the real one; empty while it is the real one. explainCurve already gives the real figure when it's off the curve. */
 function yoursLine(curve: TradeCurve, currentX: number, at: (x: number) => number, realKg: number, realOn: boolean) {
   if (realOn && Math.abs(currentX - curve.realX) < 1e-6) return "";
   const fx = fmtX(currentX, curve.unit);
@@ -124,7 +117,7 @@ function yoursLine(curve: TradeCurve, currentX: number, at: (x: number) => numbe
   if (realKg <= 0) return `Yours, at ${fx}, carries ${capacityText(you)}.`;
   const p = pct(you, realKg);
   const than = p === 0 ? "about the same as" : `${Math.abs(p)}% ${p > 0 ? "more" : "less"} than`;
-  return `Yours, at ${fx}, carries ${capacityText(you)}: ${than} the real rocket${realOn ? "" : `'s ${capacityText(realKg)}`}.`;
+  return `Yours, at ${fx}, carries ${capacityText(you)}: ${than} the real rocket.`;
 }
 
 type Placed = { left: number; right: number; lane: number; flip: boolean };
@@ -185,7 +178,7 @@ interface Props {
    * A trade curve; when its `limit` ends the sweep (no more engines fit), the plot shows a "won't fit" zone past it.
    * With `realOnCurve: false` there's no REAL marker on it; the real rocket's `realPayloadKg` is a line across instead.
    */
-  curve: Curve;
+  curve: SweptCurve;
   /** x of the user's modified rocket. */
   currentX: number;
   /** Called with the swept value of the point the user clicked. */
