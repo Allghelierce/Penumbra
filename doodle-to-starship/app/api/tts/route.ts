@@ -1,6 +1,6 @@
+import { createHash } from "node:crypto";
 import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import path from "node:path";
-import { cacheKey } from "@/lib/render-cache";
 import { metered, synthesize } from "@/lib/xai";
 
 // POST { text, voice, speed? } → audio/mpeg from xAI text-to-speech, cached under public/tts so a
@@ -41,6 +41,12 @@ async function handle(request: Request) {
     }
   }
   return audio(fresh, "miss");
+}
+
+/** Sorted-key JSON, hashed: the file name of a cached line. Changing it orphans every cached mp3. */
+function cacheKey(parts: Record<string, unknown>): string {
+  const sorted = Object.fromEntries(Object.entries(parts).sort(([a], [b]) => a.localeCompare(b)));
+  return createHash("sha256").update(JSON.stringify(sorted)).digest("hex").slice(0, 20);
 }
 
 function audio(bytes: Uint8Array, cache: "hit" | "miss") {

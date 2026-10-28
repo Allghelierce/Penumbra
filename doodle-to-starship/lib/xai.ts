@@ -11,22 +11,15 @@ export const VISION_MODEL = "grok-4.3";
 const VISION_REASONING = "none";
 export const TEXT_MODEL = "grok-4.3";
 const TEXT_REASONING = "none";
-export const IMAGE_MODEL = "grok-imagine-image-2.0";
-/** Polaroid-shaped, fast. Try quality "medium" if renders look rough. */
-const IMAGE_OPTIONS = { aspect_ratio: "4:3", resolution: "1k", quality: "low" };
-export const VIDEO_MODEL = "grok-imagine-video-1.5-lite";
-const VIDEO_OPTIONS = { duration: 6, resolution: "480p" };
 
 /**
- * Live-demo budgets in ms; a slow call is worse than a fallback. Override with XAI_VISION_TIMEOUT_MS,
- * XAI_TEXT_TIMEOUT_MS, XAI_IMAGE_TIMEOUT_MS and XAI_VIDEO_TIMEOUT_MS. Read per call so .env edits apply.
+ * Live-demo budgets in ms; a slow call is worse than a fallback. Override with XAI_VISION_TIMEOUT_MS
+ * and XAI_TEXT_TIMEOUT_MS. Read per call so .env edits apply.
  */
 export function timeouts() {
   return {
     vision: envNumber("XAI_VISION_TIMEOUT_MS", 8_000),
     text: envNumber("XAI_TEXT_TIMEOUT_MS", 6_000),
-    image: envNumber("XAI_IMAGE_TIMEOUT_MS", 25_000),
-    video: envNumber("XAI_VIDEO_TIMEOUT_MS", 15_000),
   };
 }
 
@@ -155,34 +148,22 @@ interface ChatCompletion {
   choices?: Array<{ message?: { content?: string | null } }>;
 }
 
-interface ImageResult {
-  data?: Array<{ url?: string; b64_json?: string; mime_type?: string }>;
-}
-
-interface VideoJob {
-  usage?: { cost_in_usd_ticks?: number };
-  request_id?: string;
-  status?: string;
-  progress?: number;
-  video?: { url?: string };
-}
-
-async function request<T>(method: "GET" | "POST", path: string, body: unknown, timeoutMs: number): Promise<T | null> {
+async function request<T>(path: string, body: unknown, timeoutMs: number): Promise<T | null> {
   // Name the model in logs and /api/xai-status so a slow vision read can be told from a slow rewrite.
   const model = (body as { model?: unknown } | undefined)?.model;
   const label = typeof model === "string" ? `${path} (${model})` : path;
   const key = process.env.XAI_API_KEY;
   if (!key) return null;
-  // Spend brake: paid calls fall back like no-key mode; polls (GET) are free and keep working.
-  if (method === "POST" && spentTodayUsd() >= dailyBudgetUsd()) {
+  // Spend brake: past the daily budget, calls fall back like no-key mode.
+  if (spentTodayUsd() >= dailyBudgetUsd()) {
     recordError(label, null, "budget", `daily xAI budget of $${dailyBudgetUsd()} reached`);
     return null;
   }
   try {
     const res = await fetch(`${XAI_BASE_URL}${path}`, {
-      method,
-      headers: { Authorization: `Bearer ${key}`, ...(body === undefined ? {} : { "Content-Type": "application/json" }) },
-      body: body === undefined ? undefined : JSON.stringify(body),
+      method: "POST",
+      headers: { Authorization: `Bearer ${key}`, "Content-Type": "application/json" },
+      body: JSON.stringify(body),
       signal: AbortSignal.timeout(timeoutMs),
       cache: "no-store",
     });
@@ -218,7 +199,7 @@ async function chat(
       json_schema: { name: schema.name, schema: schema.schema, strict: true },
     };
   }
-  const completion = await request<ChatCompletion>("POST", "/chat/completions", body, timeoutMs);
+  const completion = await request<ChatCompletion>("/chat/completions", body, timeoutMs);
   const content = completion?.choices?.[0]?.message?.content;
   return typeof content === "string" && content.trim() ? content : null;
 }
@@ -285,38 +266,6 @@ export async function chatJson<T>(opts: {
   return parseJson<T>(text);
 }
 
-async function imagine(path: string, body: Record<string, unknown>, timeoutMs: number): Promise<string | null> {
-  const result = await request<ImageResult>(
-    "POST",
-    path,
-    { model: IMAGE_MODEL, n: 1, response_format: "url", ...IMAGE_OPTIONS, ...body },
-    timeoutMs,
-  );
-  const image = result?.data?.[0];
-  if (image?.url) return image.url;
-  if (image?.b64_json) return `data:${image.mime_type ?? "image/jpeg"};base64,${image.b64_json}`;
-  return null;
-}
-
-/** Generate one image from a prompt. Returns a temporary URL (or a data URL if the API sends base64). */
-export function generateImage(
-  prompt: string,
-  options?: { aspect_ratio?: string },
-  timeoutMs = timeouts().image,
-): Promise<string | null> {
-  return imagine("/images/generations", { prompt, ...options }, timeoutMs);
-}
-
-/** Re-imagine an existing image (a png/jpg data URL) following `prompt`. */
-export function editImage(
-  prompt: string,
-  image: string,
-  options?: { aspect_ratio?: string },
-  timeoutMs = timeouts().image,
-): Promise<string | null> {
-  return imagine("/images/edits", { prompt, image: { url: image }, ...options }, timeoutMs);
-}
-
 /**
  * xAI bills TTS per input character. The rate wasn't in our docs copy (the price table renders
  * client-side), so this meters a conservative $30 per million characters until it's confirmed.
@@ -362,39 +311,4 @@ export async function synthesize(text: string, voiceId: string, speed = 1): Prom
     recordError(label, null, kind, `${err instanceof Error ? err.message : String(err)} after ${TTS_TIMEOUT_MS} ms`);
     return null;
   }
-}
-
-/** Start an image-to-video job. Returns its request id. There is no cancel, so only call this on a user's ask. */
-export async function startVideo(imageUrl: string, prompt: string): Promise<string | null> {
-  const job = await request<VideoJob>(
-    "POST",
-    "/videos/generations",
-    { model: VIDEO_MODEL, image: { url: imageUrl }, prompt, ...VIDEO_OPTIONS },
-    timeouts().video,
-  );
-  if (typeof job?.request_id !== "string") return null;
-  // Video is billed when the clip is made, so count it now at list price ($0.02/s) for the budget.
-  if (!job.usage) addCost(VIDEO_OPTIONS.duration * 0.02 * TICKS_PER_USD);
-  return job.request_id;
-}
-
-export type VideoStatus = "pending" | "done" | "failed" | "expired";
-
-/** Poll a video job. */
-export async function getVideo(
-  id: string,
-): Promise<{ status: VideoStatus; progress: number | null; url: string | null } | null> {
-  const job = await request<VideoJob>("GET", `/videos/${encodeURIComponent(id)}`, undefined, timeouts().video);
-  if (!job) return null;
-  const known: VideoStatus[] = ["pending", "done", "failed", "expired"];
-  const status = known.includes(job.status as VideoStatus)
-    ? (job.status as VideoStatus)
-    : job.video?.url
-      ? "done"
-      : "pending";
-  return {
-    status,
-    progress: typeof job.progress === "number" ? job.progress : null,
-    url: typeof job.video?.url === "string" ? job.video.url : null,
-  };
 }
