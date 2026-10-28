@@ -422,7 +422,7 @@ export function historyLine(design: Design, analysis: Analysis): string {
 
   switch (analysis.verdict) {
     case "stuck-on-pad":
-      return `Liftoff thrust-to-weight ${analysis.liftoffTwr.toFixed(2)} keeps it on the pad; Saturn V cleared the tower at about 1.2.`;
+      return `Liftoff thrust-to-weight ${analysis.liftoffTwr.toFixed(2)} keeps it on the pad; Saturn V cleared the tower at about 1.16.`;
     case "suborbital":
       return "Like Alan Shepard's Mercury-Redstone in 1961, it goes up and comes back down; orbit took an Atlas the next year.";
     case "orbit":
