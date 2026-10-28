@@ -161,6 +161,35 @@ describe("improvements after a success", () => {
   });
 });
 
+describe("what a flight did", () => {
+  const saturn = templateById("saturn-v").design;
+  const f9 = templateById("falcon9").design;
+  const light = (d: Design, destination: Design["destination"]): Design => ({ ...d, destination, payloadMassKg: 500 });
+  // Saturn V needs a stage more for Europa.
+  const europa = applyAction(light(saturn, "europa"), { type: "add-stage" });
+
+  it.each([
+    ["mars-transfer", light(f9, "mars-transfer"), "on course for Mars"],
+    ["mars-surface", light(saturn, "mars-surface"), "on course for Mars"],
+    ["europa", europa, "on course for Europa"],
+  ] as const)("%s: the flight is on its way, never 'reached'", (_, design, says) => {
+    expect(analyze(design).verdict).toBe("destination");
+    const first = recap(attempts(design));
+    const again = recap(attempts(light(f9, "leo"), design));
+    for (const r of [first, again]) {
+      expect(r.headline).toContain(says);
+      const lines = [r.headline, r.delta ?? "", ...r.improvements.map((i) => i.text)];
+      for (const line of lines) expect(line).not.toMatch(/\breached\b/i);
+    }
+  });
+
+  it("says a Moon flight reached the Moon's distance, and a LEO or GTO flight as before", () => {
+    expect(recap(attempts(light(saturn, "moon-orbit"))).headline).toMatch(/^Attempt 1: reached the Moon's distance with \d+\.\d km\/s to spare$/);
+    expect(recap(attempts(light(f9, "leo"))).headline).toMatch(/^Attempt 1: orbit with /);
+    expect(recap(attempts(light(f9, "gto"))).headline).toMatch(/^Attempt 1: reached GTO with /);
+  });
+});
+
 describe("every recap", () => {
   const cases: [string, Design][] = [
     ["stuck", stuck],

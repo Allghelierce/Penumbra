@@ -55,7 +55,28 @@ function outcome(design: Design, a: Analysis): string {
     case "orbit":
       return "orbit";
     case "destination":
-      return design.destination === "leo" ? "orbit" : `reached ${DESTINATION_NAMES[design.destination]}`;
+      return arrival(design.destination);
+  }
+}
+
+/**
+ * What a flight that makes its destination does, claiming only what the flight shows: the coast
+ * reaches the Moon's distance, but a Mars or Europa flight ends on its way, months or years out.
+ */
+function arrival(destination: DestinationId): string {
+  switch (destination) {
+    case "leo":
+      return "orbit";
+    case "moon-orbit":
+    case "moon-surface":
+      return "reached the Moon's distance";
+    case "mars-transfer":
+    case "mars-surface":
+      return "on course for Mars";
+    case "europa":
+      return "on course for Europa";
+    default:
+      return `reached ${DESTINATION_NAMES[destination]}`;
   }
 }
 
