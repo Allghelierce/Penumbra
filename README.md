@@ -44,13 +44,13 @@ These figures are checked by `lib/trade.test.ts`. The same tests check that the 
 - **Red pen:** notes drawn on the design, each fix re-checked against the physics before it is drawn.
 - **Launch replays:** the vehicle flies the simulated trajectory, with staging, recovery and mission-specific failures.
 - **Draw your own:** sketch any vehicle on the napkin. A reader turns the drawing into stages, engines and tanks, and it goes through the same physics.
-- **Grok integration (optional):** Grok vision reads sketches, Grok Imagine renders the design, and Grok Voice runs a spoken GO/NO-GO poll. Every xAI call has a deterministic fallback, so the app works without a key.
+- **Grok integration (optional):** Grok vision reads sketches, Grok Voice runs a spoken GO/NO-GO poll, and Grok text can reword the red pen's notes but never their numbers. Every xAI call has a deterministic fallback, so the app works without a key. There is no image generation: every picture is either your sketch or drawn by code.
 
 ## Tech stack
 
 - Next.js 16 (App Router, Turbopack), React 19, TypeScript, Tailwind CSS 4
 - Vitest: 201 tests across 20 files, covering the physics, the calibration, trade curves, the red pen and the sketch readers
-- xAI Grok APIs (vision, Imagine, Voice) behind a server-side wrapper with fallbacks (`lib/xai.ts`)
+- xAI Grok APIs (vision, text, Voice) behind a server-side wrapper with fallbacks (`lib/xai.ts`)
 - NASA Technical Reports Server API for prior-art search
 
 ## Running it
@@ -87,5 +87,5 @@ lib/missions*.ts    the real-mission case studies
 lib/redpen.ts       red-pen rules
 lib/design.ts       the shared types every module uses
 components/         the studio, trade chart, edit handles and launch scene
-app/api/            Grok vision, review, render and NASA prior-art routes
+app/api/            Grok vision, red-pen review, voice and NASA prior-art routes
 ```
