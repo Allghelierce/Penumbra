@@ -6,7 +6,7 @@
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent, type PointerEvent } from "react";
 import type { TradeCurve, TradePoint } from "@/lib/design";
 import { km } from "@/lib/physics/format";
-import { explainCurve, type SweptCurve } from "@/lib/trade";
+import { capacityText, explainCurve, type SweptCurve } from "@/lib/trade";
 
 type MarkKey = "real" | "best" | "you";
 
@@ -105,27 +105,19 @@ function ticks(lo: number, hi: number, step: number) {
 const trim = (v: number) => String(Number(v.toFixed(2)));
 const fmtX = (x: number, unit: string) => (unit === "×" ? `${trim(x)}×` : `${trim(x)} ${unit}`);
 
-/** Tonnes for big rockets, kilograms when the whole curve is under 2 t (Electron). Rounded like explainCurve's caption, so they agree. */
-export function payloadText(kg: number, tonnes: boolean) {
-  const v = Math.max(0, kg);
-  if (!tonnes) return `${Math.round(v).toLocaleString("en-US")} kg`;
-  if (v <= 0) return "0 t";
-  return v >= 100_000 ? `${Math.round(v / 1000).toLocaleString("en-US")} t` : `${(v / 1000).toFixed(1)} t`;
-}
-
 const pct = (a: number, b: number) => Math.round((a / b - 1) * 100);
 const signedPct = (p: number) => `${p > 0 ? "+" : "−"}${Math.abs(p)}%`;
 
 /** One sentence on the user's change against the real rocket; empty while it's unchanged. */
-function yoursLine(curve: TradeCurve, currentX: number, at: (x: number) => number, tonnes: boolean) {
+function yoursLine(curve: TradeCurve, currentX: number, at: (x: number) => number) {
   if (Math.abs(currentX - curve.realX) < 1e-6) return "";
   const fx = fmtX(currentX, curve.unit);
   const real = at(curve.realX);
   const you = at(currentX);
   if (you <= 0) return `Yours, at ${fx}, can't get there at all.`;
-  if (real <= 0) return `Yours, at ${fx}, carries ${payloadText(you, tonnes)}.`;
+  if (real <= 0) return `Yours, at ${fx}, carries ${capacityText(you)}.`;
   const p = pct(you, real);
-  return `Yours, at ${fx}, carries ${payloadText(you, tonnes)}: ${p === 0 ? "about the same as" : `${Math.abs(p)}% ${p > 0 ? "more" : "less"} than`} the real rocket.`;
+  return `Yours, at ${fx}, carries ${capacityText(you)}: ${p === 0 ? "about the same as" : `${Math.abs(p)}% ${p > 0 ? "more" : "less"} than`} the real rocket.`;
 }
 
 type Placed = { left: number; right: number; lane: number; flip: boolean };
@@ -251,7 +243,7 @@ export default function TradeChart({ curve, currentX, onPick, caption, context, 
       .map((key) => {
         const x = key === "real" ? curve.realX : key === "best" ? curve.bestX : currentX;
         const kg = at(x);
-        let value = allZero ? "" : kg > 0 ? payloadText(kg, tonnes) : "can't reach";
+        let value = allZero ? "" : kg > 0 ? capacityText(kg) : "can't reach";
         if (key === "you" && kg > 0 && realKg > 0 && Math.abs(currentX - curve.realX) > 1e-6) {
           const p = pct(kg, realKg);
           if (p !== 0) value += ` ${signedPct(p)}`;
@@ -286,7 +278,7 @@ export default function TradeChart({ curve, currentX, onPick, caption, context, 
   const hp = cursor != null && cursor < n ? g.pts[cursor] : null;
   const fx = (x: number) => fmtX(x, curve.unit);
   const text =
-    caption === undefined ? [explainCurve(curve, context), yoursLine(curve, currentX, g.at, g.tonnes)].filter(Boolean).join(" ") : caption;
+    caption === undefined ? [explainCurve(curve, context), yoursLine(curve, currentX, g.at)].filter(Boolean).join(" ") : caption;
 
   const pointToIndex = (clientX: number) => {
     const r = svgRef.current?.getBoundingClientRect();
@@ -313,7 +305,7 @@ export default function TradeChart({ curve, currentX, onPick, caption, context, 
   const hx = hp ? g.sx(hp.x) : 0;
   const tipRight = hx > width - 220;
   const readout = hp
-    ? `${fx(hp.x)}: ${hp.payloadKg > 0 ? payloadText(hp.payloadKg, g.tonnes) : "can't reach"}, Δv ${km(hp.totalDeltaVMps)} km/s, liftoff TWR ${hp.liftoffTwr.toFixed(2)}`
+    ? `${fx(hp.x)}: ${hp.payloadKg > 0 ? capacityText(hp.payloadKg) : "can't reach"}, Δv ${km(hp.totalDeltaVMps)} km/s, liftoff TWR ${hp.liftoffTwr.toFixed(2)}`
     : "";
 
   return (
@@ -451,7 +443,7 @@ export default function TradeChart({ curve, currentX, onPick, caption, context, 
           >
             <dl className="grid grid-cols-2 gap-x-3 gap-y-1.5">
               {[
-                [hp.payloadKg > 0 ? "Payload" : "Can't reach", hp.payloadKg > 0 ? payloadText(hp.payloadKg, g.tonnes) : "0"],
+                [hp.payloadKg > 0 ? "Payload" : "Can't reach", hp.payloadKg > 0 ? capacityText(hp.payloadKg) : "0"],
                 [curve.unit === "×" ? "Stretch" : curve.unit, curve.unit === "×" ? fx(hp.x) : trim(hp.x)],
                 ["Δv", `${km(hp.totalDeltaVMps)} km/s`],
                 ["Liftoff TWR", hp.liftoffTwr.toFixed(2)],
@@ -496,7 +488,7 @@ export default function TradeChart({ curve, currentX, onPick, caption, context, 
                   return (
                     <tr key={p.x} className={`border-t border-rule ${tags.length ? "text-white" : "text-white/70"}`}>
                       <td className="py-1">{fx(p.x)}</td>
-                      <td className="py-1 text-right">{payloadText(p.payloadKg, g.tonnes)}</td>
+                      <td className="py-1 text-right">{capacityText(p.payloadKg)}</td>
                       <td className="py-1 text-right">{km(p.totalDeltaVMps)}</td>
                       <td className="py-1 text-right">{p.liftoffTwr.toFixed(2)}</td>
                       <td className="py-1 pl-3 text-[10px] uppercase tracking-[0.14em] text-haze">{tags.join(" · ")}</td>

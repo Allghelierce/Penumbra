@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { curveModel, layoutLabels, payloadText } from "./TradeChart";
+import { curveModel, layoutLabels } from "./TradeChart";
 
 describe("curve model", () => {
   const xs = [0.6, 0.8, 1, 1.2, 1.4, 1.45, 1.5, 1.6];
@@ -63,15 +63,5 @@ describe("label layout", () => {
   it("flips a label near the right edge to the left of its marker", () => {
     const { placed } = layoutLabels([{ px: 420, w: 100 }], 428);
     expect(placed[0].flip).toBe(true);
-  });
-});
-
-describe("payloadText", () => {
-  it("uses tonnes for big rockets and kilograms for small ones", () => {
-    expect(payloadText(22_800, true)).toBe("22.8 t");
-    expect(payloadText(8_460, true)).toBe("8.5 t");
-    expect(payloadText(140_000, true)).toBe("140 t");
-    expect(payloadText(1_250, false)).toBe("1,250 kg");
-    expect(payloadText(-5, true)).toBe("0 t");
   });
 });
