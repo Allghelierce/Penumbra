@@ -268,10 +268,21 @@ export default function VerdictPanel(props: VerdictPanelProps) {
 }
 
 const OUTCOME: Record<Verdict, { text: string; tone: string }> = {
-  destination: { text: "On course", tone: "text-go-signal" },
+  destination: { text: "Made it", tone: "text-go-signal" },
   orbit: { text: "Orbit", tone: "text-white" },
   suborbital: { text: "Suborbital", tone: "text-nogo" },
   "stuck-on-pad": { text: "On the pad", tone: "text-nogo" },
+};
+
+/** A flight that made its destination: only the trips that leave Earth are on course, the rest are there. */
+const MADE_IT: Record<DestinationId, string> = {
+  leo: "Orbit",
+  gto: "GTO",
+  "moon-orbit": "Moon",
+  "moon-surface": "Moon",
+  "mars-transfer": "On course",
+  "mars-surface": "On course",
+  europa: "On course",
 };
 
 const altitude = (km: number) => (km < 1 ? "0 km" : `${Math.round(km).toLocaleString("en-US")} km`);
@@ -286,7 +297,8 @@ export function FlightLog({ attempts, recap }: { attempts: Attempt[]; recap: Rec
         {rows.map((a, i) => {
           const prev = rows[i + 1];
           const gain = prev ? a.analysis.totalDeltaVMps - prev.analysis.totalDeltaVMps : null;
-          const outcome = OUTCOME[a.analysis.verdict];
+          const verdict = OUTCOME[a.analysis.verdict];
+          const outcome = a.analysis.verdict === "destination" ? { ...verdict, text: MADE_IT[a.design.destination] } : verdict;
           return (
             <li key={a.n} className={`grid grid-cols-[2.5rem_5.5rem_1fr_auto] items-baseline gap-2 px-4 py-1.5 text-[13px] ${i === 0 ? "" : "opacity-70"}`}>
               <span className="font-space text-[12px] font-semibold tracking-[0.12em] text-haze">#{a.n}</span>
