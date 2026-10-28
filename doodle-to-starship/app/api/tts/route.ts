@@ -1,15 +1,18 @@
 import { createHash } from "node:crypto";
 import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import path from "node:path";
+import { clientIp, RULES, SlidingWindowLimiter } from "@/lib/rate-limit";
 import { metered, synthesize } from "@/lib/xai";
 
 // POST { text, voice, speed? } → audio/mpeg from xAI text-to-speech, cached under public/tts so a
 // line is paid for once and then plays instantly (and offline). 204 means "use browser voice":
-// nothing cached and no key or budget for a new line.
+// nothing cached and no key or budget for a new line. 429 means one IP asked for too many new lines.
 
 const DIR = path.join(process.cwd(), "public", "tts");
 const MAX_CHARS = 600;
 const DEFAULT_VOICE = "eve";
+// Production brake on new lines, per IP. It runs after the cache, so cached lines never count.
+const limiter = new SlidingWindowLimiter();
 
 export function POST(request: Request) {
   return metered(() => handle(request));
@@ -29,6 +32,12 @@ async function handle(request: Request) {
   const cached = await readFile(file).catch(() => null);
   if (cached && cached.length > 0) return audio(cached, "hit");
 
+  if (process.env.NODE_ENV === "production") {
+    const limit = limiter.hit(`${RULES.tts.name}:${clientIp(request.headers)}`, RULES.tts, Date.now());
+    if (!limit.ok) {
+      return Response.json({ error: "rate-limited" }, { status: 429, headers: { "Retry-After": String(limit.retryAfterS) } });
+    }
+  }
   const fresh = await synthesize(text, voice, speed);
   if (!fresh) return new Response(null, { status: 204 });
   if (process.env.NODE_ENV !== "production") {

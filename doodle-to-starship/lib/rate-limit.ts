@@ -14,6 +14,8 @@ export const RULES = {
   // Every voice edit and tapped fix re-runs the review, so it gets more room than a read.
   review: { name: "review", max: 60, windowMs: 10 * MINUTE },
   voiceToken: { name: "voice-token", max: 10, windowMs: 10 * MINUTE },
+  // Enforced by app/api/tts itself, after its disk cache, so only lines that cost credits count.
+  tts: { name: "tts", max: 60, windowMs: 10 * MINUTE },
 } satisfies Record<string, Rule>;
 
 /** The limit for a request, or null when it costs nothing (pages, the voice mode check). */

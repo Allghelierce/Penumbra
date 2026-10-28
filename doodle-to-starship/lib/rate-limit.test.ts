@@ -50,6 +50,11 @@ describe("ruleFor", () => {
     expect(ruleFor("POST", "/api/read/")).toBe(RULES.read);
   });
 
+  it("leaves /api/tts to its route, which counts only uncached lines", () => {
+    expect(ruleFor("POST", "/api/tts")).toBeNull();
+    expect(RULES.tts).toMatchObject({ max: 60, windowMs: 10 * 60_000 });
+  });
+
   it("leaves free requests alone", () => {
     expect(ruleFor("GET", "/api/voice-token")).toBeNull();
     expect(ruleFor("GET", "/api/prior-art")).toBeNull();
