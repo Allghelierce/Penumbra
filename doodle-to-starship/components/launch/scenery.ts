@@ -127,6 +127,7 @@ export function drawSky(ctx: CanvasRenderingContext2D, W: number, H: number, _pa
   }
   drawSun(ctx, W, H, alt);
   drawBirds(ctx, W, H, alt);
+  drawPelicans(ctx, W, H, alt);
   drawHelicopter(ctx, W, H, alt);
   drawStorm(ctx, W, H, alt, centerY);
   drawContrails(ctx, W, H, alt, centerY);
@@ -658,6 +659,38 @@ function anvilPath(ctx: CanvasRenderingContext2D) {
   ctx.lineTo(-0.42, -0.28);
   ctx.quadraticCurveTo(-0.95, -0.32, -1.3, -0.47);
   ctx.closePath();
+}
+
+/**
+ * A line of pelicans gliding low along the coast at liftoff, each a little behind and above the
+ * one ahead, the way they ride the air off each other's wings. They sink out of view as the rocket climbs.
+ */
+function drawPelicans(ctx: CanvasRenderingContext2D, W: number, H: number, alt: number) {
+  const k = clamp01(1 - alt / 1.5);
+  if (k <= 0) return;
+  const base = ctx.globalAlpha;
+  const now = wallSeconds();
+  // They drift slowly left to right across the right half, fading in and out at each end of the loop.
+  const phase = ((now * 0.012) % 0.3) / 0.3;
+  const lead = W * (0.56 + phase * 0.3);
+  const y0 = H * 0.6 + alt * H * 0.35;
+  ctx.globalAlpha = base * 0.75 * k * Math.min(1, Math.sin(phase * Math.PI) * 3);
+  ctx.strokeStyle = "rgb(24,52,86)";
+  ctx.lineWidth = 1.8;
+  ctx.lineCap = "round";
+  ctx.lineJoin = "round";
+  for (let i = 0; i < 5; i++) {
+    const x = lead - i * 20;
+    const y = y0 - i * 4 + Math.sin(now * 0.9 + i * 0.7) * 1.2;
+    // Long, nearly flat wings with a slight droop at the tips.
+    const flap = Math.sin(now * 2.2 + i * 0.8) * 1.2;
+    ctx.beginPath();
+    ctx.moveTo(x - 9, y + 1.5 - flap);
+    ctx.quadraticCurveTo(x - 4, y - 2 - flap, x, y);
+    ctx.quadraticCurveTo(x + 4, y - 2 - flap, x + 9, y + 1.5 - flap);
+    ctx.stroke();
+  }
+  ctx.globalAlpha = base;
 }
 
 /** A news helicopter hovering off the pad at liftoff, nose toward the rocket; it sinks out of view as the rocket climbs. */
@@ -1334,11 +1367,14 @@ function drawSun(ctx: CanvasRenderingContext2D, W: number, H: number, alt: numbe
   ctx.globalAlpha = base;
 }
 
-/** Thin flat cirrus streaks at fixed heights in the stratosphere, scrolling past as the rocket climbs. */
+/**
+ * Thin wisps of polar stratospheric cloud at fixed heights around the mother-of-pearl lenses
+ * (real cirrus stop at the tropopause), scrolling past as the rocket climbs.
+ */
 const CIRRUS: { km: number; x: number; len: number; w: number }[] = (() => {
   const rand = seeded(1307);
   // Kept left of the altitude ladder on the right edge.
-  return Array.from({ length: 9 }, () => ({ km: 14 + rand() * 24, x: rand() * 0.6, len: 0.07 + rand() * 0.14, w: 1.5 + rand() * 2 }));
+  return Array.from({ length: 9 }, () => ({ km: 16 + rand() * 10, x: rand() * 0.6, len: 0.07 + rand() * 0.14, w: 1.5 + rand() * 2 }));
 })();
 
 function drawCirrus(ctx: CanvasRenderingContext2D, W: number, H: number, alt: number, centerY: number) {
