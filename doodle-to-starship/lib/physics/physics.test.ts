@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import type { Design, DestinationId, PropellantId, Stage } from "../design";
+import type { Design, DestinationId, FlightPoint, FlightTrace, PropellantId, Stage } from "../design";
 import { analyze, DESTINATIONS, PROPELLANT_DENSITY_KG_M3, simulateFlight } from ".";
 
 /** Tank volume whose usable propellant (95% of density) is `usableKg`. */
@@ -62,11 +62,22 @@ const overloaded = design(
   "Overloaded",
 );
 
-const designs = [falcon9, saturnApollo, saturnMoon, tiny, overloaded];
+// A 1 t probe on Falcon 9 has the speed for trans-Mars injection.
+const falcon9Mars: Design = { ...falcon9, payloadMassKg: 1_000, destination: "mars-transfer", name: "Falcon 9 to Mars" };
+
+// A Saturn V with a Centaur on top (RL10C, 20,800 kg of propellant, 2,250 kg dry) sends 1 t to Europa.
+const saturnEuropa = design(
+  [...saturnStages, stage("Centaur", "rl10c", 1, "hydrolox", 20_800, 2_250)],
+  1_000,
+  "europa",
+  "Saturn V + Centaur",
+);
+
+const designs = [falcon9, saturnApollo, saturnMoon, tiny, overloaded, falcon9Mars, saturnEuropa];
 
 /** Speed the trace is not allowed to fly past: 7.8 km/s, plus the departure burn beyond LEO. */
 function traceSpeedCap(destination: DestinationId): number {
-  if (destination === "moon-orbit" || destination === "moon-surface") return 7_800 + 3_260;
+  if (destination === "moon-orbit" || destination === "moon-surface") return 7_800 + 3_145;
   if (destination === "mars-transfer" || destination === "mars-surface") return 7_800 + 3_610;
   if (destination === "europa") return 7_800 + 6_300;
   return 7_800;
@@ -163,5 +174,81 @@ describe("simulateFlight", () => {
         }
       }
     }
+  });
+});
+
+describe("simulateFlight past low Earth orbit", () => {
+  const MU = 3.986004418e14;
+  const EARTH_RADIUS_M = 6_371_000;
+  const MOON_ALTITUDE_KM = 384_400 - 6_371;
+  /** The departure burn's cutoff (the last cutoff) and the coast after it. */
+  const departure = (trace: FlightTrace) => {
+    const burn = trace.events.filter((e) => e.kind === "engine-cutoff").at(-1)!;
+    return { burn, coast: trace.points.filter((p) => p.tS > burn.tS) };
+  };
+  /** Orbital energy per kilogram, which a coast on gravity alone keeps. */
+  const energy = (p: FlightPoint) => p.speedMps ** 2 / 2 - MU / (EARTH_RADIUS_M + p.altitudeKm * 1000);
+
+  it("parks in orbit, burns for the Moon, and coasts 3 days out to the Moon's distance", () => {
+    const trace = simulateFlight(saturnMoon, analyze(saturnMoon));
+    const orbit = trace.events.find((e) => e.kind === "orbit")!;
+    expect(orbit.label).toBe("Parking orbit: 200 km, 7.8 km/s");
+    const { burn, coast } = departure(trace);
+    expect(burn.label).toBe("Trans-lunar injection: 10.9 km/s at 200 km");
+    expect(burn.tS - orbit.tS).toBeGreaterThan(1_800);
+
+    const arrival = trace.events.at(-1)!;
+    expect(arrival.kind).toBe("arrival");
+    expect(arrival.label).toBe("Reaches the Moon's distance, 3.0 days after the burn");
+    const days = (arrival.tS - burn.tS) / 86_400;
+    expect(days).toBeGreaterThan(2.7);
+    expect(days).toBeLessThan(3.3);
+    expect(trace.maxAltitudeKm).toBeCloseTo(MOON_ALTITUDE_KM, 0);
+    expect(trace.points.at(-1)!.tS).toBe(arrival.tS);
+
+    // Climbing and slowing all the way, on one orbit.
+    expect(coast.length).toBeGreaterThan(50);
+    for (let i = 1; i < coast.length; i++) {
+      expect(coast[i].altitudeKm).toBeGreaterThan(coast[i - 1].altitudeKm);
+      expect(coast[i].speedMps).toBeLessThan(coast[i - 1].speedMps);
+      expect(energy(coast[i]) / energy(coast[0])).toBeCloseTo(1, 5);
+    }
+  });
+
+  it("sends Mars and Europa probes past the Moon's distance and out to a million km, without claiming arrival", () => {
+    for (const [rocket, trip] of [
+      [falcon9Mars, "~8.5-month coast to Mars"],
+      [saturnEuropa, "~2.7-year coast to Jupiter"],
+    ] as const) {
+      const analysis = analyze(rocket);
+      expect(analysis.verdict, rocket.name).toBe("destination");
+      const trace = simulateFlight(rocket, analysis);
+      expect(trace.maxAltitudeKm).toBeGreaterThan(384_400);
+      expect(trace.maxAltitudeKm).toBeCloseTo(1_000_000, 0);
+      expect(trace.events.map((e) => e.kind)).not.toContain("arrival");
+      for (const e of trace.events) expect(e.label).not.toMatch(/arriv/i);
+
+      const passes = trace.events.find((e) => /^Passes the Moon's distance, \d+ hours after the burn$/.test(e.label));
+      expect(passes?.kind, rocket.name).toBe("escape");
+      expect(trace.points.find((p) => p.tS === passes!.tS)!.altitudeKm).toBeCloseTo(MOON_ALTITUDE_KM, 0);
+
+      const last = trace.events.at(-1)!;
+      expect(last.kind).toBe("escape");
+      expect(last.label.startsWith("Leaving Earth at ")).toBe(true);
+      expect(last.label.endsWith(` km/s · ${trip}`)).toBe(true);
+      const { coast } = departure(trace);
+      for (const p of coast) expect(energy(p) / energy(coast[0])).toBeCloseTo(1, 5);
+    }
+    // Past escape speed, a probe for Jupiter leaves at the Hohmann excess speed, 8.8 km/s.
+    expect(simulateFlight(saturnEuropa, analyze(saturnEuropa)).events.at(-1)!.label).toMatch(/^Leaving Earth at 8\.8 km\/s/);
+  });
+
+  it("keeps a rocket that can't finish the trip in its parking orbit", () => {
+    const analysis = analyze(saturnApollo);
+    expect(analysis.verdict).toBe("orbit");
+    const trace = simulateFlight(saturnApollo, analysis);
+    expect(trace.maxAltitudeKm).toBe(200);
+    expect(trace.events.at(-1)!.kind).toBe("orbit");
+    expect(trace.events.some((e) => /injection/.test(e.label))).toBe(false);
   });
 });
