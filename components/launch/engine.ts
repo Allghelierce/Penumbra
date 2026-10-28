@@ -131,6 +131,8 @@ export interface LaunchHandle {
 
 /** Where in the landing inset's progress the booster touches down. */
 const LAND_TOUCH = 0.86;
+/** How far down a booster that lands after the flight ends gets in the inset (before its landing burn). */
+const LATE_DESCENT = 0.4;
 
 /** Minimum real seconds between two onEvent calls, so spoken callouts never overlap. */
 export const EVENT_GAP = 1.2;
@@ -264,12 +266,18 @@ export function startLaunch(
   // catch (T+7:00 on the first one), within the flight. The inset plays the last minute of the
   // descent, landing burn included, and holds a moment after touchdown.
   const sepSim = plan.cues.filter((cue) => cue.event.kind === "stage-sep")[Math.max(0, lander)]?.event.tS ?? null;
-  const designTouch = landsByDesign && sepSim !== null ? Math.min(plan.T - 2, sepSim + (catchMode ? 255 : 320)) : null;
-  const touchSim = landingCue
-    ? landingCue.event.tS
-    : designTouch !== null && sepSim !== null && designTouch > sepSim + 30
-      ? designTouch
-      : null;
+  const trueTouch = landingCue ? landingCue.event.tS : landsByDesign && sepSim !== null ? sepSim + (catchMode ? 255 : 320) : null;
+  // When that's after the flight ends, the inset still plays inside it, but shows the booster on
+  // its way down with the true time ("LANDS AT T+9:37, after orbit"), never a touchdown that hasn't happened.
+  const lateTouch = trueTouch !== null && trueTouch > plan.T ? trueTouch : null;
+  const touchSim =
+    trueTouch === null
+      ? null
+      : lateTouch === null
+        ? trueTouch
+        : sepSim !== null && plan.T - 2 > sepSim + 30
+          ? plan.T - 2
+          : null;
   const touchAt = touchSim === null ? null : plan.playAt(touchSim);
   const landFrom = touchSim === null || touchAt === null ? null : Math.min(plan.playAt(touchSim - 60), touchAt - 2.5);
   const landFromSim = landFrom === null ? 0 : plan.simAt(landFrom);
@@ -656,7 +664,7 @@ export function startLaunch(
     const ix = 24;
     const iy = Math.round(H - 150 - ih);
     /** Label strip at the top; the scene is clipped below it, so the booster drops in from under it. */
-    const head = Math.round(46 * s);
+    const head = Math.round((lateTouch === null ? 46 : 60) * s);
     const groundY = iy + ih - Math.round(24 * s) + 0.5;
     const cx = Math.round(ix + iw * (catchMode ? 0.6 : 0.5));
     const ph = Math.max(0.05, p0.box.maxY - p0.box.minY);
@@ -750,7 +758,16 @@ export function startLaunch(
     c.fillStyle = "rgba(255,255,255,0.6)";
     c.fillText(catchMode ? "BOOSTER CATCH" : "BOOSTER LANDING", ix + 10, iy + 9 * s);
     c.font = `600 ${Math.round(18 * s)}px ${displayFont}`;
-    if (landed) {
+    if (lateTouch !== null) {
+      // Still coming down when the flight ends: say when it really lands.
+      const sec = Math.round(lateTouch);
+      c.font = `600 ${Math.round(16 * s)}px ${displayFont}`;
+      c.fillStyle = rgba(pal.chalk, 0.95);
+      c.fillText(`${catchMode ? "CAUGHT" : "LANDS"} AT T+${Math.floor(sec / 60)}:${String(sec % 60).padStart(2, "0")}`, ix + 10, iy + 22 * s);
+      c.font = `600 ${Math.round(10 * Math.max(0.8, s))}px ${displayFont}`;
+      c.fillStyle = "rgba(255,255,255,0.6)";
+      c.fillText(orbitish ? "AFTER ORBIT" : "AFTER THE FLIGHT ENDS", ix + 10, iy + 42 * s);
+    } else if (landed) {
       c.fillStyle = "#4cc38a";
       c.fillText(catchMode ? "CAUGHT ✓" : "LANDED ✓", ix + 10, iy + 22 * s);
     } else if (k > 0.42) {
@@ -1346,8 +1363,10 @@ export function startLaunch(
     if (touchSim !== null && touchAt !== null && landFrom !== null && t >= landFrom && t <= touchAt + 2.1) {
       const k =
         t < touchAt
-          ? LAND_TOUCH * clamp01((sim - landFromSim) / Math.max(1e-6, touchSim - landFromSim))
-          : LAND_TOUCH + (t - touchAt) / LAND_DUR;
+          ? (lateTouch === null ? LAND_TOUCH : LATE_DESCENT) * clamp01((sim - landFromSim) / Math.max(1e-6, touchSim - landFromSim))
+          : lateTouch === null
+            ? LAND_TOUCH + (t - touchAt) / LAND_DUR
+            : LATE_DESCENT;
       drawLanding(k, clamp01((t - landFrom) / 0.3) * (1 - clamp01((t - touchAt - 1.5) / 0.6)));
     }
 
