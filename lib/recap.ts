@@ -6,6 +6,7 @@ import { applyAction } from "./actions";
 import type { Analysis, Attempt, Design, DesignAction, DestinationId, Improvement, Recap, RedPenMark } from "./design";
 import { analyze, DESTINATIONS, ENGINES, km, kmShort, kmSpare } from "./physics";
 import { buildReview, DESTINATION_NAMES, hardwareNeeds, massText, type ReviewOptions, SAFE_TWR } from "./redpen";
+import { capacityText, maxPayloadKg, shownKg } from "./trade";
 
 const MAX_IMPROVEMENTS = 3;
 /** Margin past which a design counts as over-built and could shed tank volume. */
@@ -284,6 +285,11 @@ function goFarther(design: Design, analysis: Analysis): Improvement | null {
       return { text: `It already has the delta-v for ${DESTINATION_NAMES[farthest]}: aim for it`, fix };
     }
   }
+
+  // When it gets there carrying less, that's the first thing to say: no rebuild needed. Both the
+  // payload and the target change, more than one edit does, so it's advice without a button.
+  const lighter = shownKg(maxPayloadKg(design, next));
+  if (lighter >= 100) return { text: `Carry ${capacityText(lighter)} and it reaches ${name}` };
 
   // Otherwise the smallest tank stretch on any stage, or failing that, a new stage.
   let best: { percent: number; stageIndex: number } | null = null;

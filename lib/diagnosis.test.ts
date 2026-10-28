@@ -239,3 +239,17 @@ describe("hardware on a real rocket's template", () => {
     for (const issue of template) expect(`${issue.effect} ${issue.why}`).not.toMatch(/\bdraw\b/i);
   });
 });
+
+describe("Saturn V to the Moon, as built", () => {
+  const saturn = TEMPLATES.find((t) => t.id === "saturn-v")!;
+
+  it.each(["moon-orbit", "moon-surface"] as const)("%s: no landing-legs no-go on the template, and its S-IC fins are never 'dead weight'", (destination) => {
+    const design: Design = { ...saturn.design, destination, payloadMassKg: 10_000 };
+    const reading = { design, parts: drawTemplate(saturn, design).parts, confidence: 1, problem: null };
+    const titles = diagnose(design, analyze(design), reading, { drawable: false }).map((i) => i.title);
+    expect(titles).not.toContain("No landing legs");
+    expect(titles).not.toContain("Fins are dead weight");
+    // Even where hardware advice is given, the fins drop with the first stage.
+    expect(diagnose(design, analyze(design), reading).map((i) => i.title)).not.toContain("Fins are dead weight");
+  });
+});

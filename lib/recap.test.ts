@@ -5,7 +5,7 @@ import type { Attempt, Design, Improvement } from "./design";
 import { analyze } from "./physics";
 import { flightOutcome, recap } from "./recap";
 import { templateById } from "./templates";
-import { maxPayloadKg } from "./trade";
+import { capacityText, maxPayloadKg, shownKg } from "./trade";
 
 function falconLike(overrides: Partial<Design> = {}): Design {
   return {
@@ -239,5 +239,30 @@ describe("flightOutcome", () => {
     // Short of Europa: it only made orbit, and says so.
     expect(at({ ...f9, destination: "europa", payloadMassKg: 500 })).toBe("orbit");
     expect(at({ ...f9, destination: "europa", payloadMassKg: 500 })).not.toMatch(/course/);
+  });
+});
+
+describe("going farther", () => {
+  it("offers a lighter payload before a rebuild when that's all it takes", () => {
+    // Falcon 9 at its most to low Earth orbit: GTO needs no new stage, just less aboard.
+    const f9 = templateById("falcon9").design;
+    const full: Design = { ...f9, destination: "leo", payloadMassKg: maxPayloadKg(f9, "leo") };
+    const gto = recap(attempts(full)).improvements.map((i) => i.text);
+    expect(gto[0]).toBe(`Carry ${capacityText(maxPayloadKg(f9, "gto"))} and it reaches GTO`);
+    expect(gto.some((t) => /Add a stage/.test(t))).toBe(false);
+
+    // Saturn V landing on the Moon at its most: Mars is just past it, with a little less aboard.
+    const saturn = templateById("saturn-v").design;
+    const moon: Design = { ...saturn, destination: "moon-surface", payloadMassKg: maxPayloadKg(saturn, "moon-surface") };
+    const mars = recap(attempts(moon), { drawable: false }).improvements.map((i) => i.text);
+    expect(mars[0]).toMatch(/^Carry [\d.,]+ t and it reaches Mars$/);
+  });
+
+  it("only offers a payload it really carries there", () => {
+    const f9 = templateById("falcon9").design;
+    const full: Design = { ...f9, destination: "leo", payloadMassKg: maxPayloadKg(f9, "leo") };
+    const kg = shownKg(maxPayloadKg(f9, "gto"));
+    const there = analyze({ ...full, destination: "gto", payloadMassKg: kg });
+    expect(there.marginMps).toBeGreaterThanOrEqual(0);
   });
 });

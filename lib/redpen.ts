@@ -234,8 +234,21 @@ export function hardwareNeeds(design: Design, parts: Part[] = []): { legs: boole
   return {
     legs: LANDING_DESTINATIONS.has(design.destination) && !hasFeature(design, parts, "landing-legs"),
     shield: design.destination === "mars-surface" && !hasFeature(design, parts, "heat-shield"),
-    fins: VACUUM_DESTINATIONS.has(design.destination) && hasFeature(design, parts, "fins"),
+    fins: VACUUM_DESTINATIONS.has(design.destination) && finsAboveTheAir(design, parts),
   };
+}
+
+/**
+ * Fins that ride on into vacuum. A multi-stage rocket's booster fins fall away at staging, while
+ * it's still in the thin upper air (Saturn V's S-IC drops at about 67 km), so only fins on an
+ * upper stage, or on a single-stage rocket, are carried where there's nothing to push on. Fins
+ * only listed as a feature are taken to be on the bottom stage, where they usually go.
+ */
+function finsAboveTheAir(design: Design, parts: Part[]): boolean {
+  const single = design.stages.length <= 1;
+  const finParts = parts.filter((p) => p.kind === "fin");
+  if (finParts.length > 0) return single || finParts.some((p) => (p.stageIndex ?? 0) > 0);
+  return single && hasFeature(design, parts, "fins");
 }
 
 // ---------------------------------------------------------------------------

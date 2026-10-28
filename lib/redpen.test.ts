@@ -235,8 +235,13 @@ describe("a rocket short of its destination", () => {
 });
 
 describe("fins", () => {
-  it("points at the fins when the destination is past low Earth orbit", () => {
-    const { review: r } = review(falconLike({ features: ["fins"], destination: "gto" }));
+  /** Fins on the upper stage, which flies on into vacuum. */
+  const upperFins = (design: Design): Part[] =>
+    partsFor({ ...design, features: [] }).concat({ kind: "fin", label: "fins", box: FIN_BOX, stageIndex: 1 });
+
+  it("points at the fins when they ride on past the air, to a destination past low Earth orbit", () => {
+    const design = falconLike({ features: ["fins"], destination: "gto" });
+    const { review: r } = review(design, upperFins(design));
     const mark = r.marks.find((m) => m.note === "useless in vacuum");
     expect(mark?.kind).toBe("arrow");
     if (mark?.kind === "arrow") {
@@ -247,9 +252,27 @@ describe("fins", () => {
 
   it("leaves fins alone for low Earth orbit and for Mars, which has air", () => {
     for (const destination of ["leo", "mars-surface"] as const) {
-      const { review: r } = review(falconLike({ features: ["fins"], destination }));
+      const design = falconLike({ features: ["fins"], destination });
+      const { review: r } = review(design, upperFins(design));
       expect(notes(r.marks)).not.toContain("useless in vacuum");
     }
+  });
+
+  it("leaves a booster's fins alone: they fall away at staging, before the air runs out", () => {
+    // Saturn V's fins are on the S-IC, which drops at about 67 km.
+    const saturn = TEMPLATES.find((t) => t.id === "saturn-v")!;
+    const toMoon = { ...saturn.design, destination: "moon-orbit" as const, payloadMassKg: 40_000 };
+    const parts = drawTemplate(saturn, toMoon).parts;
+    expect(parts.some((p) => p.kind === "fin" && p.stageIndex === 0)).toBe(true);
+    expect(notes(buildReview({ design: toMoon, parts }, analyze(toMoon)).marks)).not.toContain("useless in vacuum");
+    const { review: r } = review(falconLike({ features: ["fins"], destination: "gto" }));
+    expect(notes(r.marks)).not.toContain("useless in vacuum");
+  });
+
+  it("flags a single-stage rocket's fins, which go all the way", () => {
+    const hopper = falconLike({ features: ["fins"], destination: "gto", stages: [falconLike().stages[0]] });
+    const { review: r } = review(hopper);
+    expect(notes(r.marks)).toContain("useless in vacuum");
   });
 });
 
