@@ -245,6 +245,11 @@ export default function Studio() {
 
   // A template is drawn from the design, so every edit redraws it.
   const drawing = useMemo(() => (template && design ? drawTemplate(template, design) : null), [template, design]);
+  // A real flight with no stand-in sketch replays on its rocket's drawing, so it launches with that rocket's stages and site.
+  const flightDrawing = useMemo(() => {
+    const t = mission && !mission.sketchId ? TEMPLATES.find((x) => x.id === mission.rocket) : undefined;
+    return t ? drawTemplate(t, t.design) : null;
+  }, [mission]);
   const napkinStrokes = drawing ? drawing.strokes : strokes;
   // The design with the drag in progress, built the same way the drag will be applied.
   const preview = useMemo(
@@ -1149,8 +1154,8 @@ export default function Studio() {
         <LaunchScene
           key={flightId}
           strokes={napkinStrokes}
-          stageBands={drawing?.stageBands}
-          templateId={template?.id}
+          stageBands={(drawing ?? flightDrawing)?.stageBands}
+          templateId={template?.id ?? (flightDrawing ? mission?.rocket : undefined)}
           reading={{ ...reading, design }}
           analysis={analysis}
           trace={flight.trace}
