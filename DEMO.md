@@ -17,10 +17,10 @@ Open `/?rocket=falcon9`. It skips the picker and opens the real Falcon 9 in **MO
 | 0:18–0:23 | The payload button now reads **Too heavy. Most it can carry: 17.5 t**. Click it. | "So a reusable Falcon 9 carries 17.5 tonnes. SpaceX's own figure is 17.4." |
 | 0:23–0:33 | Drag the first stage's top edge up slowly, until its handle reads ×1.25, and watch the chart. | "Why not bigger tanks? Payload climbs, then falls, because a heavier rocket fights gravity for longer. The best is a quarter bigger and only 3% better: the real Falcon 9 is close to its best." |
 | 0:33–0:39 | **CHECK IT →**. | "The red pen writes only what's wrong. This one gets a tick: good to fly." |
-| 0:39–0:55 | **FLY IT →**. When the readout at the top changes from **REAL TIME** to **TIME ×**, click **4×**. | "It lifts off in real time. When it speeds up, the readout says by how much. And bottom left, the booster lands." |
+| 0:39–0:55 | **FLY IT →**. When the readout at the top changes from **REAL TIME** to **TIME ×**, click **4×**. Just before orbit, the booster inset bottom left reads **LANDS AT T+8:14, AFTER ORBIT**. | "It lifts off in real time. When it speeds up, the readout says by how much. And the booster is still flying home when the second stage reaches orbit, so instead of faking a landing, it tells you when it touches down." |
 | 0:55–1:00 | The end card: **IN ORBIT**. | "That's Penumbra: start from a rocket that flew, and learn what every choice costs." |
 
-To go further, click **Back to the napkin**, then **MODIFY AGAIN** and **RESET TO THE REAL ONE**. Switch the destination to **MARS**, click **Too heavy. Most it can carry: 1.0 t**, then **CHECK IT →** and **FLY IT →**, even if the red pen has notes. The flight parks in orbit, burns for Mars, passes the Moon's distance about a day later and ends **ON COURSE FOR MARS**, never "arrived". It takes about 50 seconds at 1×. Or open Saturn V or Starship from the picker and do the same with their stages.
+To go further, click **Back to Modify**, then **MODIFY AGAIN** and **RESET TO THE REAL ONE**. Switch the destination to **MARS LANDING**, click **Too heavy. Most it can carry: 1.0 t**, then **CHECK IT →** (a tick, with nothing to spare) and **FLY IT →**. The flight parks in orbit, burns for Mars, passes the Moon's distance about a day later and ends **ON COURSE FOR MARS**, never "arrived". It takes about 50 seconds at 1×. Or open Saturn V or Starship from the picker and do the same with their stages.
 
 ## The 60-second case study: CRS-7
 
@@ -39,7 +39,7 @@ Other comebacks to show if there's time: Falcon 1 Flight 1 → Flight 4, and Sta
 
 ## Draw your own
 
-**+ DRAW YOUR OWN** on the picker opens a blank napkin. Draw a rocket, then click **DIAGNOSE →**. A reader names what it sees ("I see: a 2-stage rocket, 9 engines, fins"), and the red pen reviews it with the same physics: Grok vision with a key, a geometry reader without one. To start from a sample, open `/?demo=two-stage-orbiter` (or `napkin-hopper`, `moon-rocket`, `mars-ship`). Hand the mouse to whoever is watching: "Draw a rocket, any rocket."
+**+ DRAW YOUR OWN** on the picker opens a blank napkin. Draw a rocket, and a line under the napkin says what it sees as you go ("I see: a 2-stage rocket, 9 engines, fins"). Click **CHECK DESIGN →**: the drawing is read (by Grok vision with a key, a geometry reader without one), and the red pen reviews it with the same physics. To start from a sample, open `/?demo=two-stage-orbiter` (or `napkin-hopper`, `moon-rocket`, `mars-ship`). Hand the mouse to whoever is watching: "Draw a rocket, any rocket."
 
 ## Numbers worth knowing
 
@@ -84,4 +84,5 @@ Other comebacks to show if there's time: Falcon 1 Flight 1 → Flight 4, and Sta
 - **"Why is there a best tank size?"** More propellant means more delta-v, but a heavier rocket lifts off slower and loses more to gravity, so past a point each extra tonne buys less than it costs. Further out, it can't leave the pad with a safe thrust-to-weight of 1.15.
 - **"Why is the launch so slow?"** At 1× it lifts off in real time, then speeds up, and the readout always says by how much. A flight to orbit takes 30 to 40 seconds at 1×, and 2× to 8× are one click away.
 - **"Why does the Mars flight stop past the Moon?"** The launch follows the departure out to a million kilometres. The cruise takes about eight and a half months, so the flight ends on course for Mars rather than pretending to arrive.
+- **"Why can Falcon 9 take only 1 t to Mars?"** The target is a Mars landing. Published Mars figures stop at the transfer orbit, while Penumbra also lands the payload, and the panel says so under the numbers.
 - **"Where do the real flights come from?"** Each one lists its sources on screen: Wikipedia, NASA flight reports, the Apollo Flight Journal and news coverage from the time. Approximate figures are marked ≈.
