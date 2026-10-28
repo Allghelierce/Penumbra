@@ -168,7 +168,7 @@ export function explainCurve(curve: SweptCurve, context?: { design: Design; dest
   const cost = recoveryCostKg(context.design, context.destination);
   if (recovered.length === 0 || cost <= 0) return text;
   const which = recovered.length === 1 ? `the ${recovered[0]}` : `the ${recovered.slice(0, -1).join(", ")} and the ${recovered.at(-1)}`;
-  return `${text} Landing ${which} costs about ${tonnes(cost)} of payload.`;
+  return `${text} Landing ${which} costs about ${capacityText(cost)} of payload.`;
 }
 
 function explainShape(curve: SweptCurve): string {
@@ -181,17 +181,19 @@ function explainShape(curve: SweptCurve): string {
   const stretch = curve.unit === "×";
   const fmtX = (x: number) => (stretch ? `${x.toFixed(2)}×` : x === 1 ? "1 engine" : `${x} engines`);
   if (best.payloadKg <= 0) return "No setting along this line gets a payload there. Try a closer destination or another change.";
-  if (limit && curve.points.length === 1) return `${capitalize(fit)}, so there's nothing to trade: it carries ${tonnes(real.payloadKg)}.`;
+  if (limit && curve.points.length === 1) return `${capitalize(fit)}, so there's nothing to trade: it carries ${capacityText(real.payloadKg)}.`;
   // The best point is the last engine that fits, not a peak.
   const atLimit = limit !== undefined && curve.bestX === limit.x;
   const atEnd = curve.bestX === curve.points[curve.points.length - 1].x;
 
   const gain = real.payloadKg > 0 ? (best.payloadKg - real.payloadKg) / real.payloadKg : Infinity;
   if (Math.abs(curve.bestX - curve.realX) < (stretch ? 0.051 : 1) || gain < 0.02) {
-    if (atLimit) return `The real rocket already carries the most: ${tonnes(real.payloadKg)} at ${fmtX(curve.realX)}. Fewer carry less, and ${fit}.`;
-    return `The real rocket already sits at the peak: ${tonnes(real.payloadKg)} at ${fmtX(curve.realX)}. Change it either way and it carries less.`;
+    if (atLimit) return `The real rocket already carries the most: ${capacityText(real.payloadKg)} at ${fmtX(curve.realX)}. Fewer carry less, and ${fit}.`;
+    return `The real rocket already sits at the peak: ${capacityText(real.payloadKg)} at ${fmtX(curve.realX)}. Change it either way and it carries less.`;
   }
-  const more = Number.isFinite(gain) ? `${tonnes(best.payloadKg)}, ${Math.round(gain * 100)}% more than the real ${tonnes(real.payloadKg)}` : tonnes(best.payloadKg);
+  // The percentage comes from the figures as shown, so a caption's numbers agree with each other.
+  const shownGain = (shownKg(best.payloadKg) - shownKg(real.payloadKg)) / shownKg(real.payloadKg);
+  const more = Number.isFinite(gain) ? `${capacityText(best.payloadKg)}, ${Math.round(shownGain * 100)}% more than the real ${capacityText(real.payloadKg)}` : capacityText(best.payloadKg);
   const why = stretch
     ? curve.bestX > curve.realX
       ? `More propellant adds speed until the heavier rocket lifts off at thrust-to-weight ${best.liftoffTwr.toFixed(2)}; past that it can't leave the pad safely.`
@@ -228,9 +230,22 @@ function round2(x: number) {
   return Math.round(x * 100) / 100;
 }
 
-/** Whole tonnes from 100 t; one decimal below, so 17.5 t and 18.0 t read apart. */
-function tonnes(kg: number) {
-  if (kg >= 100_000) return `${Math.round(kg / 1000).toLocaleString("en-US")} t`;
-  if (kg >= 1_000) return `${(kg / 1000).toFixed(1)} t`;
-  return `${Math.round(kg)} kg`;
+/**
+ * The payload as it's shown, in kg: rounded down to whole tonnes from 100 t, to a tenth of a
+ * tonne below that, to the kilogram under a tonne. Never up, so a capacity on screen is one the
+ * rocket can carry: show 23.2 t for a 23.17 t maximum and typing 23.2 t would fail the check.
+ */
+function shownKg(kg: number): number {
+  const safe = Math.max(0, kg);
+  if (safe >= 100_000) return Math.floor(safe / 1000) * 1000;
+  if (safe >= 1_000) return Math.floor(safe / 100) * 100;
+  return Math.floor(safe);
+}
+
+/** A payload capacity for people to read, e.g. "23.1 t", "120 t" or "354 kg", always rounded down (see shownKg). */
+export function capacityText(kg: number): string {
+  const shown = shownKg(kg);
+  if (shown >= 100_000) return `${(shown / 1000).toLocaleString("en-US")} t`;
+  if (shown >= 1_000) return `${(shown / 1000).toFixed(1)} t`;
+  return `${shown} kg`;
 }

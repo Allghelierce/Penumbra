@@ -4,7 +4,7 @@ import { applyAction } from "./actions";
 import type { Design } from "./design";
 import { analyze, ascentLossesMps, enginesThatFit } from "./physics";
 import { TEMPLATES } from "./templates";
-import { explainCurve, maxPayloadKg, MIN_LIFTOFF_TWR, realStageFor, recoveryCostKg, stretchFromReal, tradeCurve } from "./trade";
+import { capacityText, explainCurve, maxPayloadKg, MIN_LIFTOFF_TWR, realStageFor, recoveryCostKg, stretchFromReal, tradeCurve } from "./trade";
 
 const template = (id: string) => TEMPLATES.find((t) => t.id === id)!;
 const withRecovery = (d: Design, stages: number[]): Design => ({
@@ -208,7 +208,7 @@ describe("explainCurve", () => {
   it("says when no more engines fit on the base", () => {
     const curve = tradeCurve(template("falcon9").design, { kind: "engine-count", stageIndex: 0 }, { destination: "leo" });
     expect(explainCurve(curve)).toBe(
-      "The real rocket already carries the most: 23.2 t at 9 engines. Fewer carry less, and 9 Merlin 1D engines are all that fit on its 3.7 m base.",
+      "The real rocket already carries the most: 23.1 t at 9 engines. Fewer carry less, and 9 Merlin 1D engines are all that fit on its 3.7 m base.",
     );
   });
 
@@ -244,3 +244,32 @@ function bisect(ok: (kg: number) => boolean): number {
   }
   return lo;
 }
+
+describe("capacityText", () => {
+  it("rounds down: a tenth of a tonne under 100 t, whole tonnes above, kilograms under a tonne", () => {
+    expect(capacityText(23_170)).toBe("23.1 t");
+    expect(capacityText(17_500)).toBe("17.5 t");
+    expect(capacityText(17_499)).toBe("17.4 t");
+    expect(capacityText(99_999)).toBe("99.9 t");
+    expect(capacityText(100_000)).toBe("100 t");
+    expect(capacityText(120_700)).toBe("120 t");
+    expect(capacityText(1_234_567)).toBe("1,234 t");
+    expect(capacityText(999.9)).toBe("999 kg");
+    expect(capacityText(354.9)).toBe("354 kg");
+    expect(capacityText(-5)).toBe("0 kg");
+  });
+
+  it("shows only capacities the rocket can carry: each real rocket's max, as shown, still makes it", () => {
+    const shown = (text: string) => parseFloat(text.replace(/,/g, "")) * (text.endsWith(" t") ? 1000 : 1);
+    for (const t of TEMPLATES) {
+      for (const design of [t.design, withRecovery(t.design, [])]) {
+        const max = maxPayloadKg(design, "leo");
+        const kg = shown(capacityText(max));
+        expect(kg, t.id).toBeLessThanOrEqual(max);
+        const a = analyze({ ...design, destination: "leo", payloadMassKg: kg });
+        expect(a.marginMps, t.id).toBeGreaterThanOrEqual(0);
+        expect(a.liftoffTwr, t.id).toBeGreaterThanOrEqual(MIN_LIFTOFF_TWR);
+      }
+    }
+  });
+});
