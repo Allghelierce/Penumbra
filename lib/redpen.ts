@@ -68,7 +68,16 @@ export const DESTINATION_NAMES: Record<DestinationId, string> = {
   europa: "Europa",
 };
 
-export function buildReview(reading: SketchReading, drawn: Analysis): Review {
+/**
+ * How the review may advise. `drawable: false` is for a drawing the user can't add parts to,
+ * like a real rocket's template in Modify: hardware the trip needs (landing legs, a heat shield)
+ * becomes a line in the summary instead of a mark asking them to draw it.
+ */
+export interface ReviewOptions {
+  drawable?: boolean;
+}
+
+export function buildReview(reading: SketchReading, drawn: Analysis, { drawable = true }: ReviewOptions = {}): Review {
   const { parts } = reading;
   const sketch = new Sketch(parts);
   const side = sketch.openSide();
@@ -117,10 +126,12 @@ export function buildReview(reading: SketchReading, drawn: Analysis): Review {
   if (fix) marks.push(shortfallMark(fix, sketch));
 
   const needs = hardwareNeeds(design, parts);
-  if (needs.legs) marks.push(arrowTo(sketch.bottomCenter(), side, 0.06, "needs legs"));
-  if (needs.shield) marks.push(arrowTo(sketch.capsuleSide(), side, -0.06, "heat shield!"));
-  // Dead weight, not a no-go, so it comes after them.
-  if (needs.fins) marks.push(arrowTo(sketch.finSide(side), side, -0.04, FINS_NOTE));
+  if (drawable) {
+    if (needs.legs) marks.push(arrowTo(sketch.bottomCenter(), side, 0.06, "needs legs"));
+    if (needs.shield) marks.push(arrowTo(sketch.capsuleSide(), side, -0.06, "heat shield!"));
+    // Dead weight, not a no-go, so it comes after them.
+    if (needs.fins) marks.push(arrowTo(sketch.finSide(side), side, -0.04, FINS_NOTE));
+  }
 
   const issues = spreadNotes(marks.slice(0, MAX_MARKS));
   const summary = summarize(design, analysis, {
@@ -133,6 +144,7 @@ export function buildReview(reading: SketchReading, drawn: Analysis): Review {
     flyableAnalysis,
     needsLegs: needs.legs,
     needsShield: needs.shield,
+    drawable,
   });
   return {
     marks: issues.length > 0 ? issues : [passMark(sketch, analysis)],
@@ -412,6 +424,8 @@ function summarize(
     flyableAnalysis: Analysis | null;
     needsLegs: boolean;
     needsShield: boolean;
+    /** False when the user can't draw the missing hardware on: then it's only mentioned. */
+    drawable: boolean;
   },
 ): string {
   const deltaV = `${km(analysis.totalDeltaVMps)} of ${km(analysis.requiredDeltaVMps)} km/s`;
@@ -444,10 +458,12 @@ function summarize(
   if (fuelFix) return `${deltaV}: ${fuelFix}.`;
 
   const missing = [found.needsLegs && "landing legs", found.needsShield && "a heat shield"].filter(Boolean);
+  const reaches = `${deltaV}: it reaches ${destination} with ${kmSpare(analysis.totalDeltaVMps, analysis.requiredDeltaVMps)} km/s to spare.`;
   if (missing.length > 0) {
+    if (!found.drawable) return `${reaches} Landing there also takes ${missing.join(" and ")}, which this check doesn't model.`;
     return `${deltaV} gets it to ${destination}, but it needs ${missing.join(" and ")} to land.`;
   }
-  return `${deltaV}: it reaches ${destination} with ${kmSpare(analysis.totalDeltaVMps, analysis.requiredDeltaVMps)} km/s to spare.`;
+  return reaches;
 }
 
 function shortfallAdvice(fix: ShortfallFix, analysis: Analysis, destination: DestinationId): string {

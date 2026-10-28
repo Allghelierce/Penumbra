@@ -15,6 +15,7 @@ import {
   massText,
   metres,
   overfitEngines,
+  type ReviewOptions,
   SAFE_TWR,
   vacuumOnPad,
   vacuumReason,
@@ -52,8 +53,8 @@ const SEVERITY_ORDER = { "no-go": 0, warning: 1, ok: 2 } as const;
 
 type Draft = Omit<Issue, "n">;
 
-export function diagnose(design: Design, analysis: Analysis, reading?: SketchReading): Issue[] {
-  const marks = buildReview(reading ?? { design, parts: [] }, analysis).marks;
+export function diagnose(design: Design, analysis: Analysis, reading?: SketchReading, options: ReviewOptions = {}): Issue[] {
+  const marks = buildReview(reading ?? { design, parts: [] }, analysis, options).marks;
   // Only the numbered issue marks; the outlines, callouts and dimensions just identify parts.
   const markFor = (test: (m: RedPenMark) => boolean) => {
     const i = marks.findIndex((m) => isIssueMark(m) && test(m));
@@ -73,7 +74,8 @@ export function diagnose(design: Design, analysis: Analysis, reading?: SketchRea
   drafts.push(liftoff.issue);
   drafts.push(deltaVIssue(fitted, liftoff.flyable, marks, markFor, cut));
   drafts.push(...slowUpperStages(fitted, a));
-  drafts.push(...hardwareIssues(fitted, reading?.parts ?? [], markFor));
+  // Hardware the user can't add (a real rocket's template) is only mentioned in the review's summary.
+  if (options.drawable !== false) drafts.push(...hardwareIssues(fitted, reading?.parts ?? [], markFor));
 
   return drafts
     .map((d, i) => ({ d, i }))

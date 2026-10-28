@@ -4,7 +4,7 @@ import { applyAction } from "./actions";
 import { NAPKIN_ASPECT, type Design, type Part, type RedPenMark, type SketchReading } from "./design";
 import { analyze } from "./physics";
 import { buildReview, overfitEngines } from "./redpen";
-import { TEMPLATES } from "./templates";
+import { drawTemplate, TEMPLATES } from "./templates";
 import { maxPayloadKg, MIN_LIFTOFF_TWR } from "./trade";
 
 function falconLike(overrides: Partial<Design> = {}): Design {
@@ -477,5 +477,26 @@ describe("a vacuum engine on the bottom stage", () => {
     const twrWith = (count: number) => analyze(applyAction(one, { ...fix, count })).liftoffTwr;
     expect(twrWith(fix.count)).toBeGreaterThanOrEqual(1.3);
     expect(twrWith(fix.count - 1)).toBeLessThan(1.3);
+  });
+});
+
+describe("a real rocket's template, which can't be drawn on", () => {
+  const f9 = TEMPLATES.find((t) => t.id === "falcon9")!;
+  const toMars = { ...f9.design, destination: "mars-surface" as const, payloadMassKg: 500 };
+  const reading: SketchReading = { design: toMars, parts: drawTemplate(f9, toMars).parts, confidence: 1, problem: null };
+  const analysis = analyze(toMars);
+
+  it("on a sketch, asks for the heat shield a Mars landing needs", () => {
+    expect(analysis.verdict).toBe("destination");
+    const review = buildReview(reading, analysis);
+    expect(review.marks.map((m) => m.note)).toContain("heat shield!");
+  });
+
+  it("on a template, only mentions it: no mark asks the user to draw anything", () => {
+    const review = buildReview(reading, analysis, { drawable: false });
+    expect(review.marks.map((m) => m.note)).not.toContain("heat shield!");
+    expect(review.marks.map((m) => m.note)).not.toContain("needs legs");
+    expect(review.summary).toMatch(/Landing there also takes a heat shield, which this check doesn't model\.$/);
+    for (const m of review.marks) expect(m.note).not.toMatch(/\bdraw\b/i);
   });
 });

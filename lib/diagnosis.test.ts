@@ -5,7 +5,7 @@ import type { Design } from "./design";
 import { diagnose, sensitivities } from "./diagnosis";
 import { analyze } from "./physics";
 import { buildReview } from "./redpen";
-import { templateById } from "./templates";
+import { drawTemplate, templateById, TEMPLATES } from "./templates";
 import { maxPayloadKg } from "./trade";
 
 function falconLike(overrides: Partial<Design> = {}): Design {
@@ -223,5 +223,19 @@ describe("sensitivities", () => {
   it("gives tank and engine trades", () => {
     expect(value("Booster tanks")).toMatch(/^\+10% → [+−±][\d,]+ m\/s$/);
     expect(value("Booster engines")).toMatch(/^\+1 Merlin 1D → TWR \+\d\.\d{3}, [+−±][\d,]+ m\/s$/);
+  });
+});
+
+describe("hardware on a real rocket's template", () => {
+  const f9 = TEMPLATES.find((t) => t.id === "falcon9")!;
+  const toMars: Design = { ...f9.design, destination: "mars-surface", payloadMassKg: 500 };
+  const reading = { design: toMars, parts: drawTemplate(f9, toMars).parts, confidence: 1, problem: null };
+
+  it("raises no issue the user can't act on: no 'draw a heat shield' when the drawing can't change", () => {
+    const sketch = diagnose(toMars, analyze(toMars), reading);
+    expect(sketch.map((i) => i.title)).toContain("No heat shield");
+    const template = diagnose(toMars, analyze(toMars), reading, { drawable: false });
+    expect(template.map((i) => i.title)).not.toContain("No heat shield");
+    for (const issue of template) expect(`${issue.effect} ${issue.why}`).not.toMatch(/\bdraw\b/i);
   });
 });

@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import { applyAction } from "./actions";
 import type { Attempt, Design, Improvement } from "./design";
 import { analyze } from "./physics";
-import { recap } from "./recap";
+import { flightOutcome, recap } from "./recap";
 import { templateById } from "./templates";
 import { maxPayloadKg } from "./trade";
 
@@ -214,5 +214,30 @@ describe("every recap", () => {
   it("is deterministic", () => {
     const history = attempts(hopper, falconLike(), falconLike({ destination: "gto" }));
     expect(recap(history)).toEqual(recap(history));
+  });
+});
+
+describe("a real rocket's template", () => {
+  it("never suggests drawing hardware the user can't add, though a sketch still does", () => {
+    const f9 = templateById("falcon9").design;
+    const toMars: Design = { ...f9, destination: "mars-surface", payloadMassKg: 500 };
+    const sketch = recap(attempts(toMars)).improvements.map((i) => i.text);
+    expect(sketch.some((t) => /^Draw /.test(t))).toBe(true);
+    const template = recap(attempts(toMars), { drawable: false }).improvements.map((i) => i.text);
+    for (const t of template) expect(t).not.toMatch(/\bdraw\b/i);
+  });
+});
+
+describe("flightOutcome", () => {
+  it("says what each flight did, and 'on course' only for a trip that's on its way", () => {
+    const f9 = templateById("falcon9").design;
+    const at = (d: Design) => flightOutcome(d, analyze(d));
+    expect(at({ ...f9, destination: "leo" })).toBe("orbit");
+    expect(at({ ...f9, destination: "gto", payloadMassKg: 500 })).toBe("reached GTO");
+    expect(at({ ...f9, destination: "moon-orbit", payloadMassKg: 500 })).toBe("reached the Moon's distance");
+    expect(at({ ...f9, destination: "mars-transfer", payloadMassKg: 500 })).toBe("on course for Mars");
+    // Short of Europa: it only made orbit, and says so.
+    expect(at({ ...f9, destination: "europa", payloadMassKg: 500 })).toBe("orbit");
+    expect(at({ ...f9, destination: "europa", payloadMassKg: 500 })).not.toMatch(/course/);
   });
 });

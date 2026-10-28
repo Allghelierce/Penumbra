@@ -5,7 +5,7 @@
 import { applyAction } from "./actions";
 import type { Analysis, Attempt, Design, DesignAction, DestinationId, Improvement, Recap, RedPenMark } from "./design";
 import { analyze, DESTINATIONS, ENGINES, km, kmShort, kmSpare } from "./physics";
-import { buildReview, DESTINATION_NAMES, hardwareNeeds, massText, SAFE_TWR } from "./redpen";
+import { buildReview, DESTINATION_NAMES, hardwareNeeds, massText, type ReviewOptions, SAFE_TWR } from "./redpen";
 
 const MAX_IMPROVEMENTS = 3;
 /** Margin past which a design counts as over-built and could shed tank volume. */
@@ -16,7 +16,8 @@ const MIN_SHRINK_PERCENT = 5;
 const MAX_SHRINK_PERCENT = 50;
 const MAX_STRETCH = 2.5;
 
-export function recap(attempts: Attempt[]): Recap {
+/** `drawable: false` for a drawing the user can't add parts to (a real rocket's template): no "draw legs" advice then. */
+export function recap(attempts: Attempt[], { drawable = true }: ReviewOptions = {}): Recap {
   const current = attempts.at(-1);
   if (!current) return { headline: "No flights yet", delta: null, improvements: [] };
   const previous = attempts.at(-2) ?? null;
@@ -24,7 +25,7 @@ export function recap(attempts: Attempt[]): Recap {
   return {
     headline: headline(current, previous),
     delta: previous ? delta(current, previous) : null,
-    improvements: improvements(current.design, current.analysis).slice(0, MAX_IMPROVEMENTS),
+    improvements: improvements(current.design, current.analysis, drawable).slice(0, MAX_IMPROVEMENTS),
   };
 }
 
@@ -33,7 +34,7 @@ export function recap(attempts: Attempt[]): Recap {
 
 function headline(current: Attempt, previous: Attempt | null): string {
   const a = current.analysis;
-  const start = `Attempt ${current.n}: ${outcome(current.design, a)}`;
+  const start = `Attempt ${current.n}: ${flightOutcome(current.design, a)}`;
   if (a.verdict === "stuck-on-pad") return `${start}, thrust-to-weight ${a.liftoffTwr.toFixed(2)}`;
   if (previous && previous.analysis.verdict === "stuck-on-pad") return `${start}, off the pad this time`;
   if (previous) return `${start}, ${comparison(a.totalDeltaVMps, previous.analysis.totalDeltaVMps)}`;
@@ -46,7 +47,12 @@ function headline(current: Attempt, previous: Attempt | null): string {
   return `${start} with ${kmSpare(a.totalDeltaVMps, a.requiredDeltaVMps)} km/s to spare`;
 }
 
-function outcome(design: Design, a: Analysis): string {
+/**
+ * What a flight did, in a few words: "stuck on the pad", "suborbital", "orbit", "reached GTO",
+ * "reached the Moon's distance" or "on course for Mars". Only what the flight shows, so the
+ * flight log and the recap say the same thing.
+ */
+export function flightOutcome(design: Design, a: Analysis): string {
   switch (a.verdict) {
     case "stuck-on-pad":
       return "stuck on the pad";
@@ -126,14 +132,14 @@ function designChanges(before: Design, after: Design): string[] {
 // ---------------------------------------------------------------------------
 // Improvements
 
-function improvements(design: Design, analysis: Analysis): Improvement[] {
+function improvements(design: Design, analysis: Analysis, drawable: boolean): Improvement[] {
   const out: Improvement[] = [];
-  const marks = buildReview({ design, parts: [] }, analysis).marks;
+  const marks = buildReview({ design, parts: [] }, analysis, { drawable }).marks;
   // A marginal liftoff isn't a success yet, whatever the delta-v says.
   const reached = analysis.verdict === "destination" && analysis.liftoffTwr >= SAFE_TWR;
 
   if (!reached) out.push(...fixesFromRedPen(design, marks));
-  out.push(...landingNeeds(design));
+  if (drawable) out.push(...landingNeeds(design));
   if (reached) out.push(...levelUps(design, analysis));
   if (!reached) {
     const aimLower = aimForReachable(design, analysis);
