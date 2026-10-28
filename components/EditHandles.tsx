@@ -1,8 +1,9 @@
 "use client";
 
-import { Fragment, useEffect, useRef, useState, type KeyboardEvent, type PointerEvent } from "react";
+import { Fragment, useEffect, useId, useRef, useState, type KeyboardEvent, type PointerEvent } from "react";
 import { NAPKIN_ASPECT, type Design, type DesignAction, type EngineCluster, type EngineId, type Part, type Stage, type TemplateDrawing } from "@/lib/design";
 import { ENGINES } from "@/lib/physics";
+import { metres as baseMetres, overfitEngines, type EngineOverfit } from "@/lib/redpen";
 
 /** A tank stretch that is being dragged or nudged but not applied yet. */
 export interface Stretch {
@@ -29,6 +30,8 @@ const NUDGE_MS = 700;
 const ROW = 32;
 /** An engine chip's − and + buttons plus borders, in px (the count and type menu take the rest). */
 const CHIP_FIXED = 68;
+/** Height of a handwritten "only 9 fit" line under a chip, in px. */
+const NOTE = 20;
 
 type Box = { x0: number; x1: number; y0: number; y1: number };
 type Band = { index: number; stage: Stage; top: number; bottom: number; x0: number; x1: number };
@@ -88,6 +91,13 @@ const shortName = (name: string) => name.replace(/ Vacuum$/, " Vac").replace("So
 
 const signedMetres = (m: number) => `${m < 0 ? "−" : "+"}${Math.abs(m).toFixed(1)} m`;
 
+/** The red pen's note for a cluster that doesn't fit its base, naming the engine when the stage has several. */
+function fitNote(o: EngineOverfit, several: boolean) {
+  const name = several ? ` ${shortName(ENGINES[o.engine].name)}` : "";
+  if (o.fits === 0) return several ? `no room for${name}` : "none fit";
+  return `only ${o.fits}${name} fit${o.fits === 1 ? "s" : ""}`;
+}
+
 /**
  * Drag-to-modify controls over a real rocket on the napkin: a handle on the top edge of each stage's
  * tanks stretches or shrinks them (5% steps, 0.5× to 2×; arrow keys nudge the focused handle), each engine
@@ -96,6 +106,7 @@ const signedMetres = (m: number) => `${m < 0 ? "−" : "+"}${Math.abs(m).toFixed
  */
 export default function EditHandles({ drawing, design, onAction, onPreview }: EditHandlesProps) {
   const root = useRef<HTMLDivElement>(null);
+  const id = useId();
   const [size, setSize] = useState({ w: 0, h: 0 });
   const [pending, setPending] = useState<Stretch | null>(null);
   // Mirrors `pending` for event handlers that run before the next render.
@@ -185,9 +196,14 @@ export default function EditHandles({ drawing, design, onAction, onPreview }: Ed
     timer.current = window.setTimeout(commit, NUDGE_MS);
   }
 
+  // Clusters with more engines than fit on their base, as the red pen marks them: + still adds, the chip just turns red.
+  const overfit = overfitEngines(design);
+  const overfitOf = (stageIndex: number, clusterIndex: number) => overfit.find((o) => o.stageIndex === stageIndex && o.clusterIndex === clusterIndex);
+  const notesOf = (b: Band) => overfit.filter((o) => o.stageIndex === b.index).length;
+
   // Engine chips to the right of the rocket, stage names and remove buttons to its left, each beside its band.
   const chipTops = stack(
-    bands.map((b) => ({ y: ((b.top + b.bottom) / 2) * H, h: (Math.max(1, b.stage.engines.length) + 1) * (ROW + 1) + 1 })),
+    bands.map((b) => ({ y: ((b.top + b.bottom) / 2) * H, h: (Math.max(1, b.stage.engines.length) + 1) * (ROW + 1) + 1 + notesOf(b) * NOTE })),
     H,
   );
   // "+ Booster stage" goes under the rocket when there's room, otherwise at the foot of the stage-name column.
@@ -272,78 +288,101 @@ export default function EditHandles({ drawing, design, onAction, onPreview }: Ed
 
       {bands.map((band, i) => {
         const { engines, label, propellant, recover = false } = band.stage;
+        const crowded = overfit.filter((o) => o.stageIndex === band.index);
+        const noteId = (clusterIndex: number) => `${id}-fit-${band.index}-${clusterIndex}`;
         return (
-          <div
-            key={band.index}
-            role="group"
-            aria-label={`${label} engines and recovery`}
-            className="napkin-overlay pointer-events-auto absolute divide-y divide-white/15 border border-white/25 bg-black shadow-[0_2px_10px_rgba(0,0,0,0.4)]"
-            style={{ left: chipLeft, top: chipTops[i] }}
-          >
-            {engines.map((cluster, clusterIndex) => {
-              const name = ENGINES[cluster.engine].name;
-              const set = (next: EngineCluster) => onAction({ type: "set-engines", stageIndex: band.index, clusterIndex, engine: next.engine, count: next.count });
-              const options = Object.values(ENGINES).filter((spec) => spec.propellant === propellant || spec.id === cluster.engine);
-              return (
-                <div key={clusterIndex} className="flex items-stretch">
-                  <button
-                    type="button"
-                    aria-label={`One fewer ${name} on ${label}`}
-                    disabled={cluster.count <= 1}
-                    onClick={() => set({ ...cluster, count: cluster.count - 1 })}
-                    className={`${control} text-[15px] text-white hover:bg-white/10 disabled:text-white/25 disabled:hover:bg-transparent`}
-                  >
-                    −
-                  </button>
-                  <label
-                    className="relative flex h-8 min-w-0 cursor-pointer items-center gap-1.5 pl-1 pr-5 transition-colors hover:bg-white/10 has-[select:focus-visible]:outline-2 has-[select:focus-visible]:-outline-offset-2 has-[select:focus-visible]:outline-white"
-                    style={{ width: menuWidth }}
-                  >
-                    <span className="shrink-0 font-mono text-[12px] tabular-nums">{cluster.count}×</span>
-                    <span className="truncate text-[10px] font-semibold uppercase tracking-[0.08em]">{shortName(name)}</span>
-                    <span aria-hidden className="pointer-events-none absolute right-1.5 text-[9px] text-haze">
-                      ▾
-                    </span>
-                    {/* The native menu, invisible over the chip: keyboard and screen-reader friendly, and it fits a narrow chip. */}
-                    <select
-                      aria-label={`${label} engine type${engines.length > 1 ? ` ${clusterIndex + 1}` : ""}`}
-                      value={cluster.engine}
-                      onChange={(e) => set({ ...cluster, engine: e.target.value as EngineCluster["engine"] })}
-                      className="absolute inset-0 cursor-pointer appearance-none opacity-0 [color-scheme:dark]"
-                    >
-                      {options.map((spec) => {
-                        // The bottom stage lights at sea level, where a vacuum engine gives no thrust.
-                        const padless = band.index === 0 && vacuumOnly(spec.id) && spec.id !== cluster.engine;
-                        return (
-                          <option key={spec.id} value={spec.id} disabled={padless}>
-                            {padless ? `${spec.name} (upper stage only)` : spec.name}
-                          </option>
-                        );
-                      })}
-                    </select>
-                  </label>
-                  <button
-                    type="button"
-                    aria-label={`One more ${name} on ${label}`}
-                    disabled={cluster.count >= MAX_ENGINES}
-                    onClick={() => set({ ...cluster, count: cluster.count + 1 })}
-                    className={`${control} border-l border-white/15 text-[15px] text-white hover:bg-white/10 disabled:text-white/25 disabled:hover:bg-transparent`}
-                  >
-                    +
-                  </button>
-                </div>
-              );
-            })}
-            <button
-              type="button"
-              aria-pressed={recover}
-              title={recover ? `${label} flies back and lands: it keeps a landing reserve and carries legs` : `${label} is thrown away after staging`}
-              onClick={() => onAction({ type: "set-recover", stageIndex: band.index, recover: !recover })}
-              className="flex h-8 w-full items-center justify-between gap-2 px-2.5 text-[10px] font-semibold uppercase tracking-[0.18em] transition-colors hover:bg-white/10"
+          <div key={band.index} className="napkin-overlay absolute" style={{ left: chipLeft, top: chipTops[i] }}>
+            <div
+              role="group"
+              aria-label={`${label} engines and recovery`}
+              className={`pointer-events-auto divide-y divide-white/15 border bg-black shadow-[0_2px_10px_rgba(0,0,0,0.4)] ${
+                crowded.length > 0 ? "border-redpen/80" : "border-white/25"
+              }`}
             >
-              <span className={recover ? "text-white" : "text-haze"}>♻ Recover</span>
-              <span className={`font-mono text-[10px] tracking-[0.1em] ${recover ? "text-go-signal" : "text-white/35"}`}>{recover ? "On" : "Off"}</span>
-            </button>
+              {engines.map((cluster, clusterIndex) => {
+                const name = ENGINES[cluster.engine].name;
+                const set = (next: EngineCluster) => onAction({ type: "set-engines", stageIndex: band.index, clusterIndex, engine: next.engine, count: next.count });
+                const options = Object.values(ENGINES).filter((spec) => spec.propellant === propellant || spec.id === cluster.engine);
+                const over = overfitOf(band.index, clusterIndex);
+                const describedBy = over ? noteId(clusterIndex) : undefined;
+                return (
+                  <div
+                    key={clusterIndex}
+                    className={`flex items-stretch ${over ? "bg-redpen/15 text-redpen" : ""}`}
+                    title={over ? `${cluster.count} ${name} don't fit side by side on a ${baseMetres(over.baseM)} m base` : undefined}
+                  >
+                    <button
+                      type="button"
+                      aria-label={`One fewer ${name} on ${label}`}
+                      disabled={cluster.count <= 1}
+                      onClick={() => set({ ...cluster, count: cluster.count - 1 })}
+                      className={`${control} text-[15px] text-white hover:bg-white/10 disabled:text-white/25 disabled:hover:bg-transparent`}
+                    >
+                      −
+                    </button>
+                    <label
+                      className="relative flex h-8 min-w-0 cursor-pointer items-center gap-1.5 pl-1 pr-5 transition-colors hover:bg-white/10 has-[select:focus-visible]:outline-2 has-[select:focus-visible]:-outline-offset-2 has-[select:focus-visible]:outline-white"
+                      style={{ width: menuWidth }}
+                    >
+                      <span className="shrink-0 font-mono text-[12px] tabular-nums">{cluster.count}×</span>
+                      <span className="truncate text-[10px] font-semibold uppercase tracking-[0.08em]">{shortName(name)}</span>
+                      <span aria-hidden className="pointer-events-none absolute right-1.5 text-[9px] text-haze">
+                        ▾
+                      </span>
+                      {/* The native menu, invisible over the chip: keyboard and screen-reader friendly, and it fits a narrow chip. */}
+                      <select
+                        aria-label={`${label} engine type${engines.length > 1 ? ` ${clusterIndex + 1}` : ""}`}
+                        aria-describedby={describedBy}
+                        value={cluster.engine}
+                        onChange={(e) => set({ ...cluster, engine: e.target.value as EngineCluster["engine"] })}
+                        className="absolute inset-0 cursor-pointer appearance-none opacity-0 [color-scheme:dark]"
+                      >
+                        {options.map((spec) => {
+                          // The bottom stage lights at sea level, where a vacuum engine gives no thrust.
+                          const padless = band.index === 0 && vacuumOnly(spec.id) && spec.id !== cluster.engine;
+                          return (
+                            <option key={spec.id} value={spec.id} disabled={padless}>
+                              {padless ? `${spec.name} (upper stage only)` : spec.name}
+                            </option>
+                          );
+                        })}
+                      </select>
+                    </label>
+                    <button
+                      type="button"
+                      aria-label={`One more ${name} on ${label}`}
+                      aria-describedby={describedBy}
+                      disabled={cluster.count >= MAX_ENGINES}
+                      onClick={() => set({ ...cluster, count: cluster.count + 1 })}
+                      className={`${control} border-l border-white/15 text-[15px] text-white hover:bg-white/10 disabled:text-white/25 disabled:hover:bg-transparent`}
+                    >
+                      +
+                    </button>
+                  </div>
+                );
+              })}
+              <button
+                type="button"
+                aria-pressed={recover}
+                title={recover ? `${label} flies back and lands: it keeps a landing reserve and carries legs` : `${label} is thrown away after staging`}
+                onClick={() => onAction({ type: "set-recover", stageIndex: band.index, recover: !recover })}
+                className="flex h-8 w-full items-center justify-between gap-2 px-2.5 text-[10px] font-semibold uppercase tracking-[0.18em] transition-colors hover:bg-white/10"
+              >
+                <span className={recover ? "text-white" : "text-haze"}>♻ Recover</span>
+                <span className={`font-mono text-[10px] tracking-[0.1em] ${recover ? "text-go-signal" : "text-white/35"}`}>{recover ? "On" : "Off"}</span>
+              </button>
+            </div>
+            {/* The red pen's verdict, written on the napkin under the chip. */}
+            {crowded.map((o) => (
+              <p
+                key={o.clusterIndex}
+                id={noteId(o.clusterIndex)}
+                className="pen-write pointer-events-none origin-left -rotate-2 whitespace-nowrap pl-2 font-hand text-[19px] leading-5 text-redpen"
+                style={{ height: NOTE }}
+              >
+                {fitNote(o, engines.length > 1)}
+              </p>
+            ))}
           </div>
         );
       })}
