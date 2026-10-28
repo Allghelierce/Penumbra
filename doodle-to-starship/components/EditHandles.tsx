@@ -1,7 +1,7 @@
 "use client";
 
 import { Fragment, useEffect, useRef, useState, type KeyboardEvent, type PointerEvent } from "react";
-import { NAPKIN_ASPECT, type Design, type DesignAction, type EngineCluster, type Part, type Stage, type TemplateDrawing } from "@/lib/design";
+import { NAPKIN_ASPECT, type Design, type DesignAction, type EngineCluster, type EngineId, type Part, type Stage, type TemplateDrawing } from "@/lib/design";
 import { ENGINES } from "@/lib/physics";
 
 /** A tank stretch that is being dragged or nudged but not applied yet. */
@@ -81,6 +81,8 @@ function stack(items: { y: number; h: number }[], limit: number, gap = 4) {
 
 /** A stretch handle's width in px: the stage's width plus a margin, never too small to grab. */
 const handleWidth = (band: Band, napkinWidth: number) => Math.max((band.x1 - band.x0) * napkinWidth + 28, 76);
+
+const vacuumOnly = (engine: EngineId) => ENGINES[engine].thrustSeaLevelN <= 0;
 
 const shortName = (name: string) => name.replace(/ Vacuum$/, " Vac").replace("Solid rocket motor", "Solid motor");
 
@@ -309,11 +311,15 @@ export default function EditHandles({ drawing, design, onAction, onPreview }: Ed
                       onChange={(e) => set({ ...cluster, engine: e.target.value as EngineCluster["engine"] })}
                       className="absolute inset-0 cursor-pointer appearance-none opacity-0 [color-scheme:dark]"
                     >
-                      {options.map((spec) => (
-                        <option key={spec.id} value={spec.id}>
-                          {spec.name}
-                        </option>
-                      ))}
+                      {options.map((spec) => {
+                        // The bottom stage lights at sea level, where a vacuum engine gives no thrust.
+                        const padless = band.index === 0 && vacuumOnly(spec.id) && spec.id !== cluster.engine;
+                        return (
+                          <option key={spec.id} value={spec.id} disabled={padless}>
+                            {padless ? `${spec.name} (upper stage only)` : spec.name}
+                          </option>
+                        );
+                      })}
                     </select>
                   </label>
                   <button
