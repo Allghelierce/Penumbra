@@ -46,16 +46,11 @@ describe("ruleFor", () => {
   it("limits the routes that spend xAI credits", () => {
     expect(ruleFor("POST", "/api/read")).toBe(RULES.read);
     expect(ruleFor("POST", "/api/review")).toBe(RULES.review);
-    expect(ruleFor("POST", "/api/render")).toBe(RULES.render);
-    expect(ruleFor("GET", "/api/render")).toBe(RULES.render);
-    expect(ruleFor("POST", "/api/replay")).toBe(RULES.replay);
     expect(ruleFor("POST", "/api/voice-token")).toBe(RULES.voiceToken);
     expect(ruleFor("POST", "/api/read/")).toBe(RULES.read);
   });
 
   it("leaves free requests alone", () => {
-    expect(ruleFor("GET", "/api/replay/abc123")).toBeNull();
-    expect(ruleFor("GET", "/api/replay")).toBeNull();
     expect(ruleFor("GET", "/api/voice-token")).toBeNull();
     expect(ruleFor("GET", "/api/prior-art")).toBeNull();
     expect(ruleFor("GET", "/api/xai-status")).toBeNull();

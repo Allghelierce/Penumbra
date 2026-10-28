@@ -1,43 +1,24 @@
 "use client";
 
-// Dev smoke test for every xAI-backed route: one button per capability, latency, source,
-// cost (from the x-xai-cost-usd header the routes set) and the image or video itself.
+// Dev smoke test for every xAI-backed route: one button per capability, latency, source and
+// cost (from the x-xai-cost-usd header the routes set).
 
 import { useEffect, useRef, useState } from "react";
-import type { ReplayPollResponse, ReplayStartResponse } from "@/app/api/replay/types";
-import { applyAction } from "@/lib/actions";
 import { DEMO_SKETCHES } from "@/lib/demo-sketches";
-import type {
-  Analysis,
-  Design,
-  DesignAction,
-  ReadResponse,
-  RenderRequest,
-  RenderResponse,
-  ReviewResponse,
-  SketchReading,
-} from "@/lib/design";
+import type { Analysis, ReadResponse, ReviewResponse, SketchReading } from "@/lib/design";
 import { strokesToPng } from "@/lib/napkin";
 import { analyze } from "@/lib/physics";
-import { buildReview } from "@/lib/redpen";
-import { readFromGeometry } from "@/lib/sketch/geometry";
 
 const SKETCH = DEMO_SKETCHES.find((d) => d.id === "mars-ship")!;
-const POLL_MS = 3000;
-const POLL_LIMIT_MS = 180_000;
 
 /** Milliseconds since `t0` (a previous now()). Module-level so it's clearly not called during render. */
 const now = () => performance.now();
 const since = (t0: number) => Math.round(now() - t0);
 
-type Step = "read" | "review" | "concept" | "patch" | "outcome" | "replay" | "voice";
+type Step = "read" | "review" | "voice";
 const STEPS: { id: Step; label: string; note: string }[] = [
   { id: "read", label: "read sketch", note: "vision · mars-ship PNG" },
   { id: "review", label: "review rewrite", note: "text · red-pen copy" },
-  { id: "concept", label: "concept render", note: "imagine · edit from sketch" },
-  { id: "patch", label: "mission patch", note: "imagine · generate 1:1" },
-  { id: "outcome", label: "outcome render", note: "imagine · generate" },
-  { id: "replay", label: "replay video", note: "video · start + poll" },
   { id: "voice", label: "voice token", note: "realtime · client secret" },
 ];
 
@@ -47,8 +28,6 @@ interface Result {
   source?: string;
   costUsd?: number | null;
   text?: string;
-  image?: string | null;
-  video?: string | null;
 }
 
 interface Status {
@@ -68,82 +47,11 @@ async function post<T>(path: string, body?: unknown) {
   return { json, ms: since(t0), costUsd: cost === null ? null : Number(cost), ok: res.ok };
 }
 
-const isEdit = (fix: DesignAction | undefined): fix is DesignAction =>
-  Boolean(fix) && fix!.type !== "launch" && fix!.type !== "review";
-
-/** Rough price of one sketch-to-photo render: $0.04 per image plus the input image. */
-const RENDER_ESTIMATE_USD = 0.05;
-
-interface WarmJob {
-  label: string;
-  design: Design;
-  analysis: Analysis;
-  kind: RenderRequest["kind"];
-  sketch: string;
-}
-
-/**
- * What the offline demo shows for each demo sketch read by geometry (what an offline read produces):
- * the concept and the outcome, plus the outcome after its red-pen fixes (one per new verdict, since
- * outcome renders are keyed by sketch + verdict + destination). No patches or videos, to save credit.
- */
-function planWarm(): WarmJob[] {
-  const jobs: WarmJob[] = [];
-  for (const demo of DEMO_SKETCHES) {
-    const sketch = strokesToPng(demo.strokes);
-    const reading = readFromGeometry(demo.strokes, demo.destination);
-    const base = analyze(reading.design);
-    const job = (label: string, design: Design, analysis: Analysis, kind: RenderRequest["kind"]) =>
-      jobs.push({ label: `${demo.id} · ${label}`, design, analysis, kind, sketch });
-    job("concept", reading.design, base, "concept");
-    job(`outcome ${base.verdict}`, reading.design, base, "outcome");
-    const fixes = buildReview(reading, base).marks.map((m) => m.fix).filter(isEdit);
-    const variants = [...fixes.map((f) => applyAction(reading.design, f)), fixes.reduce(applyAction, reading.design)];
-    const seen = new Set<string>([`${base.verdict}/${reading.design.destination}`]);
-    for (const design of variants) {
-      const analysis = analyze(design);
-      const id = `${analysis.verdict}/${design.destination}`;
-      if (seen.has(id)) continue;
-      seen.add(id);
-      job(`outcome after fix ${analysis.verdict}`, design, analysis, "outcome");
-    }
-  }
-  return jobs;
-}
-
-/** Runs the jobs one at a time (so the server's budget brake stops it cleanly). Cached ones are free. */
-async function runWarm(jobs: WarmJob[], log: (line: string) => void) {
-  for (const { label, design, analysis, kind, sketch } of jobs) {
-    const r = await post<RenderResponse>("/api/render", { design, analysis, kind, sketch });
-    const cost = r.costUsd != null ? `$${r.costUsd.toFixed(3)}` : r.json.url ? "cached" : "-";
-    log(`${label}: ${r.json.url ?? "no image (budget, key or error: see /api/xai-status)"} · ${r.ms} ms · ${cost}`);
-  }
-  log("done");
-}
-
-/** Renders just the three demo concepts (isolated on black), for pinning as fixed assets. */
-async function pinDemoConcepts(log: (line: string) => void) {
-  for (const demo of DEMO_SKETCHES) {
-    const sketch = strokesToPng(demo.strokes);
-    const reading = readFromGeometry(demo.strokes, demo.destination);
-    const r = await post<RenderResponse>("/api/render", {
-      design: reading.design,
-      analysis: analyze(reading.design),
-      kind: "concept",
-      sketch,
-    });
-    log(`PIN ${demo.id} ${r.json.url ?? "none"} ${r.costUsd != null ? `$${r.costUsd.toFixed(3)}` : "cached"}`);
-  }
-  log("done");
-}
-
 export default function XaiDevPage() {
   const [status, setStatus] = useState<Status | null>(null);
-  const [warmLog, setWarmLog] = useState<string[] | null>(null);
   const [results, setResults] = useState<Partial<Record<Step, Result>>>({});
   const reading = useRef<SketchReading | null>(null);
   const analysis = useRef<Analysis | null>(null);
-  const outcomeUrl = useRef<string | null>(null);
   const png = useRef<string | null>(null);
 
   useEffect(() => {
@@ -159,26 +67,6 @@ export default function XaiDevPage() {
   async function ensureReading() {
     if (!reading.current) await run.read();
     return { reading: reading.current!, analysis: analysis.current! };
-  }
-
-  async function render(step: Step, kind: "concept" | "outcome" | "patch", withSketch: boolean) {
-    set(step, { state: "running" });
-    const ctx = await ensureReading();
-    const r = await post<RenderResponse>("/api/render", {
-      design: ctx.reading.design,
-      analysis: ctx.analysis,
-      kind,
-      ...(withSketch ? { sketch: sketchPng() } : {}),
-    });
-    if (kind === "outcome") outcomeUrl.current = r.json.url;
-    set(step, {
-      state: r.json.source === "grok" ? "ok" : "fallback",
-      ms: r.ms,
-      source: r.json.source,
-      costUsd: r.costUsd,
-      image: r.json.url,
-      text: r.json.url ? undefined : "no image",
-    });
   }
 
   const run: Record<Step, () => Promise<void>> = {
@@ -214,41 +102,6 @@ export default function XaiDevPage() {
         text: [r.json.review?.summary, ...(r.json.review?.marks ?? []).map((m) => `• ${m.note}`)].join("\n"),
       });
     },
-    concept: () => render("concept", "concept", true),
-    patch: () => render("patch", "patch", false),
-    outcome: () => render("outcome", "outcome", false),
-    replay: async () => {
-      set("replay", { state: "running", text: "starting…" });
-      if (!outcomeUrl.current) await run.outcome();
-      if (!outcomeUrl.current) {
-        set("replay", { state: "fallback", source: "none", text: "needs an outcome render url first" });
-        return;
-      }
-      const t0 = now();
-      const start = await post<ReplayStartResponse>("/api/replay", {
-        imageUrl: outcomeUrl.current,
-        verdict: analysis.current?.verdict,
-      });
-      if (start.json.status !== "pending" || !start.json.id) {
-        set("replay", { state: "fallback", ms: start.ms, source: start.json.status, costUsd: start.costUsd });
-        return;
-      }
-      while (since(t0) < POLL_LIMIT_MS) {
-        await new Promise((resolve) => setTimeout(resolve, POLL_MS));
-        const poll = (await fetch(`/api/replay/${start.json.id}`).then((r) => r.json())) as ReplayPollResponse;
-        const ms = since(t0);
-        if (poll.status === "done") {
-          set("replay", { state: "ok", ms, source: "grok", costUsd: start.costUsd, video: poll.url });
-          return;
-        }
-        if (poll.status !== "pending") {
-          set("replay", { state: "error", ms, source: poll.status });
-          return;
-        }
-        set("replay", { state: "running", ms, text: `pending ${poll.progress ?? "?"}% · ${Math.round(ms / 1000)} s` });
-      }
-      set("replay", { state: "error", text: "gave up after 3 min" });
-    },
     voice: async () => {
       set("voice", { state: "running" });
       const r = await post<{ mode: string; token?: string; expiresAt?: number | null; error?: string }>("/api/voice-token");
@@ -272,9 +125,7 @@ export default function XaiDevPage() {
 
   async function runAll() {
     await guarded("read");
-    await guarded("review");
-    await Promise.all([guarded("concept"), guarded("patch"), guarded("outcome")]);
-    await Promise.all([guarded("replay"), guarded("voice")]);
+    await Promise.all([guarded("review"), guarded("voice")]);
   }
 
   const totalCost = Object.values(results).reduce((sum, r) => sum + (r?.costUsd ?? 0), 0);
@@ -288,41 +139,10 @@ export default function XaiDevPage() {
       </p>
       <div className="mb-6 flex items-center gap-4">
         <button className="rounded bg-neutral-900 px-3 py-1.5 text-white" onClick={runAll}>
-          run all (≈$0.30)
-        </button>
-        <button
-          className="rounded border border-neutral-900 px-3 py-1.5 disabled:opacity-40"
-          disabled={warmLog !== null && warmLog.at(-1) !== "done"}
-          onClick={() => {
-            const jobs = planWarm();
-            const estimate = (jobs.length * RENDER_ESTIMATE_USD).toFixed(2);
-            if (!window.confirm(`Warm the demo cache: ${jobs.length} renders, up to ≈ $${estimate} (cached ones are free). Continue?`)) return;
-            setWarmLog([`${jobs.length} renders planned, ≈ $${estimate} at most`]);
-            void runWarm(jobs, (line) => setWarmLog((lines) => [...(lines ?? []), line])).catch((err) =>
-              setWarmLog((lines) => [...(lines ?? []), `error: ${err instanceof Error ? err.message : err}`, "done"]),
-            );
-          }}
-        >
-          warm demo cache (concept + outcome, ≈$0.60)
-        </button>
-        <button
-          className="rounded border border-neutral-900 px-3 py-1.5 disabled:opacity-40"
-          disabled={warmLog !== null && warmLog.at(-1) !== "done"}
-          onClick={() => {
-            if (!window.confirm("Render the 3 demo concepts (3 edits, ≈ $0.15)?")) return;
-            setWarmLog([]);
-            void pinDemoConcepts((line) => setWarmLog((lines) => [...(lines ?? []), line]));
-          }}
-        >
-          pin demo concepts (≈$0.15)
+          run all
         </button>
         <span className="text-neutral-600">spent this page: ${totalCost.toFixed(4)}</span>
       </div>
-      {warmLog && (
-        <pre className="mb-6 max-h-64 overflow-y-auto rounded border border-neutral-300 p-3 text-xs text-neutral-700">
-          {warmLog.join("\n") || "warming…"}
-        </pre>
-      )}
       <ul className="space-y-3">
         {STEPS.map(({ id, label, note }) => {
           const r = results[id];
@@ -351,11 +171,6 @@ export default function XaiDevPage() {
                 )}
               </div>
               {r?.text && <pre className="mt-2 whitespace-pre-wrap text-neutral-700">{r.text}</pre>}
-              {r?.image && (
-                // eslint-disable-next-line @next/next/no-img-element
-                <img src={r.image} alt={label} className="mt-2 max-h-72 rounded border border-neutral-200" />
-              )}
-              {r?.video && <video src={r.video} className="mt-2 max-h-72" autoPlay muted loop playsInline controls />}
             </li>
           );
         })}

@@ -13,12 +13,10 @@ export const RULES = {
   read: { name: "read", max: 30, windowMs: 10 * MINUTE },
   // Every voice edit and tapped fix re-runs the review, so it gets more room than a read.
   review: { name: "review", max: 60, windowMs: 10 * MINUTE },
-  render: { name: "render", max: 20, windowMs: 10 * MINUTE },
-  replay: { name: "replay", max: 3, windowMs: 60 * MINUTE },
   voiceToken: { name: "voice-token", max: 10, windowMs: 10 * MINUTE },
 } satisfies Record<string, Rule>;
 
-/** The limit for a request, or null when it costs nothing (pages, replay polling, the voice mode check). */
+/** The limit for a request, or null when it costs nothing (pages, the voice mode check). */
 export function ruleFor(method: string, pathname: string): Rule | null {
   const reads = method === "GET" || method === "HEAD";
   switch (pathname.replace(/\/+$/, "")) {
@@ -26,10 +24,6 @@ export function ruleFor(method: string, pathname: string): Rule | null {
       return RULES.read;
     case "/api/review":
       return RULES.review;
-    case "/api/render":
-      return RULES.render;
-    case "/api/replay":
-      return reads ? null : RULES.replay;
     case "/api/voice-token":
       return reads ? null : RULES.voiceToken;
     default:

@@ -25,5 +25,5 @@ export function proxy(request: NextRequest) {
 }
 
 export const config = {
-  matcher: ["/dev/:path*", "/api/read", "/api/review", "/api/render", "/api/replay", "/api/voice-token"],
+  matcher: ["/dev/:path*", "/api/read", "/api/review", "/api/voice-token"],
 };
