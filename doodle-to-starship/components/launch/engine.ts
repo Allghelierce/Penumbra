@@ -70,8 +70,6 @@ export interface LaunchInput {
   templateId?: TemplateId | null;
   /** A real-rocket template's exact stage bands ([top, bottom] on the napkin, bottom stage first). */
   stageBands?: [number, number][] | null;
-  /** A vehicle picture is on its way: draw nothing (rather than the strokes) while it loads. */
-  vehicleExpected?: boolean;
   /** A real flight being replayed; its id picks the scenario effects (crs7, ift1, falcon1-f1). */
   mission?: HistoricMission | null;
   /** Where the napkin sat on screen (viewport px), so the doodle starts exactly there. */
@@ -125,8 +123,6 @@ export interface LaunchHandle {
   stop: () => void;
   /** Playback speed multiplier (0.5–8). */
   setSpeed: (x: number) => void;
-  /** Fly a picture of the vehicle (same 3:4 frame as the strokes) instead of the chalk strokes. */
-  setVehicle: (img: HTMLImageElement | null) => void;
   /** Jump straight to the end card. */
   skip: () => void;
 }
@@ -234,7 +230,7 @@ export function startLaunch(
   const ctx = canvas.getContext("2d");
   if (!ctx) {
     hooks.onEnd();
-    return { stop: () => {}, skip: () => {}, setVehicle: () => {}, setSpeed: () => {} };
+    return { stop: () => {}, skip: () => {}, setSpeed: () => {} };
   }
 
   const design = input.reading.design;
@@ -287,27 +283,6 @@ export function startLaunch(
   const meteors: { x: number; y: number; vx: number; vy: number; age: number; life: number; len: number }[] = [];
   let crossIdx = 0;
   let trIdx = 0;
-  /** After a breakup with a vehicle picture: tiles of the picture tumbling away. */
-  const tiles: {
-    sx: number;
-    sy: number;
-    sw: number;
-    sh: number;
-    lw: number;
-    lh: number;
-    x: number;
-    y: number;
-    vx: number;
-    vy: number;
-    rot: number;
-    vr: number;
-    age: number;
-    life: number;
-  }[] = [];
-  const TILE_COLS = 6;
-  const TILE_ROWS = 8;
-  /** Alpha per tile of the vehicle picture, so empty tiles don't fly as debris. */
-  let coverage: Uint8ClampedArray | null = null;
   const callouts: FlightEvent[] = [];
   /** Wall-clock seconds of the last onEvent, and until when its line is being spoken. */
   let lastCallout = -Infinity;
@@ -358,7 +333,6 @@ export function startLaunch(
   /** Playback speed (0.5×, 1×, 2×); held to 1× while a recorded quote plays so it's never cut off. */
   let speed = 1;
   let quoteUntil = -Infinity;
-  let vehicle: HTMLImageElement | null = null;
   let cutArmed = false;
   const sound = hooks.sound;
 
@@ -413,47 +387,8 @@ export function startLaunch(
     // CRS-7: the nose (Dragon) is not debris; it comes away whole.
     const crs7 = scenario === "crs7";
     const capBottom = top + 0.18 * Hn;
-    // A vehicle picture breaks into tiles of itself; the chalk doodle into chunks of its strokes.
-    if (vehicle) {
-      const nap = doodle.napkin;
-      const tw = (nap.maxX - nap.minX) / TILE_COLS;
-      const th = (nap.maxY - nap.minY) / TILE_ROWS;
-      const iw = vehicle.naturalWidth / TILE_COLS;
-      const ih = vehicle.naturalHeight / TILE_ROWS;
-      for (let row = 0; row < TILE_ROWS; row++) {
-        for (let col = 0; col < TILE_COLS; col++) {
-          if (coverage && coverage[(row * TILE_COLS + col) * 4 + 3] < 12) continue;
-          const lx = nap.minX + (col + 0.5) * tw;
-          const ly = nap.minY + (row + 0.5) * th;
-          if (!pieces.some((p, i) => attached(i) && ly >= p.band.top && ly < p.band.bottom)) continue;
-          if (crs7 && ly < capBottom) continue;
-          const [wx, wy] = toWorld(pose, [lx, ly]);
-          const dx = wx - blast[0];
-          const dy = wy - blast[1];
-          const len = Math.hypot(dx, dy) || 1e-6;
-          const sp = rnd(0.4, 1.4) * Hn;
-          tiles.push({
-            sx: col * iw,
-            sy: row * ih,
-            sw: iw,
-            sh: ih,
-            lw: tw,
-            lh: th,
-            x: wx,
-            y: wy,
-            vx: (dx / len) * sp + rnd(-0.2, 0.2) * Hn,
-            vy: (dy / len) * sp + rnd(0.2, 0.8) * Hn,
-            rot: pose.rot,
-            vr: rnd(-4, 4),
-            age: 0,
-            life: rnd(2.2, 3.2),
-          });
-        }
-      }
-    }
-
     // The doodle itself comes apart: every attached stroke breaks into chunks that fly.
-    const lines = vehicle ? [] : pieces.flatMap((p, i) => (attached(i) ? p.lines : []));
+    const lines = pieces.flatMap((p, i) => (attached(i) ? p.lines : []));
     const total = lines.reduce((n, l) => n + l.length, 0);
     const chunk = Math.max(4, Math.ceil(total / 110));
     for (const l of lines) {
@@ -485,10 +420,6 @@ export function startLaunch(
       const hx = Math.sin(pose.rot);
       const hy = Math.cos(pose.rot);
       // The stack shreds into a cone along its flight path.
-      for (const f of tiles) {
-        f.vx += hx * rnd(0.4, 1.2) * Hn;
-        f.vy += hy * rnd(0.4, 1.2) * Hn;
-      }
       for (const f of frags) {
         f.vx += hx * rnd(0.4, 1.2) * Hn;
         f.vy += hy * rnd(0.4, 1.2) * Hn;
@@ -719,8 +650,7 @@ export function startLaunch(
     c.scale(Zi, Zi);
     c.translate(-p0.nozzle.x, -p0.box.maxY);
     if (k > 0.42 && k < touch + 0.02) drawFlame(p0.nozzle, 0.7, 0, 1, Zi, 7);
-    if (vehicle) drawVehiclePiece(0, 1);
-    else strokeDoodle(piecePaths[0], 1, 1, Zi);
+    strokeDoodle(piecePaths[0], 1, 1, Zi);
     c.restore();
     // Touchdown (or the catch): a flash, and dust off the pad.
     if (landed) {
@@ -776,26 +706,6 @@ export function startLaunch(
       c.lineTo(x + (x - nose[0]) * 0.4, nose[1] + Hn * (0.4 + rand() * 0.6));
       c.stroke();
     }
-    c.restore();
-  }
-
-  /** One stage's slice of the vehicle picture, clipped to its band so stages split cleanly. */
-  function drawVehiclePiece(i: number, alpha: number) {
-    const c = ctx!;
-    const n = doodle.napkin;
-    const p = pieces[i];
-    if (!vehicle || !p) return;
-    const top = Math.max(p.band.top, n.minY);
-    const bottom = Math.min(p.band.bottom, n.maxY);
-    if (bottom <= top) return;
-    c.save();
-    c.beginPath();
-    c.rect(n.minX, top, n.maxX - n.minX, bottom - top);
-    c.clip();
-    c.globalAlpha = alpha;
-    c.imageSmoothingEnabled = true;
-    c.imageSmoothingQuality = "high";
-    c.drawImage(vehicle, n.minX, n.minY, n.maxX - n.minX, n.maxY - n.minY);
     c.restore();
   }
 
@@ -1022,25 +932,6 @@ export function startLaunch(
         world.push({ x, y, vx: rnd(-0.05, 0.05) * Hn, vy: rnd(-0.05, 0.05) * Hn, age: 0, life: rnd(1.2, 2.2), r0: 0.02 * Hn, r1: rnd(0.08, 0.14) * Hn, a0: 0.4, sprite: "smoke", drag: 1, g: 0, add: false });
       }
     };
-    for (let i = tiles.length - 1; i >= 0; i--) {
-      const f = tiles[i];
-      f.age += dt;
-      if (f.age >= f.life) {
-        tiles.splice(i, 1);
-        continue;
-      }
-      f.vy -= 1.4 * Hn * dt;
-      f.x += f.vx * dt;
-      f.y += f.vy * dt;
-      f.rot += f.vr * dt;
-      if (f.y < groundLevel) {
-        f.y = groundLevel;
-        f.vy = Math.abs(f.vy) * 0.3;
-        f.vx *= 0.6;
-        f.vr *= 0.6;
-      }
-      trail(f.x, f.y, f.age, 8);
-    }
     for (let i = frags.length - 1; i >= 0; i--) {
       const f = frags[i];
       f.age += dt;
@@ -1267,14 +1158,7 @@ export function startLaunch(
         if (thr > 0.01) withPiece(i, (a) => drawFlame(p.nozzle, thr, plume, a, Z, i + 1));
       });
       drawParticles(local, (p) => [p.x, p.y, 1]);
-      // Waiting briefly for the vehicle picture beats flashing the strokes and swapping.
-      const waiting = !!input.vehicleExpected && !vehicle && t < 1.2;
-      pieces.forEach((_, i) =>
-        withPiece(i, (a) => {
-          if (vehicle) drawVehiclePiece(i, a);
-          else if (!waiting) strokeDoodle(piecePaths[i], a, chalk, Z);
-        }),
-      );
+      pieces.forEach((_, i) => withPiece(i, (a) => strokeDoodle(piecePaths[i], a, chalk, Z)));
       if (reentry > 0.02) drawReentry(reentry, [focus[0], top], Z);
       if (fire.length) drawParticles(fire, (p) => [p.x, p.y, 1]);
       // Vapor cone around Max-Q: a crisp condensation collar as it goes transonic.
@@ -1332,19 +1216,6 @@ export function startLaunch(
       }
       c.globalAlpha = 1;
     }
-    if (tiles.length && vehicle) {
-      for (const f of tiles) {
-        const k = f.age / f.life;
-        c.save();
-        c.translate(SX(f.x), SY(f.y));
-        c.rotate(f.rot);
-        c.scale(Z, Z);
-        c.globalAlpha = 1 - k * k;
-        c.drawImage(vehicle, f.sx, f.sy, f.sw, f.sh, -f.lw / 2, -f.lh / 2, f.lw, f.lh);
-        c.restore();
-      }
-      c.globalAlpha = 1;
-    }
     // IFT-1's flight termination is a long, bright flash; other losses a short one.
     const flashDur = scenario === "ift1" ? 1.6 : 0.8;
     if (capsule) {
@@ -1361,8 +1232,7 @@ export function startLaunch(
       c.beginPath();
       c.rect(nap.minX, capsule.top - 0.05, nap.maxX - nap.minX, capsule.bottom - capsule.top + 0.05);
       c.clip();
-      if (vehicle) c.drawImage(vehicle, nap.minX, nap.minY, nap.maxX - nap.minX, nap.maxY - nap.minY);
-      else strokeDoodle(piecePaths[pieces.length - 1], 1, chalk, Z);
+      strokeDoodle(piecePaths[pieces.length - 1], 1, chalk, Z);
       c.restore();
     }
     if (exploded && t - explodedAt < flashDur) {
@@ -1488,24 +1358,6 @@ export function startLaunch(
     stop: () => cancelAnimationFrame(raf),
     setSpeed: (x) => {
       speed = Math.min(8, Math.max(0.5, x));
-    },
-    setVehicle: (img) => {
-      vehicle = img;
-      coverage = null;
-      if (img) {
-        try {
-          const probe = document.createElement("canvas");
-          probe.width = TILE_COLS;
-          probe.height = TILE_ROWS;
-          const pc = probe.getContext("2d", { willReadFrequently: true });
-          if (pc) {
-            pc.drawImage(img, 0, 0, TILE_COLS, TILE_ROWS);
-            coverage = pc.getImageData(0, 0, TILE_COLS, TILE_ROWS).data;
-          }
-        } catch {
-          // Unreadable picture: every tile counts as debris.
-        }
-      }
     },
     skip: () => {
       if (ended) return;

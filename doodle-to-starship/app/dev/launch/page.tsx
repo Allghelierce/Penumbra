@@ -2,35 +2,17 @@
 
 import { useEffect, useRef, useState } from "react";
 import LaunchScene from "@/components/LaunchScene";
-import {
-  FIXTURES,
-  FIXTURE_RENDER,
-  REAL_FIXTURES,
-  SAMPLE_MISSION,
-  SAMPLE_RECAP,
-  TEMPLATE_FIXTURES,
-  VEHICLE_FIXTURE,
-  type LaunchFixture,
-} from "./fixtures";
-
-type RenderMode = "late" | "now" | "none";
+import { FIXTURES, REAL_FIXTURES, SAMPLE_MISSION, SAMPLE_RECAP, TEMPLATE_FIXTURES, type LaunchFixture } from "./fixtures";
 
 export default function LaunchDevPage() {
   const [active, setActive] = useState<{ fixture: LaunchFixture; run: number } | null>(null);
-  const [mode, setMode] = useState<RenderMode>("late");
-  const [renderUrl, setRenderUrl] = useState<string | null>(null);
   const [log, setLog] = useState<string[]>([]);
-  const timer = useRef<number | undefined>(undefined);
   const runs = useRef(0);
-  const [vehicle, setVehicle] = useState(false);
   const [missionMode, setMissionMode] = useState(false);
   const [napkinRect, setNapkinRect] = useState<{ left: number; top: number; width: number; height: number } | null>(null);
 
-  function play(fixture: LaunchFixture, m: RenderMode = mode) {
-    window.clearTimeout(timer.current);
+  function play(fixture: LaunchFixture) {
     setLog([]);
-    setRenderUrl(m === "now" ? FIXTURE_RENDER : null);
-    if (m === "late") timer.current = window.setTimeout(() => setRenderUrl(FIXTURE_RENDER), 15_000);
     setActive({ fixture, run: ++runs.current });
   }
 
@@ -41,28 +23,15 @@ export default function LaunchDevPage() {
     if (!fixture) return;
     // ?rect=left,top,width,height pretends the napkin sat there on screen.
     const [left, top, width, height] = (params.get("rect") ?? "").split(",").map(Number);
-    // ?render=late|now|none picks when (or whether) the stand-in render arrives.
-    const r = params.get("render");
-    const m: RenderMode = r === "now" || r === "none" || r === "late" ? r : mode;
-    // ?vehicle=1 flies the stand-in vehicle picture instead of the chalk strokes.
-    const v = params.get("vehicle") === "1";
     // ?mission=1 shows the historic-mission debrief end card.
     const ms = params.get("mission") === "1";
     const h = window.setTimeout(() => {
       if (height > 0) setNapkinRect({ left, top, width, height });
-      setVehicle(v);
       setMissionMode(ms);
-      setMode(m);
-      play(fixture, m);
+      setActive({ fixture, run: ++runs.current });
     }, 0);
     return () => window.clearTimeout(h);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
-
-  function close() {
-    window.clearTimeout(timer.current);
-    setActive(null);
-  }
 
   return (
     <main className="min-h-screen bg-table px-4 py-8 text-graphite sm:px-10">
@@ -94,16 +63,6 @@ export default function LaunchDevPage() {
         </section>
       ))}
 
-      <fieldset className="mt-6 flex flex-wrap gap-x-5 gap-y-2 font-mono text-xs">
-        <legend className="mb-2 text-ink-muted">Outcome render</legend>
-        {(["late", "now", "none"] as const).map((m) => (
-          <label key={m} className="flex items-center gap-1.5">
-            <input type="radio" name="render" checked={mode === m} onChange={() => setMode(m)} />
-            {m === "late" ? "arrives after 15 s" : m === "now" ? "ready at launch" : "never arrives"}
-          </label>
-        ))}
-      </fieldset>
-
       <section className="mt-8 max-w-2xl">
         <h2 className="font-mono text-xs uppercase tracking-widest text-ink-muted">onEvent log</h2>
         <ol className="mt-2 space-y-1 font-mono text-xs">
@@ -123,18 +82,15 @@ export default function LaunchDevPage() {
           trace={active.fixture.trace}
           stageBands={active.fixture.stageBands}
           templateId={active.fixture.templateId}
-          renderUrl={renderUrl}
-          renderState={mode === "none" ? "none" : renderUrl ? "done" : "loading"}
           napkinRect={napkinRect}
-          vehicleImageUrl={vehicle ? VEHICLE_FIXTURE : null}
           mission={missionMode ? SAMPLE_MISSION : null}
           recap={SAMPLE_RECAP}
           onImprove={(fix) => {
             setLog((l) => [...l, `onImprove ${JSON.stringify(fix)}`]);
-            close();
+            setActive(null);
           }}
           onEvent={(e) => setLog((l) => [...l, `T+${Math.round(e.tS)}s  ${e.kind}  ${e.label}`])}
-          onDone={close}
+          onDone={() => setActive(null)}
         />
       )}
     </main>

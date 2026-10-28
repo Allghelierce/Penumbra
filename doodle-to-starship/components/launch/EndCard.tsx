@@ -21,7 +21,6 @@ import {
 } from "@/lib/design";
 import { launchRecord } from "@/lib/presets";
 import { fmtKm } from "./plan";
-import type { ReplayState } from "./useReplay";
 
 interface EndCardProps {
   outcome: Verdict;
@@ -29,12 +28,9 @@ interface EndCardProps {
   analysis: Analysis;
   maxAltKm: number;
   maxSpeedMps: number;
-  renderUrl: string | null;
-  /** False once we know no render is coming: the frame shows the sketch instead. */
-  renderPending: boolean;
   strokes: Stroke[];
-  video: ReplayState;
-  onVideo: () => void;
+  /** Caption on the sketch: "Napkin sketch", or the rocket's name for a real-rocket template. */
+  sketchLabel: string;
   onDone: () => void;
   onReplay: () => void;
   /** What to try next; the studio computes it from the attempt history. */
@@ -114,8 +110,7 @@ function verdictCopy({ outcome, design, analysis, maxAltKm, lostAt }: EndCardPro
 
 export default function EndCard(props: EndCardProps) {
   if (props.mission) return <Debrief {...props} mission={props.mission} />;
-  const { design, analysis, maxAltKm, maxSpeedMps, renderUrl, renderPending, strokes, video, onVideo, onDone, onReplay, recap, onImprove } =
-    props;
+  const { design, analysis, maxAltKm, maxSpeedMps, strokes, sketchLabel, onDone, onReplay, recap, onImprove } = props;
   const { go, headline, line } = verdictCopy(props);
   const findings = (analysis.findings ?? []).slice(0, 3);
   const improvements = (recap?.improvements ?? []).slice(0, 3);
@@ -126,7 +121,7 @@ export default function EndCard(props: EndCardProps) {
     <div className="ls-fade absolute inset-0 flex items-start justify-center overflow-y-auto bg-umbra/70 px-4 py-8 backdrop-blur-[3px] sm:items-center">
       <div className="ls-rise w-full max-w-3xl overflow-hidden rounded-[3px] border border-rule bg-panel text-starlight shadow-[0_30px_80px_rgba(0,0,0,0.55)]">
         <div className="grid sm:grid-cols-[minmax(0,16rem)_1fr]">
-          <RenderFrame url={renderUrl} pending={renderPending} strokes={strokes} name={design.name} video={video} />
+          <SketchFrame strokes={strokes} name={design.name} label={sketchLabel} />
           <div className="flex min-w-0 flex-col justify-center p-5 sm:p-7">
             <div className="flex flex-wrap items-center gap-3">
               <span
@@ -216,7 +211,6 @@ export default function EndCard(props: EndCardProps) {
           >
             Fly again
           </button>
-          {renderUrl && <VideoButton video={video} onVideo={onVideo} />}
         </div>
       </div>
     </div>
@@ -235,36 +229,7 @@ function Stat({ label, value, unit }: { label: string; value: string; unit?: str
   );
 }
 
-/** Starts the Grok Imagine mission replay (a paid job, so only on click) and shows its progress. */
-function VideoButton({ video, onVideo }: { video: ReplayState; onVideo: () => void }) {
-  const base = "rounded-[3px] border border-rule px-4 py-2 text-sm font-semibold";
-  switch (video.phase) {
-    case "idle":
-      return (
-        <button type="button" onClick={onVideo} className={`${base} text-starlight transition-colors hover:border-haze`}>
-          ▶ Mission replay
-        </button>
-      );
-    case "pending":
-      return (
-        <span className={`${base} ls-pending text-haze`} aria-live="polite">
-          Developing replay{video.progress !== null ? ` ${Math.round(video.progress)}%` : "…"}
-        </span>
-      );
-    case "failed":
-      return (
-        <button type="button" onClick={onVideo} className={`${base} text-nogo transition-colors hover:border-nogo`}>
-          Replay failed · retry
-        </button>
-      );
-    case "unavailable":
-      return <span className="text-xs text-haze">Replay unavailable</span>;
-    default:
-      return null;
-  }
-}
-
-/** The user's own doodle in chalk on night, for when there's no render to show. */
+/** The user's own doodle in chalk on night. */
 function SketchView({ strokes, name }: { strokes: Stroke[]; name: string }) {
   const lines = strokes.map((s) => s.points.map(([x, y]) => [x * NAPKIN_ASPECT, y] as const)).filter((l) => l.length > 0);
   const xs = lines.flat().map((p) => p[0]);
@@ -301,64 +266,21 @@ function SketchView({ strokes, name }: { strokes: Stroke[]; name: string }) {
   );
 }
 
-function RenderFrame({
-  url,
-  pending,
-  strokes,
-  name,
-  video,
-}: {
-  url: string | null;
-  pending: boolean;
-  strokes: Stroke[];
-  name: string;
-  video: ReplayState;
-}) {
-  const [failed, setFailed] = useState<string | null>(null);
-  const show = url !== null && failed !== url;
-  const playing = video.phase === "done";
-  const sketch = !playing && !show && (!pending || (url !== null && failed === url));
+function SketchFrame({ strokes, name, label }: { strokes: Stroke[]; name: string; label: string }) {
   return (
     <figure className="relative border-b border-rule sm:border-b-0 sm:border-r">
       <div className="relative aspect-[4/3] h-full w-full overflow-hidden sm:aspect-auto sm:min-h-[16rem]">
-        {playing ? (
-          <video
-            key={video.url}
-            src={video.url}
-            autoPlay
-            muted
-            loop
-            playsInline
-            aria-label={`Grok Imagine mission replay of ${name}`}
-            className="ls-fade absolute inset-0 h-full w-full object-cover"
-          />
-        ) : show ? (
-          // Grok Imagine URLs are remote and short-lived; next/image would need them allow-listed.
-          // eslint-disable-next-line @next/next/no-img-element
-          <img
-            key={url}
-            src={url}
-            alt={`Grok Imagine render of ${name}`}
-            className="ls-fade absolute inset-0 h-full w-full object-cover"
-            onError={() => setFailed(url)}
-          />
-        ) : sketch ? (
-          <SketchView strokes={strokes} name={name} />
-        ) : (
-          <div className="absolute inset-0 flex items-center justify-center bg-[repeating-linear-gradient(135deg,rgba(255,255,255,0.03)_0_10px,transparent_10px_20px)]">
-            <span className="ls-pending text-xs font-semibold uppercase tracking-[0.18em] text-haze">Render pending</span>
-          </div>
-        )}
+        <SketchView strokes={strokes} name={name} />
       </div>
       <figcaption className="absolute left-3 top-3 rounded-[3px] bg-umbra/75 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-[0.16em] text-haze">
-        {playing ? "Grok Imagine replay" : sketch ? "Napkin sketch" : "Grok Imagine render"}
+        {label}
       </figcaption>
     </figure>
   );
 }
 
 /** Mission mode: what happened on the real flight, what changed, and how it came back. */
-function Debrief({ mission, renderUrl, renderPending, strokes, design, video, onDone, onFixRetry, trace }: EndCardProps & { mission: HistoricMission }) {
+function Debrief({ mission, strokes, sketchLabel, design, onDone, onFixRetry, trace }: EndCardProps & { mission: HistoricMission }) {
   const lost = mission.outcome === "lost";
   const retry = lost && onFixRetry ? onFixRetry : null;
   // Real recorded dialog from the flight, in order.
@@ -397,7 +319,7 @@ function Debrief({ mission, renderUrl, renderPending, strokes, design, video, on
           </div>
         )}
         <div className="grid sm:grid-cols-[minmax(0,14rem)_1fr]">
-          <RenderFrame url={renderUrl} pending={renderPending} strokes={strokes} name={design.name} video={video} />
+          <SketchFrame strokes={strokes} name={design.name} label={sketchLabel} />
           <div className="flex min-w-0 flex-col justify-center p-5 sm:p-7">
             <div className="text-sm text-haze">
               {mission.vehicle} · {mission.mission} · {mission.date} · {mission.site}

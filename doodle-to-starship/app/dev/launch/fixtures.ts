@@ -262,13 +262,6 @@ export const FIXTURES: LaunchFixture[] = [
   },
 ];
 
-/** Stand-in for the Grok Imagine outcome image. */
-export const FIXTURE_RENDER =
-  "data:image/svg+xml;utf8," +
-  encodeURIComponent(
-    `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 400"><defs><linearGradient id="s" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#05070d"/><stop offset="1" stop-color="#0b1a33"/></linearGradient><radialGradient id="f" cx=".5" cy=".75" r=".5"><stop offset="0" stop-color="#ffb347"/><stop offset=".4" stop-color="#ff5a1f" stop-opacity=".7"/><stop offset="1" stop-color="#ff5a1f" stop-opacity="0"/></radialGradient></defs><rect width="400" height="400" fill="url(#s)"/><circle cx="200" cy="900" r="620" fill="#0f2c4d" stroke="#6eaaff" stroke-width="4"/><rect width="400" height="400" fill="url(#f)" opacity=".5"/><path d="M200 70 L225 130 L225 250 L175 250 L175 130 Z" fill="#f4f1ea"/><path d="M188 250 L200 330 L212 250 Z" fill="#ffb347"/><text x="200" y="380" font-family="monospace" font-size="16" fill="#ffffff99" text-anchor="middle">fixture render</text></svg>`,
-  );
-
 function real(id: string, title: string, strokes: Stroke[], destination: Design["destination"], tweak?: (d: Design) => Design): LaunchFixture | null {
   try {
     const read = readFromGeometry(strokes, destination);
@@ -314,13 +307,6 @@ export const SAMPLE_RECAP: Recap = {
     { text: "Fins add drag above Max-Q; the real Falcon 9 uses grid fins only for landing" },
   ],
 };
-
-/** Stand-in for a concept render "isolated on pure black", in the same 3:4 frame as ROCKET_STROKES. */
-export const VEHICLE_FIXTURE =
-  "data:image/svg+xml;utf8," +
-  encodeURIComponent(
-    `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 300 400"><defs><linearGradient id="m" x1="0" x2="1"><stop offset="0" stop-color="#6f7782"/><stop offset=".45" stop-color="#e9edf2"/><stop offset="1" stop-color="#7b838e"/></linearGradient></defs><rect width="300" height="400" fill="#000"/><path d="M118 120 Q150 10 182 120 Z" fill="url(#m)"/><rect x="118" y="120" width="64" height="88" fill="url(#m)"/><rect x="118" y="208" width="64" height="4" fill="#3a3f46"/><rect x="118" y="212" width="64" height="108" fill="url(#m)"/><circle cx="150" cy="148" r="9" fill="#1b2430" stroke="#c9d1db" stroke-width="2"/><path d="M118 264 L97 312 L97 340 L118 320 Z" fill="#9aa3ad"/><path d="M182 264 L203 312 L203 340 L182 320 Z" fill="#9aa3ad"/><path d="M131 320 L126 338 L174 338 L169 320 Z" fill="#4a5058"/></svg>`,
-  );
 
 /** A stand-in historic mission for the debrief card. */
 export const SAMPLE_MISSION: HistoricMission = {

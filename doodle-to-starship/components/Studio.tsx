@@ -1295,9 +1295,6 @@ export default function Studio() {
           reading={{ ...reading, design }}
           analysis={analysis}
           trace={flight.trace}
-          renderUrl={flight.renderUrl}
-          renderState={flight.renderState}
-          vehicleImageUrl={concept.url}
           napkinRect={flight.napkinRect}
           onEvent={(event) => {
             setNarration(calloutFor(event, design, flight.trace));

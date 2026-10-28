@@ -15,12 +15,11 @@ import type {
 } from "@/lib/design";
 import { BOUNDARIES, FAR_MARKS, LAYERS, ladderPos, ladderTop } from "./launch/atmosphere";
 import { PenumbraLockup } from "@/components/PenumbraLogo";
-import { cutoutBlack } from "@/lib/cutout";
+import { templateById } from "@/lib/templates";
 import { createLaunchAudio, isLaunchAudioMuted, setLaunchAudioMuted, unlockLaunchAudio } from "./launch/audio";
 import EndCard from "./launch/EndCard";
 import { flightStats, planFor, startLaunch, type LaunchHandle, type NapkinRect } from "./launch/engine";
 import type { CaptionCue, Crossing, Finale, Plan, Tone } from "./launch/plan";
-import { useReplay, type ReplayState } from "./launch/useReplay";
 
 // The narrator can share the launch's mission-control tones, and the LAUNCH button
 // should call unlockLaunchAudio() in its click handler so sound can start (Safari).
@@ -34,14 +33,6 @@ export interface LaunchSceneProps {
   analysis: Analysis;
   /** From simulateFlight() in @/lib/physics. */
   trace: FlightTrace;
-  /** Grok Imagine outcome image; may arrive late or never. */
-  renderUrl: string | null;
-  /**
-   * Optional: where the render stands. "loading" keeps the end card's frame pending; "done"
-   * or "none" with no URL shows the user's sketch instead. Without it, the sketch takes
-   * over if no URL has arrived ~20 s after the launch started.
-   */
-  renderState?: "loading" | "done" | "none";
   /** Fired as each trace event plays. */
   onEvent?: (e: FlightEvent) => void;
   /** "Back to the napkin". */
@@ -51,12 +42,6 @@ export interface LaunchSceneProps {
    * starts exactly where it was drawn. Without it the scene starts from a centered 3:4 box.
    */
   napkinRect?: NapkinRect | null;
-  /**
-   * Optional: a picture of the vehicle "isolated on pure black", in the same 3:4 frame as the
-   * strokes. When it loads, the launch flies it (black cut out) instead of the chalk strokes,
-   * split at the same stage line. Read live; if it fails, the strokes fly.
-   */
-  vehicleImageUrl?: string | null;
   /** Optional: what to try next, shown on the end card. Read live, so it can arrive late. */
   recap?: Recap | null;
   /** Optional: apply an improvement's fix, re-check and relaunch (the studio remounts the scene). */
@@ -104,10 +89,8 @@ const KEYFRAMES = `
 .ls-rise { animation: ls-rise 0.6s cubic-bezier(.2,.8,.2,1) both; }
 @keyframes ls-fade { from { opacity: 0; } to { opacity: 1; } }
 .ls-fade { animation: ls-fade 0.6s ease-out both; }
-@keyframes ls-pending { 0%, 100% { opacity: 0.45; } 50% { opacity: 0.9; } }
 @keyframes ls-hint { 0%, 80% { opacity: 1; } 100% { opacity: 0; } }
 .ls-hint { animation: ls-hint 9s ease-in both; }
-.ls-pending { animation: ls-pending 1.8s ease-in-out infinite; }
 @keyframes ls-transcript { 0% { opacity: 0; transform: translateY(6px); } 8% { opacity: 1; transform: none; } 88% { opacity: 1; } 100% { opacity: 0; } }
 .ls-transcript { animation: ls-transcript 3.2s ease-out forwards; }
 `;
@@ -181,14 +164,10 @@ export default function LaunchScene(props: LaunchSceneProps) {
     window.addEventListener("penumbra:mute", onMuteEvent);
     return () => window.removeEventListener("penumbra:mute", onMuteEvent);
   }, []);
-  // Lives out here so a paid video job survives "fly again".
-  const replay = useReplay(props.renderUrl, props.trace.outcome ?? props.analysis.verdict);
   return (
     <LaunchRun
       key={run}
       {...props}
-      video={replay.state}
-      onVideo={replay.start}
       onReplay={() => setRun((r) => r + 1)}
       muted={muted}
       speed={speed}
@@ -204,8 +183,6 @@ export default function LaunchScene(props: LaunchSceneProps) {
 }
 
 interface RunProps extends LaunchSceneProps {
-  video: ReplayState;
-  onVideo: () => void;
   onReplay: () => void;
   muted: boolean;
   onMute: () => void;
@@ -218,7 +195,6 @@ function LaunchRun(props: RunProps) {
   const [input] = useState(() => ({
     templateId: props.templateId,
     stageBands: props.stageBands,
-    vehicleExpected: !!props.vehicleImageUrl,
     mission: props.mission,
     napkinRect: props.napkinRect,
     strokes: props.strokes,
@@ -250,12 +226,6 @@ function LaunchRun(props: RunProps) {
   const [finale, setFinale] = useState<Finale | null>(null);
   const [ended, setEnded] = useState(false);
   const stats = useMemo(() => flightStats(input.trace), [input]);
-  const [renderGaveUp, setRenderGaveUp] = useState(false);
-  useEffect(() => {
-    const h = window.setTimeout(() => setRenderGaveUp(true), 20_000);
-    return () => window.clearTimeout(h);
-  }, []);
-  const renderPending = props.renderState ? props.renderState === "loading" : !renderGaveUp;
   const plan = useMemo(() => planFor(input), [input]);
   const marks = useMemo(() => milestones(plan), [plan]);
 
@@ -294,32 +264,6 @@ function LaunchRun(props: RunProps) {
       handle.current = null;
     };
   }, [input]);
-
-  // The vehicle picture, black cut out, swapped in for the strokes as soon as it's ready.
-  useEffect(() => {
-    const url = props.vehicleImageUrl;
-    if (!url) return;
-    let live = true;
-    cutoutBlack(url)
-      .then(
-        (src) =>
-          new Promise<HTMLImageElement>((resolve, reject) => {
-            const img = new Image();
-            img.onload = () => resolve(img);
-            img.onerror = () => reject(new Error("cutout failed to decode"));
-            img.src = src;
-          }),
-      )
-      .then((img) => {
-        if (live) handle.current?.setVehicle(img);
-      })
-      .catch(() => {
-        // Keep flying the chalk strokes.
-      });
-    return () => {
-      live = false;
-    };
-  }, [props.vehicleImageUrl]);
 
   useEffect(() => {
     handle.current?.setSpeed(props.speed);
@@ -502,11 +446,8 @@ function LaunchRun(props: RunProps) {
           analysis={input.analysis}
           maxAltKm={stats.maxAltKm}
           maxSpeedMps={stats.maxSpeedMps}
-          renderUrl={props.renderUrl}
-          renderPending={renderPending}
           strokes={input.strokes}
-          video={props.video}
-          onVideo={props.onVideo}
+          sketchLabel={input.templateId ? `Your ${templateById(input.templateId).name}` : "Napkin sketch"}
           onDone={props.onDone}
           onReplay={props.onReplay}
           recap={props.recap}
