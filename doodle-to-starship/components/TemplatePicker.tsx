@@ -19,13 +19,6 @@ export function payloadText(kg: number): string {
 /** "Falcon 9 Block 5" → "Falcon 9": the name people use in a sentence. */
 export const shortName = (name: string) => name.replace(/\s+Block\s+\d+$/i, "");
 
-/** A payload capacity rounded down to what payloadText shows, so the most it can carry always still flies. */
-export function floorShown(kg: number): number {
-  if (kg >= 100_000) return Math.floor(kg / 1_000) * 1_000;
-  if (kg >= 1_000) return Math.floor(kg / 100) * 100;
-  return Math.max(0, Math.floor(kg));
-}
-
 /** The real rocket as drawn on the napkin, at its true proportions. */
 function Outline({ template }: { template: RocketTemplate }) {
   const strokes = useMemo(() => drawTemplate(template, template.design).strokes, [template]);
