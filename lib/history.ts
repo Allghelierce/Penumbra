@@ -17,6 +17,7 @@ import type {
   SketchReading,
   Stroke,
 } from "./design";
+import { NAPKIN_ASPECT } from "./design";
 import { ALL_MISSIONS } from "./mission-catalog";
 import { historicMarks } from "./redpen";
 import { readFromGeometry } from "./sketch/geometry";
@@ -115,7 +116,7 @@ function sampleAt(timeline: HistoricMission["timeline"], tS: number) {
 // that came back.
 
 /** The successful flight that followed each loss. */
-export const COMEBACK: Record<string, string> = { "falcon1-f1": "falcon1-f4", crs7: "og2", ift1: "ift5" };
+export const COMEBACK: Record<string, string> = { "falcon1-f1": "falcon1-f4", crs7: "og2", ift1: "ift5", "electron-f1": "electron-f2" };
 
 /** The comeback flight for a loss, looked up in the full mission catalog. */
 export function comebackFor(m: HistoricMission): HistoricMission | null {
@@ -136,11 +137,16 @@ export function fixNote(m: HistoricMission): string {
     crs7: "FIX: stronger struts",
     // The pad had no flame deflector; this is the change that let Starship fly again.
     ift1: "FIX: flame deflector",
+    // The rocket was fine: the fix was a contractor's ground receiver, set up with error correction.
+    "electron-f1": "FIX: ground receiver",
   };
   return notes[m.id] ?? "FIX: redesign";
 }
 
 type Box = [number, number, number, number];
+
+/** Napkin coordinates are normalized on both axes of a 3:4 napkin, so a round arc squashes its y by this. */
+const NAPKIN_Y = NAPKIN_ASPECT;
 
 /** A few hand-drawn strokes, all marked detail, that draw the fix into the failed part's box. */
 export function fixStrokes(m: HistoricMission, reading: SketchReading): Stroke[] {
@@ -203,6 +209,40 @@ export function fixStrokes(m: HistoricMission, reading: SketchReading): Stroke[]
     }
     return strokes;
   }
+  if (m.id === "electron-f1") {
+    // Nothing on the rocket changed: a tracking dish on the ground beside it, its link restored,
+    // with radio waves aimed up at the stage that was flying when the data was lost.
+    const whole = partBox(reading.parts, () => true) ?? box;
+    const [wx, wy, ww, wh] = whole;
+    // Right of the rocket when there's room: the fix note runs out to the right of the fix, so a
+    // dish on the left would put the note across the rocket.
+    const right = wx + ww + 0.12 <= 0.97;
+    const dx = right ? wx + ww + 0.07 : wx - 0.07;
+    const groundY = Math.min(0.97, wy + wh);
+    const dishY = groundY - 0.07;
+    // Aim from the dish at the middle of the failed stage, in screen-true angles (y is squashed on the napkin).
+    const aim = Math.atan2((y + h / 2 - dishY) / NAPKIN_Y, x + w / 2 - dx);
+    const rot = (u: number, v: number): Point => [
+      dx + (u * Math.cos(aim) - v * Math.sin(aim)),
+      dishY + (u * Math.sin(aim) + v * Math.cos(aim)) * NAPKIN_Y,
+    ];
+    const curve = (pts: Point[]): Stroke => ({ detail: true, points: pts.map(([px, py]) => clampPoint([px + wobble() * 0.0012, py + wobble() * 0.0012])) });
+    // The bowl: a parabola opening toward the rocket, with the feed on a strut at its focus.
+    const bowl = curve(Array.from({ length: 11 }, (_, i): Point => {
+      const v = -0.04 + (i / 10) * 0.08;
+      return rot((v * v) / 0.05 - 0.016, v);
+    }));
+    const feed = curve([rot(-0.016, 0), rot(0.028, 0)]);
+    const strokes = [bowl, feed, line([dx, dishY + 0.01], [dx, groundY], 4), line([dx - 0.022, groundY], [dx + 0.022, groundY], 3)];
+    // Three waves widening toward the stage.
+    for (const r of [0.045, 0.07, 0.095]) {
+      strokes.push(curve(Array.from({ length: 9 }, (_, i): Point => {
+        const a = -0.45 + (i / 8) * 0.9;
+        return rot(0.028 + r * Math.cos(a), r * Math.sin(a));
+      })));
+    }
+    return strokes;
+  }
   // Anything else: a reinforcing cross-hatch in the failed part.
   return [line([x + w * 0.2, y + h * 0.2], [x + w * 0.8, y + h * 0.8]), line([x + w * 0.8, y + h * 0.2], [x + w * 0.2, y + h * 0.8])];
 }
@@ -211,7 +251,9 @@ export function fixStrokes(m: HistoricMission, reading: SketchReading): Stroke[]
  * The flaw drawn into the sketch before any review, in the same graphite hand as the user's
  * lines (not detail strokes), small enough that the reader still sees the same parts:
  * falcon1-f1 a cracked, dripping fitting on the engine's fuel line; crs7 a helium bottle on one
- * cracked strut inside the stage-2 tank; ift1 crossed-out engine bells with smoke in the bay.
+ * cracked strut inside the stage-2 tank; ift1 crossed-out engine bells with smoke in the bay;
+ * electron-f13 a power cable in the second stage whose overheated connector has come apart.
+ * (electron-f1 gets none: the rocket was fine, and the fault was in a receiver on the ground.)
  */
 export function defectStrokes(m: HistoricMission, reading: SketchReading): Stroke[] {
   const failure = m.failure;
@@ -282,6 +324,32 @@ export function defectStrokes(m: HistoricMission, reading: SketchReading): Strok
       strokes.push(
         pen(Array.from({ length: 9 }, (_, i): Point => [sx + Math.sin(i * 1.4) * w * 0.025, y + h * 0.2 - (i / 8) * h * 0.55])),
       );
+    }
+    return strokes;
+  }
+  if (m.id === "electron-f13") {
+    // The power cable down the stage to the engine's electric pumps, pulled apart at a connector
+    // that overheated: the two halves sit apart with a spark between them and heat rising off them.
+    const cx = x + w * 0.62;
+    const [breakTop, breakBottom] = [y + h * 0.44, y + h * 0.56];
+    // Sized for a slim stage too: never thinner than a pen's width.
+    const cw = Math.max(w * 0.09, 0.007);
+    const block = (bx: number, top: number, bottom: number) =>
+      polyline([[bx - cw, top], [bx + cw, top], [bx + cw, bottom], [bx - cw, bottom], [bx - cw, top]], 1);
+    const strokes = [
+      // Cable from the top of the stage down to the upper half of the connector.
+      polyline([[cx, y + h * 0.08], [cx - w * 0.02, y + h * 0.25], [cx, breakTop - h * 0.04]], 3),
+      block(cx, breakTop - h * 0.04, breakTop),
+      // The lower half, pulled off to one side, and the cable on down to the pumps.
+      block(cx + w * 0.05, breakBottom, breakBottom + h * 0.04),
+      polyline([[cx + w * 0.05, breakBottom + h * 0.04], [cx + w * 0.03, y + h * 0.75], [cx + w * 0.05, y + h * 0.93]], 3),
+      // A spark across the gap.
+      polyline([[cx - w * 0.01, breakTop + h * 0.01], [cx + w * 0.04, breakTop + h * 0.04], [cx + w * 0.01, breakTop + h * 0.07], [cx + w * 0.06, breakBottom - h * 0.01]], 1),
+    ];
+    // Heat curling up off the connector.
+    for (const fx of [-0.16, -0.24]) {
+      const hx = cx + w * fx;
+      strokes.push(pen(Array.from({ length: 7 }, (_, i): Point => [hx + Math.sin(i * 1.5) * w * 0.025, breakTop + h * 0.02 - (i / 6) * h * 0.2])));
     }
     return strokes;
   }

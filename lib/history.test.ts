@@ -203,7 +203,7 @@ describe("the real missions", () => {
 });
 
 describe("fix and try again", () => {
-  it.each(HISTORIC_MISSIONS.filter((m) => COMEBACK[m.id]).map((m) => [m.id, m] as const))(
+  it.each(ALL_MISSIONS.filter((m) => COMEBACK[m.id]).map((m) => [m.id, m] as const))(
     "%s: has a comeback flight, a short fix note and detail strokes in the failed part",
     (_, m) => {
       const comeback = comebackFor(m);
@@ -270,7 +270,7 @@ describe("the flaw drawn into the sketch", () => {
 
 describe("review fixes", () => {
   it("fits each featured fix note beside its fix on the 300-unit napkin", () => {
-    for (const lost of HISTORIC_MISSIONS.filter((m) => COMEBACK[m.id])) {
+    for (const lost of ALL_MISSIONS.filter((m) => COMEBACK[m.id])) {
       const xs = fixStrokes(lost, historicReading(lost)).flatMap((s) => s.points.map((p) => p[0]));
       const maxX = Math.max(...xs);
       // FixOverlay writes the note from the fix's right edge when there's room there.
@@ -361,5 +361,40 @@ describe("flights on their rocket's template drawing", () => {
         }
       }
     }
+  });
+});
+
+describe("Electron's lost flights", () => {
+  const flight = (id: string) => ALL_MISSIONS.find((m) => m.id === id)!;
+
+  it("Flight 1: no flaw drawn, since the rocket was fine; the fix is a ground receiver beside it", () => {
+    const f1 = flight("electron-f1");
+    const reading = historicReading(f1);
+    expect(defectStrokes(f1, reading)).toEqual([]);
+    expect(comebackFor(f1)?.id).toBe("electron-f2");
+    expect(fixNote(f1)).toBe("FIX: ground receiver");
+    // The dish stands on the ground beside the rocket, not on it.
+    const rocket = reading.parts.reduce((x1, p) => Math.max(x1, p.box[0] + p.box[2]), 0);
+    const dish = fixStrokes(f1, reading)[0].points;
+    expect(Math.min(...dish.map((pt) => pt[0]))).toBeGreaterThan(rocket);
+  });
+
+  it("Flight 13: a broken power connector drawn inside the second stage", () => {
+    const f13 = flight("electron-f13");
+    const reading = historicReading(f13);
+    const tank = reading.parts.find((p) => p.kind === "tank" && p.stageIndex === 1)!;
+    const flaw = defectStrokes(f13, reading);
+    expect(flaw.length).toBeGreaterThanOrEqual(5);
+    const [x, y, w, h] = tank.box;
+    for (const stroke of flaw) {
+      expect(stroke.detail).toBeUndefined();
+      for (const [px, py] of stroke.points) {
+        expect(px).toBeGreaterThanOrEqual(x - 0.01);
+        expect(px).toBeLessThanOrEqual(x + w + 0.01);
+        expect(py).toBeGreaterThanOrEqual(y - 0.01);
+        expect(py).toBeLessThanOrEqual(y + h + 0.01);
+      }
+    }
+    expect(defectStrokes(f13, reading)).toEqual(flaw);
   });
 });
