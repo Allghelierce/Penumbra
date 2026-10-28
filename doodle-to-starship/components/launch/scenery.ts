@@ -129,11 +129,13 @@ export function drawSky(ctx: CanvasRenderingContext2D, W: number, H: number, _pa
   drawBirds(ctx, W, H, alt);
   drawHelicopter(ctx, W, H, alt);
   drawStorm(ctx, W, H, alt, centerY);
+  drawContrails(ctx, W, H, alt, centerY);
   drawCirrus(ctx, W, H, alt, centerY);
   drawNacreous(ctx, W, H, alt, centerY);
   drawScienceBalloon(ctx, W, H, alt, centerY);
   drawBlueJet(ctx, W, H, alt, centerY);
   drawSprite(ctx, W, H, alt, centerY);
+  drawSoundingRocket(ctx, W, H, alt, centerY);
   drawNoctilucent(ctx, W, H, alt, centerY);
   drawElve(ctx, W, H, alt, centerY);
   drawStarlinkTrain(ctx, W, H, alt, centerY);
@@ -162,7 +164,12 @@ type LandmarkIcon =
   | "sputnik"
   | "capsule"
   | "telescope"
-  | "train";
+  | "train"
+  | "belt"
+  | "gps"
+  | "geo"
+  | "shield"
+  | "moon";
 
 /**
  * Famous things at their real heights, down the left edge, so the climb has a sense of scale.
@@ -200,6 +207,14 @@ const LANDMARKS: { km: number; label: string; icon: LandmarkIcon }[] = [
   { km: 327, label: "Gagarin's Vostok 1", icon: "capsule" },
   { km: 540, label: "Hubble", icon: "telescope" },
   { km: 550, label: "Starlink", icon: "train" },
+  // Radiation trapped by Earth's magnetic field, about 1,000 to 6,000 km up.
+  { km: 3000, label: "Inner Van Allen belt", icon: "belt" },
+  { km: 20200, label: "GPS satellites", icon: "gps" },
+  // One orbit a day, so a satellite here hangs over the same spot.
+  { km: 35786, label: "Geostationary orbit", icon: "geo" },
+  // The magnetopause on the side facing the Sun, about 10 Earth radii out.
+  { km: 57000, label: "Earth's magnetic shield ends", icon: "shield" },
+  { km: 384400, label: "The Moon's orbit", icon: "moon" },
 ];
 
 let landmarkFont: string | null = null;
@@ -519,6 +534,57 @@ function drawLandmarkIcon(ctx: CanvasRenderingContext2D, icon: LandmarkIcon, x: 
     case "train":
       for (let i = 0; i < 4; i++) ctx.fillRect(x - 7 + i * 4, y + 3 - i * 2, 2, 2);
       return;
+    case "belt":
+      // A doughnut of trapped particles around a small Earth.
+      ctx.strokeStyle = "rgb(190,150,255)";
+      ctx.lineWidth = 1.3;
+      ctx.ellipse(x, y, 8, 3.6, 0, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.fillStyle = "rgb(90,150,230)";
+      ctx.beginPath();
+      ctx.arc(x, y, 2.6, 0, Math.PI * 2);
+      ctx.fill();
+      return;
+    case "gps":
+      ctx.fillRect(x - 2.5, y - 2.5, 5, 5);
+      ctx.fillRect(x - 8.5, y - 1.5, 5, 3);
+      ctx.fillRect(x + 3.5, y - 1.5, 5, 3);
+      return;
+    case "geo":
+      // A ring of orbit with a satellite parked on it.
+      ctx.lineWidth = 1.1;
+      ctx.arc(x, y, 6.5, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.fillStyle = "rgb(90,150,230)";
+      ctx.beginPath();
+      ctx.arc(x, y, 2.4, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.fillStyle = "#ffffff";
+      ctx.fillRect(x + 4.6, y - 6.4, 3.4, 3.4);
+      return;
+    case "shield":
+      // Field lines bowing around Earth, squashed on the sunward side.
+      ctx.lineWidth = 1.1;
+      ctx.moveTo(x + 2, y - 7);
+      ctx.quadraticCurveTo(x - 9, y, x + 2, y + 7);
+      ctx.moveTo(x + 4, y - 4.5);
+      ctx.quadraticCurveTo(x - 4, y, x + 4, y + 4.5);
+      ctx.stroke();
+      ctx.fillStyle = "rgb(90,150,230)";
+      ctx.beginPath();
+      ctx.arc(x + 5, y, 2.4, 0, Math.PI * 2);
+      ctx.fill();
+      return;
+    case "moon":
+      ctx.fillStyle = "rgb(214,210,196)";
+      ctx.arc(x, y, 5.5, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.fillStyle = "rgba(120,116,104,0.8)";
+      ctx.beginPath();
+      ctx.arc(x - 1.8, y - 1.5, 1.4, 0, Math.PI * 2);
+      ctx.arc(x + 2, y + 1.6, 1.1, 0, Math.PI * 2);
+      ctx.fill();
+      return;
   }
 }
 
@@ -802,6 +868,107 @@ function drawStorm(ctx: CanvasRenderingContext2D, W: number, H: number, alt: num
   ctx.stroke();
   ctx.restore();
   ctx.globalAlpha = base;
+}
+
+/** Old contrails near 10.5 km, right of the storm: [from x, from dy, to x, to dy (fractions), width px]. */
+const CONTRAILS: [number, number, number, number, number][] = [
+  [0.42, 0.03, 0.83, -0.05, 4],
+  [0.5, -0.07, 0.84, -0.01, 3],
+];
+
+/** Contrails left by earlier flights, spread by the wind into soft bands around a thinner core. */
+function drawContrails(ctx: CanvasRenderingContext2D, W: number, H: number, alt: number, centerY: number) {
+  const y = featureY(alt, 10.5, centerY, H);
+  if (y < -H * 0.15 || y > H + H * 0.15) return;
+  const base = ctx.globalAlpha;
+  ctx.lineCap = "round";
+  ctx.strokeStyle = "#ffffff";
+  for (const [x0, dy0, x1, dy1, w] of CONTRAILS) {
+    for (const [width, a] of [
+      [w * 2.4, 0.12],
+      [w * 0.7, 0.3],
+    ] as const) {
+      ctx.globalAlpha = base * a;
+      ctx.lineWidth = width;
+      ctx.beginPath();
+      ctx.moveTo(W * x0, y + H * dy0);
+      ctx.lineTo(W * x1, y + H * dy1);
+      ctx.stroke();
+    }
+  }
+  ctx.globalAlpha = base;
+}
+
+/**
+ * A sounding rocket arcing up through the mesosphere. The layer is too high for balloons and
+ * too low for satellites, so brief rocket flights like this are the only way to sample it.
+ */
+function drawSoundingRocket(ctx: CanvasRenderingContext2D, W: number, H: number, alt: number, centerY: number) {
+  const y = featureY(alt, 66, centerY, H);
+  if (y < -H * 0.35 || y > H + H * 0.3) return;
+  const base = ctx.globalAlpha;
+  const x = W * 0.68;
+  const p0: Vec = [x - W * 0.07, y + H * 0.34];
+  const c: Vec = [x - W * 0.035, y + H * 0.09];
+  const at = (f: number): Vec => [
+    (1 - f) * (1 - f) * p0[0] + 2 * (1 - f) * f * c[0] + f * f * x,
+    (1 - f) * (1 - f) * p0[1] + 2 * (1 - f) * f * c[1] + f * f * y,
+  ];
+  ctx.save();
+  ctx.lineCap = "round";
+  ctx.strokeStyle = "#ffffff";
+  // The smoke trail: older smoke lower down, wider and fainter.
+  for (let i = 0; i < 16; i++) {
+    const [ax, ay] = at(i / 16);
+    const [bx, by] = at((i + 1) / 16);
+    const f = (i + 1) / 16;
+    ctx.globalAlpha = base * (0.08 + 0.4 * f);
+    ctx.lineWidth = 5 - 3.5 * f;
+    ctx.beginPath();
+    ctx.moveTo(ax, ay);
+    ctx.lineTo(bx, by);
+    ctx.stroke();
+  }
+  // The rocket, pointing along its path, with its motor lit.
+  ctx.translate(x, y);
+  ctx.rotate(Math.atan2(y - c[1], x - c[0]));
+  ctx.globalAlpha = base;
+  ctx.fillStyle = "rgb(255,170,90)";
+  ctx.beginPath();
+  ctx.moveTo(-9, -1.2);
+  ctx.lineTo(-15, 0);
+  ctx.lineTo(-9, 1.2);
+  ctx.closePath();
+  ctx.fill();
+  ctx.fillStyle = "#ffffff";
+  ctx.fillRect(-9, -1.6, 13, 3.2);
+  ctx.beginPath();
+  ctx.moveTo(4, -1.6);
+  ctx.lineTo(8, 0);
+  ctx.lineTo(4, 1.6);
+  ctx.closePath();
+  ctx.moveTo(-9, -1.6);
+  ctx.lineTo(-11, -4);
+  ctx.lineTo(-6, -1.6);
+  ctx.moveTo(-9, 1.6);
+  ctx.lineTo(-11, 4);
+  ctx.lineTo(-6, 1.6);
+  ctx.fill();
+  ctx.restore();
+  // Its label, in the balloons' style, with the reason it's here.
+  ctx.save();
+  ctx.globalAlpha = base;
+  ctx.font = `700 10px ${displayFont()}`;
+  if ("letterSpacing" in ctx) (ctx as CanvasRenderingContext2D & { letterSpacing: string }).letterSpacing = "1.4px";
+  ctx.fillStyle = "#ffffff";
+  ctx.textAlign = "left";
+  ctx.textBaseline = "middle";
+  ctx.fillText("SOUNDING ROCKET · 66 KM", x + 14, y - 6);
+  ctx.globalAlpha = base * 0.7;
+  ctx.font = `500 11px ${displayFont()}`;
+  if ("letterSpacing" in ctx) (ctx as CanvasRenderingContext2D & { letterSpacing: string }).letterSpacing = "0.3px";
+  ctx.fillText("Too high for balloons, too low for satellites", x + 14, y + 8);
+  ctx.restore();
 }
 
 /** A lens with a fuller top, for nacreous clouds. */
@@ -2066,7 +2233,9 @@ const AURORA_RAYS: [number, number, number, number][] = (() => {
  * Thermosphere aurora: flat, stylized curtains on the limb, k 0..1. Each is green with a sharp
  * bright lower edge that fades upward, a violet fringe on top, and uneven vertical rays.
  */
-export function drawAurora(ctx: CanvasRenderingContext2D, W: number, H: number, k: number, t: number, base: number) {
+export function drawAurora(ctx: CanvasRenderingContext2D, W: number, H: number, k: number, t: number, base: number, altKm?: number) {
+  // Far out, the curtains would hang off a globe; they fade between 1,500 and 3,000 km.
+  if (altKm !== undefined) k *= clamp01((3000 - altKm) / 1500);
   if (k <= 0.01) return;
   const wave = (x: number, ph: number, amp: number) => Math.sin(x * 0.006 + ph) * amp + Math.sin(x * 0.017 + ph * 1.7) * amp * 0.35;
   const ribbon = (top: (x: number) => number, bottom: (x: number) => number) => {
@@ -2368,6 +2537,17 @@ export interface CityLight {
 }
 
 /** Cities as clusters of lights, brightest at the core, strung together by highways, plus scattered towns. */
+/** Cloud bands on the sunlit crescent: [radius as a fraction of the globe's, angle, length, width]. */
+const DAY_CLOUDS: [number, number, number, number][] = [
+  [0.95, -0.55, 0.22, 0.018],
+  [0.9, -0.2, 0.3, 0.022],
+  [0.86, 0.18, 0.26, 0.016],
+  [0.93, 0.45, 0.2, 0.02],
+  [0.8, -0.38, 0.18, 0.014],
+  [0.76, 0.02, 0.24, 0.018],
+  [0.82, 0.62, 0.16, 0.014],
+];
+
 /** Night-side storm cells: [angle from the top of the globe, depth below the limb (of H), flash phase]. */
 const NIGHT_STORMS: [number, number, number][] = [
   [-0.12, 0.035, 0],
@@ -2407,8 +2587,21 @@ export function makeCityLights(rand: () => number): CityLight[] {
 /** Screen y of the top of Earth's limb at this altitude (lift raises it for the orbit finale). */
 export function earthTopY(H: number, altKm: number, lift: number): number {
   const k = clamp01((altKm - 1) / 180);
-  return H * (1.03 - 0.17 * Math.pow(k, 0.6) - 0.1 * lift);
+  return H * (1.03 - 0.17 * Math.pow(k, 0.6) - 0.1 * lift - 0.16 * globeLift(altKm));
 }
+
+const EARTH_RADIUS_KM = 6371;
+
+/** tan of Earth's angular radius seen from `h` km up. */
+const earthTan = (h: number) => EARTH_RADIUS_KM / Math.sqrt((EARTH_RADIUS_KM + h) ** 2 - EARTH_RADIUS_KM ** 2);
+
+/** Earth's apparent size relative to 181 km, from its real angular size: 1 up to there, ~0.06 at the Moon. */
+export function earthRecede(altKm: number): number {
+  return altKm <= 181 ? 1 : earthTan(altKm) / earthTan(181);
+}
+
+/** How far the shrinking globe has risen to stay above the readouts: 0 below 1,000 km, 1 by about 16,000 km. */
+const globeLift = (altKm: number) => clamp01((Math.log10(Math.max(altKm, 1)) - 3) / 1.2);
 
 export function drawEarth(
   ctx: CanvasRenderingContext2D,
@@ -2422,28 +2615,36 @@ export function drawEarth(
 ) {
   const k = clamp01((altKm - 1) / 180);
   if (k <= 0 && lift <= 0) return;
-  const R = W * (14 - 12.4 * Math.pow(Math.max(k, lift * 0.9), 0.55));
+  // Past 181 km the limb curves in by Earth's real angular size, until it's a whole globe
+  // (about 10,000 km), then a ball (about 84 px at GEO) and a dot by the Moon's distance.
+  const shrink = earthRecede(altKm);
+  const R = W * (14 - 12.4 * Math.pow(Math.max(k, lift * 0.9), 0.55)) * shrink;
   const top = earthTopY(H, altKm, lift);
   const cx = W / 2;
   const cy = top + R;
-  const span = Math.min(Math.PI / 2, Math.asin(Math.min(1, (W * 0.75) / R)) + 0.05);
+  const span = R < W * 0.75 ? Math.PI : Math.min(Math.PI / 2, Math.asin(Math.min(1, (W * 0.75) / R)) + 0.05);
   const a0 = -Math.PI / 2 - span;
   const a1 = -Math.PI / 2 + span;
+  // Depths below the limb and the atmosphere's thickness shrink with the globe.
+  const deep = Math.min(1, R / (1.6 * W));
+  const thin = Math.min(1, Math.max(0.25, R / (H * 0.5)));
+  const turn = Math.min(8, (W / R) * 4);
+
+  // How much of the sunlit side shows: none on the limb views, a crescent once the whole globe does.
+  const day = clamp01((0.45 - shrink) / 0.3);
 
   // Surface.
   ctx.fillStyle = "#0b1d36";
   ctx.beginPath();
-  ctx.arc(cx, cy, R, a0, a1);
-  ctx.lineTo(W + 10, H + 10);
-  ctx.lineTo(-10, H + 10);
-  ctx.closePath();
+  ctx.arc(cx, cy, R, 0, Math.PI * 2);
   ctx.fill();
 
-  // City lights, turning slowly with the planet.
+  // City lights, turning slowly with the planet; on the globe they spread across the night side.
   ctx.fillStyle = "rgb(255,205,140)";
   for (const l of lights) {
-    const a = l.a + spin;
-    const r = R - l.d * H;
+    const a = (l.a + spin) * (1 + day * 0.9);
+    const r = (R - l.d * H * deep) * (1 - day) + R * (1 - l.d * 4.5) * day;
+    if (r < 1) continue;
     const x = cx + r * Math.sin(a);
     const y = cy - r * Math.cos(a);
     if (x < 0 || x > W || y > H) continue;
@@ -2454,14 +2655,16 @@ export function drawEarth(
 
   // Moonlit cloud swirls on the night side, turning with the planet.
   ctx.strokeStyle = "rgb(150,170,200)";
-  ctx.lineWidth = 2;
+  ctx.lineWidth = Math.max(1, 2 * thin);
   ctx.lineCap = "round";
   for (let i = 0; i < 7; i++) {
-    const mid = -Math.PI / 2 + (i - 3) * 0.06 * (W / R) * 4 + spin * 0.9 + Math.sin(i * 5.1) * 0.03;
-    const len = (0.015 + 0.012 * Math.abs(Math.sin(i * 2.3))) * (W / R) * 4;
+    const mid = -Math.PI / 2 + (i - 3) * 0.06 * turn + spin * 0.9 + Math.sin(i * 5.1) * 0.03;
+    const len = (0.015 + 0.012 * Math.abs(Math.sin(i * 2.3))) * turn;
+    const r = R - H * (0.03 + 0.025 * (i % 3)) * deep;
+    if (r < 1) continue;
     ctx.globalAlpha = 0.06 + 0.03 * (i % 2);
     ctx.beginPath();
-    ctx.arc(cx, cy, R - H * (0.03 + 0.025 * (i % 3)), mid - len, mid + len);
+    ctx.arc(cx, cy, r, mid - len, mid + len);
     ctx.stroke();
   }
   ctx.globalAlpha = 1;
@@ -2474,17 +2677,51 @@ export function drawEarth(
     const f = (t * 0.8 + ph) % 2.6;
     if (f > 0.16) continue;
     const a = a0 + spin * 0.9;
-    const r = R - d * H;
+    const r = R - d * H * deep;
+    if (r < 1) continue;
     const x = cx + r * Math.sin(a);
     const y = cy - r * Math.cos(a);
     if (x < 0 || x > W || y > H) continue;
     // Two quick pulses, the second fainter.
     ctx.globalAlpha = (f < 0.06 ? 0.55 : f > 0.09 ? 0.3 : 0.08) * (0.4 + 0.6 * k);
     ctx.beginPath();
-    ctx.ellipse(x, y, 8, 3.5, a, 0, Math.PI * 2);
+    ctx.ellipse(x, y, 8 * thin, 3.5 * thin, a, 0, Math.PI * 2);
     ctx.fill();
   }
   ctx.restore();
+
+  // Once the whole globe shows, its sunlit side: a crescent of daylit ocean and cloud facing the
+  // Sun, with the orange line of sunset along the terminator.
+  if (day > 0) {
+    ctx.save();
+    // The globe, minus the night side's circle: what's left is the crescent.
+    ctx.beginPath();
+    ctx.arc(cx, cy, R, 0, Math.PI * 2);
+    ctx.clip();
+    ctx.beginPath();
+    ctx.rect(cx - R - 2, cy - R - 2, R * 2 + 4, R * 2 + 4);
+    ctx.arc(cx - R * 0.42, cy, R * 1.04, 0, Math.PI * 2);
+    ctx.clip("evenodd");
+    ctx.globalAlpha = day;
+    ctx.fillStyle = "rgb(62,128,206)";
+    ctx.fillRect(cx - R, cy - R, R * 2, R * 2);
+    ctx.strokeStyle = "#ffffff";
+    ctx.lineCap = "round";
+    for (const [rr, a, len, w] of DAY_CLOUDS) {
+      ctx.globalAlpha = day * 0.5;
+      ctx.lineWidth = Math.max(1, R * w);
+      ctx.beginPath();
+      ctx.arc(cx, cy, R * rr, a - len / 2 + spin * 0.9, a + len / 2 + spin * 0.9);
+      ctx.stroke();
+    }
+    ctx.globalAlpha = day * 0.7;
+    ctx.strokeStyle = "rgb(255,170,110)";
+    ctx.lineWidth = Math.max(1, R * 0.025);
+    ctx.beginPath();
+    ctx.arc(cx - R * 0.42, cy, R * 1.04, -Math.PI / 2, Math.PI / 2);
+    ctx.stroke();
+    ctx.restore();
+  }
 
   // The atmosphere edge-on: thin, layered bands hugging the limb (twilight orange
   // at the bottom, then blue, fading out), each a crisp arc.
@@ -2496,10 +2733,12 @@ export function drawEarth(
   ];
   ctx.lineCap = "butt";
   for (const [off, w, color] of bands) {
+    const bw = Math.max(1, w * thin);
+    if (R + off * thin + bw / 2 < 1) continue;
     ctx.strokeStyle = color;
-    ctx.lineWidth = w;
+    ctx.lineWidth = bw;
     ctx.beginPath();
-    ctx.arc(cx, cy, R + off + w / 2, a0, a1);
+    ctx.arc(cx, cy, R + off * thin + bw / 2, a0, a1);
     ctx.stroke();
   }
 
@@ -2507,10 +2746,10 @@ export function drawEarth(
   const glow = clamp01((altKm - 90) / 60) + lift * 0.5;
   if (glow > 0) {
     ctx.strokeStyle = "rgba(120,255,170,1)";
-    ctx.lineWidth = 1.5;
+    ctx.lineWidth = Math.max(1, 1.5 * thin);
     ctx.globalAlpha = Math.min(1, glow) * 0.22;
     ctx.beginPath();
-    ctx.arc(cx, cy, R + 12, a0, a1);
+    ctx.arc(cx, cy, R + 12 * thin, a0, a1);
     ctx.stroke();
     ctx.globalAlpha = 1;
   }
@@ -2531,16 +2770,17 @@ export function drawEarth(
   }
 
   // Noctilucent clouds: electric-blue wisps riding just above the band (seen from the mesosphere up).
-  const nlc = clamp01((altKm - 50) / 30) * (1 - lift * 0.5);
+  const nlc = clamp01((altKm - 50) / 30) * (1 - lift * 0.5) * (1 - day);
   if (nlc > 0) {
     ctx.strokeStyle = "rgba(170,230,255,1)";
     ctx.lineWidth = 1;
+    const nturn = Math.min(12, (W / R) * 6);
     for (let i = 0; i < 9; i++) {
-      const mid = -Math.PI / 2 + (i - 4) * 0.035 * (W / R) * 6 + Math.sin(i * 7.3) * 0.02 + spin * 0.6;
-      const len = (0.02 + 0.015 * Math.sin(i * 3.1 + 1)) * (W / R) * 6;
+      const mid = -Math.PI / 2 + (i - 4) * 0.035 * nturn + Math.sin(i * 7.3) * 0.02 + spin * 0.6;
+      const len = (0.02 + 0.015 * Math.sin(i * 3.1 + 1)) * nturn;
       ctx.globalAlpha = nlc * (0.25 + 0.2 * Math.sin(t * 0.7 + i));
       ctx.beginPath();
-      ctx.arc(cx, cy, R + 18 + (i % 3) * 3, mid - len, mid + len);
+      ctx.arc(cx, cy, R + (18 + (i % 3) * 3) * thin, mid - len, mid + len);
       ctx.stroke();
     }
     ctx.globalAlpha = 1;

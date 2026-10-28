@@ -68,7 +68,7 @@ export default function SceneryDevPage() {
       drawSky(ctx, W, H, pal, alt, 1);
       drawStars(ctx, stars, W, H, 0, alt * 26, 0.08 + 0.92 * clamp01((alt - 8) / 45), t);
       drawOzone(ctx, W, H, alt, center);
-      drawAurora(ctx, W, H, clamp01((alt - 85) / 25), t, earthTopY(H, alt, 0) - 6);
+      drawAurora(ctx, W, H, clamp01((alt - 85) / 25), t, earthTopY(H, alt, 0) - 6, alt);
       drawBoundaries(ctx, W, H, alt, center, font, pal.chalk, 1);
       drawEarth(ctx, W, H, alt, 0, 0, lights, t);
       for (const d of decks) drawDeck(ctx, W, H, d, alt, 0, center, t, 1);
