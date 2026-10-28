@@ -129,6 +129,9 @@ export interface LaunchHandle {
   skip: () => void;
 }
 
+/** Where in the landing inset's progress the booster touches down. */
+const LAND_TOUCH = 0.86;
+
 /** Minimum real seconds between two onEvent calls, so spoken callouts never overlap. */
 export const EVENT_GAP = 1.2;
 
@@ -241,15 +244,28 @@ export function startLaunch(
   const plan = buildPlan(input.trace, input.analysis, design, pieces.length, input.mission?.id);
   /** Historic replay effects, by mission id. */
   const scenario = input.mission?.id ?? null;
-  // Booster recovery, shown picture-in-picture after first-stage separation: when the first stage
-  // is set to recover (a sketch that never says falls back to its landing legs; a template that
-  // doesn't is expendable), or at a mission timeline event that says the booster lands or is caught.
+  // Booster recovery, shown picture-in-picture: when the first stage is set to recover (a sketch
+  // that never says falls back to its landing legs; a template that doesn't is expendable), or at a
+  // mission timeline event that says the booster lands or is caught.
   const landingCue = plan.cues.find((cue) => /\b(lands|landed|landing|caught|catch)\b/i.test(cue.event.label ?? ""));
   // A real flight from history says for itself how its booster came home (a catch, or a splashdown).
   const catchMode = (input.templateId === "starship" && !input.mission) || /\b(caught|catch)\b/i.test(landingCue?.event.label ?? "");
   const recovers = design.stages?.[0]?.recover ?? (!input.templateId && !!design.features?.includes("landing-legs"));
   const landsByDesign = pieces.length >= 2 && plan.seps.length >= 1 && recovers;
-  const landAt = landingCue ? landingCue.at : landsByDesign ? plan.seps[0] + 1.2 : null;
+  // It touches down when real boosters do: at the mission's own event, or about 5 minutes after
+  // separation for a pad landing (Falcon 9 lands around T+7:45) and a little over 4 for a tower
+  // catch (T+7:00 on the first one), within the flight. The inset plays the last minute of the
+  // descent, landing burn included, and holds a moment after touchdown.
+  const sepSim = plan.cues.find((cue) => cue.event.kind === "stage-sep")?.event.tS ?? null;
+  const designTouch = landsByDesign && sepSim !== null ? Math.min(plan.T - 2, sepSim + (catchMode ? 255 : 320)) : null;
+  const touchSim = landingCue
+    ? landingCue.event.tS
+    : designTouch !== null && sepSim !== null && designTouch > sepSim + 30
+      ? designTouch
+      : null;
+  const touchAt = touchSim === null ? null : plan.playAt(touchSim);
+  const landFrom = touchSim === null || touchAt === null ? null : Math.min(plan.playAt(touchSim - 60), touchAt - 2.5);
+  const landFromSim = landFrom === null ? 0 : plan.simAt(landFrom);
   const LAND_DUR = 3.6;
   /** Reduced motion: no camera shake or plasma shimmer. */
   const calm = typeof window !== "undefined" && !!window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
@@ -366,7 +382,7 @@ export function startLaunch(
       dx: dir * 0.04 * Hn * d,
       dy: 0.06 * Hn * d + 0.32 * Hn * d * d,
       // A booster that's coming home flips around for its boostback instead of tumbling.
-      rot: i === 0 && landAt !== null ? dir * Math.PI * ease(d / 1.8) : dir * (0.35 * d + 0.18 * d * d),
+      rot: i === 0 && touchAt !== null ? dir * Math.PI * ease(d / 1.8) : dir * (0.35 * d + 0.18 * d * d),
       alpha: 1 - clamp01((d - 1.6) / 1.4),
     };
   };
@@ -621,11 +637,11 @@ export function startLaunch(
     }
   }
 
-  function drawLanding(k: number, since: number) {
+  /** k runs 0 to LAND_TOUCH through the descent, then on past it after touchdown. */
+  function drawLanding(k: number, fade: number) {
     const c = ctx!;
     const p0 = pieces[0];
     if (!p0) return;
-    const fade = clamp01(since / 0.3) * (1 - clamp01((since - LAND_DUR - 0.6) / 0.6));
     if (fade <= 0) return;
     const iw = Math.round(Math.min(190, W * 0.3));
     const ih = Math.round(iw * 1.2);
@@ -640,7 +656,7 @@ export function startLaunch(
     const pw = Math.max(0.01, p0.box.maxX - p0.box.minX);
     const Zi = Math.min((ih * 0.42) / ph, (iw * 0.3) / pw);
     const hpx = ph * Zi;
-    const touch = 0.86;
+    const touch = LAND_TOUCH;
     const landed = k >= touch;
     // Where it comes to rest: on the pad, or hanging from the tower's arms just below its top.
     const rest = catchMode ? groundY - 0.22 * hpx : groundY;
@@ -1102,7 +1118,7 @@ export function startLaunch(
     if (depart && t >= depart.cutAt) {
       if (depart.end === "escape") drawMoonPass(altKm);
       // Short of the ladder, and clear of the verdict that lands beside it.
-      else drawMoonDisc(W * 0.72, H * 0.25, Math.max(1.5, Math.min(W, H) * 0.075 * clamp01(30_000 / Math.hypot(30_000, MOON_KM - altKm))));
+      else drawMoonDisc(W * 0.74, H * 0.2, Math.max(1.5, Math.min(W, H) * 0.075 * clamp01(30_000 / Math.hypot(30_000, MOON_KM - altKm))));
     }
     // The ISS and other satellites are low-orbit traffic: gone well before the Moon.
     const issK = clamp01((altKm - 120) / 30) * clamp01((1_200 - altKm) / 400) * (1 - limbRise);
@@ -1320,7 +1336,13 @@ export function startLaunch(
       c.globalCompositeOperation = "source-over";
     }
 
-    if (landAt !== null && t >= landAt && t <= landAt + LAND_DUR + 1.3) drawLanding((t - landAt) / LAND_DUR, t - landAt);
+    if (touchSim !== null && touchAt !== null && landFrom !== null && t >= landFrom && t <= touchAt + 2.1) {
+      const k =
+        t < touchAt
+          ? LAND_TOUCH * clamp01((sim - landFromSim) / Math.max(1e-6, touchSim - landFromSim))
+          : LAND_TOUCH + (t - touchAt) / LAND_DUR;
+      drawLanding(k, clamp01((t - landFrom) / 0.3) * (1 - clamp01((t - touchAt - 1.5) / 0.6)));
+    }
 
     // A vignette that tightens around Max-Q.
     const maxQPulse = maxQAt !== null && flying ? Math.exp(-(((t - maxQAt) / 1.1) ** 2)) : 0;

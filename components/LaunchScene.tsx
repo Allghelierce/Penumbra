@@ -103,7 +103,6 @@ const MARK_LABEL: Partial<Record<FlightEventKind, string>> = {
   impact: "Impact",
   orbit: "Orbit",
   arrival: "Moon",
-  milestone: "Moon",
   escape: "Escape",
 };
 
@@ -117,6 +116,7 @@ const initials = (label: string) =>
 
 interface Mark {
   at: number;
+  /** Empty for a plain mark with no words under it. */
   label: string;
   low: boolean;
 }
@@ -129,21 +129,25 @@ function milestones(plan: Plan): Mark[] {
   let seps = 0;
   for (const c of plan.cues) {
     const k = c.event.kind;
+    // A milestone says its own thing (a pogo, an engine out, the Moon's distance): the Moon gets
+    // its name on the rail, anything else a plain mark (its words are in the callout).
+    const milestone = k === "milestone" ? (/moon/i.test(c.event.label ?? "") ? "Moon" : "") : null;
     const label =
-      k === "engine-cutoff"
+      milestone ??
+      (k === "engine-cutoff"
         ? /injection/i.test(c.event.label ?? "")
           ? initials(c.event.label)
           : seps > 0
             ? "SECO"
             : "MECO"
-        : MARK_LABEL[k];
+        : MARK_LABEL[k]);
     if (k === "stage-sep") seps++;
     const at = (c.at - plan.liftoffAt) / span;
-    if (!label || at < 0 || at > 1.001) continue;
+    if (label === undefined || at < 0 || at > 1.001) continue;
     // Two events at the same moment (cutoff + separation, cutoff + orbit): keep the later one.
     if (marks.length && at - marks[marks.length - 1].at < 0.015) marks.pop();
-    const prev = marks[marks.length - 1];
-    marks.push({ at: Math.min(1, at), label, low: prev ? at - prev.at < 0.1 && !prev.low : false });
+    const prev = marks.findLast((m) => m.label);
+    marks.push({ at: Math.min(1, at), label, low: label !== "" && prev ? at - prev.at < 0.1 && !prev.low : false });
   }
   return marks;
 }
@@ -473,6 +477,7 @@ function LaunchRun(props: RunProps) {
                 ? `Your ${templateById(input.templateId).name}`
                 : "Napkin sketch"
           }
+          doneLabel={input.templateId && !input.mission ? "Back to Modify" : "Back to the napkin"}
           onDone={props.onDone}
           onReplay={props.onReplay}
           recap={props.recap}
@@ -525,7 +530,7 @@ function AltitudeLadder({
         <div className="absolute inset-y-0 left-0 w-px bg-white/15" />
         {beyond && (
           // Off the top of the scale: the arrow keeps going.
-          <div className={`absolute bottom-full left-0 mb-1 flex items-start gap-2 ${LIFT}`} title="Far off the top of this scale">
+          <div className={`absolute bottom-full left-0 mb-1 flex items-start gap-2 ${LIFT}`}>
             <div className="-ml-[5px] flex flex-col items-center">
               <span className="h-0 w-0 border-x-[5px] border-b-[8px] border-x-transparent border-b-white/60" />
               <span className="h-5 w-px border-l border-dashed border-white/40" />

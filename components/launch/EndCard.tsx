@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import MissionReport from "@/components/MissionReport";
 import { MISSION_PHOTOS } from "@/lib/mission-photos";
@@ -20,7 +20,7 @@ import {
   type Verdict,
 } from "@/lib/design";
 import { launchRecord } from "@/lib/presets";
-import { fmtKm } from "./plan";
+import { fmtKm, UNFLOWN } from "./plan";
 
 interface EndCardProps {
   outcome: Verdict;
@@ -31,6 +31,8 @@ interface EndCardProps {
   strokes: Stroke[];
   /** Caption on the sketch: "Napkin sketch", "Your Falcon 9 Block 5", or a historic flight's vehicle. */
   sketchLabel: string;
+  /** The way back: "Back to the napkin", or "Back to Modify" for a real rocket. */
+  doneLabel: string;
   onDone: () => void;
   onReplay: () => void;
   /** What to try next; the studio computes it from the attempt history. */
@@ -82,12 +84,21 @@ function verdictCopy({ outcome, design, analysis, maxAltKm, lostAt, trace }: End
   const budget = `${kms(analysis.totalDeltaVMps)} of ${kms(analysis.requiredDeltaVMps)} km/s`;
   const margin = analysis.marginMps;
   const history = launchRecord(design.name);
-  // Bound for Mars or Jupiter, the flight ends leaving Earth on a coast of months or years.
+  // Bound for Mars or Jupiter, the flight ends leaving Earth on a coast of months or years; bound
+  // for the Moon, it stops at the Moon's distance, before the burn into orbit or down to the surface.
   const escape = outcome === "destination" ? [...(trace.events ?? [])].reverse().find((e) => e.kind === "escape") : undefined;
+  const arrival = outcome === "destination" && UNFLOWN[dest] ? (trace.events ?? []).find((e) => e.kind === "arrival") : undefined;
   switch (outcome) {
     case "destination":
       // The coast is the news here, not the rocket's launch record.
       if (escape) return { go: true, headline: `On course for ${SHORT[dest]}`, line: `${escape.label}. ${budget}, ${kms(margin)} km/s to spare.` };
+      if (arrival) {
+        return {
+          go: true,
+          headline: "At the Moon's distance",
+          line: `${arrival.label}; ${UNFLOWN[dest]}. ${budget}, ${kms(margin)} km/s to spare.`,
+        };
+      }
       return {
         go: true,
         headline: dest === "leo" ? "In orbit" : `Made it to ${SHORT[dest]}`,
@@ -112,9 +123,19 @@ function verdictCopy({ outcome, design, analysis, maxAltKm, lostAt, trace }: End
   }
 }
 
+/** Focuses the card's main action once it's up, without scrolling a tall card away from its top. */
+function useFirstFocus() {
+  const ref = useRef<HTMLButtonElement>(null);
+  useEffect(() => {
+    ref.current?.focus({ preventScroll: true });
+  }, []);
+  return ref;
+}
+
 export default function EndCard(props: EndCardProps) {
+  const focusRef = useFirstFocus();
   if (props.mission) return <Debrief {...props} mission={props.mission} />;
-  const { design, analysis, maxAltKm, maxSpeedMps, strokes, sketchLabel, onDone, onReplay, recap, onImprove } = props;
+  const { design, analysis, maxAltKm, maxSpeedMps, strokes, sketchLabel, doneLabel, onDone, onReplay, recap, onImprove } = props;
   const { go, headline, line } = verdictCopy(props);
   const findings = (analysis.findings ?? []).slice(0, 3);
   const improvements = (recap?.improvements ?? []).slice(0, 3);
@@ -122,8 +143,8 @@ export default function EndCard(props: EndCardProps) {
   const lead = improvements.find(fixable);
 
   return (
-    <div className="ls-fade absolute inset-0 flex items-start justify-center overflow-y-auto bg-umbra/70 px-4 py-8 backdrop-blur-[3px] sm:items-center">
-      <div className="ls-rise w-full max-w-3xl overflow-hidden rounded-[3px] border border-rule bg-panel text-starlight shadow-[0_30px_80px_rgba(0,0,0,0.55)]">
+    <div className="ls-fade absolute inset-0 flex items-start justify-center overflow-y-auto bg-umbra/70 px-4 py-8 backdrop-blur-[3px]">
+      <div className="ls-rise my-auto w-full max-w-3xl overflow-hidden rounded-[3px] border border-rule bg-panel text-starlight shadow-[0_30px_80px_rgba(0,0,0,0.55)]">
         <div className="grid sm:grid-cols-[minmax(0,16rem)_1fr]">
           <SketchFrame strokes={strokes} name={design.name} label={sketchLabel} />
           <div className="flex min-w-0 flex-col justify-center p-5 sm:p-7">
@@ -165,7 +186,7 @@ export default function EndCard(props: EndCardProps) {
                     <li key={imp.text}>
                       <button
                         type="button"
-                        autoFocus={imp === lead}
+                        ref={imp === lead ? focusRef : undefined}
                         onClick={() => onImprove?.(imp.fix)}
                         className={`group flex w-full items-center justify-between gap-4 rounded-[3px] border px-4 py-2.5 text-left text-sm font-semibold transition-colors ${
                           imp === lead
@@ -203,7 +224,7 @@ export default function EndCard(props: EndCardProps) {
         <div className="flex flex-wrap items-center gap-3 border-t border-rule px-5 py-4 sm:px-7">
           <button
             type="button"
-            autoFocus={!lead}
+            ref={lead ? undefined : focusRef}
             onClick={onDone}
             className={
               lead
@@ -211,7 +232,7 @@ export default function EndCard(props: EndCardProps) {
                 : "rounded-[3px] border border-starlight bg-starlight px-4 py-2 text-sm font-semibold text-umbra transition-opacity hover:opacity-90"
             }
           >
-            Back to the napkin
+            {doneLabel}
           </button>
           <button
             type="button"
@@ -290,6 +311,7 @@ function SketchFrame({ strokes, name, label }: { strokes: Stroke[]; name: string
 
 /** Mission mode: what happened on the real flight, what changed, and how it came back. */
 function Debrief({ mission, strokes, sketchLabel, design, onDone, onFixRetry, trace }: EndCardProps & { mission: HistoricMission }) {
+  const focusRef = useFirstFocus();
   const lost = mission.outcome === "lost";
   const retry = lost && onFixRetry ? onFixRetry : null;
   // Real recorded dialog from the flight, in order.
@@ -308,8 +330,8 @@ function Debrief({ mission, strokes, sketchLabel, design, onDone, onFixRetry, tr
   const section = "border-t border-rule px-5 py-3 sm:px-7";
   const label = "text-[11px] font-semibold uppercase tracking-[0.2em] text-haze";
   return (
-    <div className="ls-fade absolute inset-0 flex items-start justify-center overflow-y-auto bg-umbra/75 px-4 py-8 backdrop-blur-[3px] sm:items-center">
-      <div className="ls-rise w-full max-w-3xl overflow-hidden rounded-[3px] border border-rule bg-panel text-starlight shadow-[0_30px_80px_rgba(0,0,0,0.55)]">
+    <div className="ls-fade absolute inset-0 flex items-start justify-center overflow-y-auto bg-umbra/75 px-4 py-8 backdrop-blur-[3px]">
+      <div className="ls-rise my-auto w-full max-w-3xl overflow-hidden rounded-[3px] border border-rule bg-panel text-starlight shadow-[0_30px_80px_rgba(0,0,0,0.55)]">
         {photos.length > 0 && (
           <div className={`grid gap-px border-b border-rule bg-rule ${photos.length > 1 ? "grid-cols-2" : "grid-cols-1"}`}>
             {photos.map((ph) => (
@@ -427,7 +449,7 @@ function Debrief({ mission, strokes, sketchLabel, design, onDone, onFixRetry, tr
             )}
             <button
               type="button"
-              autoFocus={!retry}
+              ref={retry ? undefined : focusRef}
               onClick={onDone}
               className={
                 retry
@@ -440,7 +462,7 @@ function Debrief({ mission, strokes, sketchLabel, design, onDone, onFixRetry, tr
             {retry && (
               <button
                 type="button"
-                autoFocus
+                ref={focusRef}
                 onClick={retry}
                 className="rounded-[3px] border border-starlight bg-starlight px-4 py-2 text-sm font-semibold text-umbra transition-opacity hover:opacity-90"
               >

@@ -124,6 +124,8 @@ export interface Plan {
   hasDownrange: boolean;
   /** Sim seconds at playback time t. */
   simAt: (t: number) => number;
+  /** Playback time at which sim second s plays (the inverse of simAt). */
+  playAt: (sim: number) => number;
   /** Set for a trip past low Earth orbit: the parking orbit, the departure burn and the coast. */
   depart: Departure | null;
 }
@@ -153,6 +155,12 @@ export const DEST_NAME: Record<DestinationId, string> = {
   "mars-transfer": "the Mars transfer",
   "mars-surface": "the surface of Mars",
   europa: "Europa",
+};
+
+/** At the Moon's distance the trace stops: the burn that would finish the trip isn't flown. */
+export const UNFLOWN: Partial<Record<DestinationId, string>> = {
+  "moon-orbit": "the burn into lunar orbit isn't flown here",
+  "moon-surface": "the landing burn isn't flown here",
 };
 
 const OFF_KINDS = new Set<FlightEventKind>(["engine-cutoff", "fuel-exhausted", "orbit", "arrival", "impact", "breakup"]);
@@ -221,6 +229,7 @@ function padPlan(points: FlightPoint[], events: FlightEvent[], analysis: Analysi
     maxSpeedMps: 0,
     hasDownrange: false,
     simAt: () => 0,
+    playAt: () => T_IGNITE,
     depart: null,
   };
 }
@@ -361,8 +370,9 @@ function flightPlan(
           at: finaleAt + 0.35,
           text: DEST_SHORT[design.destination] ?? "AWAY",
           ok: true,
-          kicker: trip.end.kind === "escape" ? "On course for" : undefined,
-          sub: trip.end.label,
+          // The trace stops at the Moon's distance: no claim of the orbit or landing burn after it.
+          kicker: trip.end.kind === "escape" ? "On course for" : "At the Moon's distance",
+          sub: trip.end.kind === "escape" ? trip.end.label : `${trip.end.label} · ${UNFLOWN[design.destination] ?? "what comes next isn't flown here"}`,
         }
       : finaleFor(outcome, design, failed ? finaleAt + 0.15 : finaleAt + 0.35);
   const maxDown = Math.max(...points.map((p) => Math.abs(p.downrangeKm)));
@@ -402,6 +412,7 @@ function flightPlan(
     maxSpeedMps: Math.max(0, ...points.filter((p) => p.tS <= T).map((p) => p.speedMps)),
     hasDownrange: maxDown > Math.max(0.5, maxAltKm * 0.02),
     simAt,
+    playAt: playOf,
     depart: trip
       ? {
           parkAt: playOf(trip.park.tS),
@@ -901,7 +912,9 @@ export function sampleAt(points: FlightPoint[], t: number): Sample {
 
 /** Direction of travel at sim time t: 0 is straight up, PI/2 is flying right, PI is straight down. */
 export function headingAt(plan: Plan, sim: number): number | null {
-  const d = Math.max(1, plan.T * 0.01);
+  // A few seconds either side, scaled to the climb (not to a coast that lasts days, whose span
+  // would reach from the pad into the parking orbit and lay the rocket flat at liftoff).
+  const d = Math.min(8, Math.max(1, (plan.depart?.parkSim ?? plan.T) * 0.01));
   const a = sampleAt(plan.points, sim - d);
   const b = sampleAt(plan.points, sim + d);
   const dA = b.alt - a.alt;
