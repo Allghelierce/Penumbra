@@ -235,7 +235,7 @@ function round2(x: number) {
  * tonne below that, to the kilogram under a tonne. Never up, so a capacity on screen is one the
  * rocket can carry: show 23.2 t for a 23.17 t maximum and typing 23.2 t would fail the check.
  */
-function shownKg(kg: number): number {
+export function shownKg(kg: number): number {
   const safe = Math.max(0, kg);
   if (safe >= 100_000) return Math.floor(safe / 1000) * 1000;
   if (safe >= 1_000) return Math.floor(safe / 100) * 100;

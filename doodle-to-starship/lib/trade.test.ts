@@ -4,7 +4,17 @@ import { applyAction } from "./actions";
 import type { Design } from "./design";
 import { analyze, ascentLossesMps, enginesThatFit } from "./physics";
 import { TEMPLATES } from "./templates";
-import { capacityText, explainCurve, maxPayloadKg, MIN_LIFTOFF_TWR, realStageFor, recoveryCostKg, stretchFromReal, tradeCurve } from "./trade";
+import {
+  capacityText,
+  explainCurve,
+  maxPayloadKg,
+  MIN_LIFTOFF_TWR,
+  realStageFor,
+  recoveryCostKg,
+  shownKg,
+  stretchFromReal,
+  tradeCurve,
+} from "./trade";
 
 const template = (id: string) => TEMPLATES.find((t) => t.id === id)!;
 const withRecovery = (d: Design, stages: number[]): Design => ({
@@ -257,6 +267,19 @@ describe("capacityText", () => {
     expect(capacityText(999.9)).toBe("999 kg");
     expect(capacityText(354.9)).toBe("354 kg");
     expect(capacityText(-5)).toBe("0 kg");
+  });
+
+  it("gives the shown figure as a number too, for setting a payload to it or comparing two", () => {
+    expect(shownKg(23_190)).toBe(23_100);
+    expect(shownKg(22_960)).toBe(22_900);
+    expect(shownKg(23_190) - shownKg(22_960)).toBe(200);
+    expect(shownKg(135_918)).toBe(135_000);
+    expect(shownKg(354.9)).toBe(354);
+    expect(shownKg(-1)).toBe(0);
+    for (const kg of [0, 999, 1_000, 17_518, 99_999, 100_000, 151_292]) {
+      const text = capacityText(kg);
+      expect(parseFloat(text.replace(/,/g, "")) * (text.endsWith(" t") ? 1000 : 1)).toBeCloseTo(shownKg(kg), 6);
+    }
   });
 
   it("shows only capacities the rocket can carry: each real rocket's max, as shown, still makes it", () => {
