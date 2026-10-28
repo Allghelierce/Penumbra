@@ -69,6 +69,8 @@ export interface Stage {
   dryMassKg?: number;
   /** The stage flies back and lands, so it keeps a landing propellant reserve and carries recovery hardware. */
   recover?: boolean;
+  /** This stage's own diameter in m, when it's narrower than the vehicle's (Saturn V's S-IVB is 6.6 m on a 10.1 m rocket). */
+  diameterM?: number;
 }
 
 export interface Design {
