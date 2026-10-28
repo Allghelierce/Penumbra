@@ -79,6 +79,9 @@ function stack(items: { y: number; h: number }[], limit: number, gap = 4) {
   return tops;
 }
 
+/** A stretch handle's width in px: the stage's width plus a margin, never too small to grab. */
+const handleWidth = (band: Band, napkinWidth: number) => Math.max((band.x1 - band.x0) * napkinWidth + 28, 76);
+
 const shortName = (name: string) => name.replace(/ Vacuum$/, " Vac").replace("Solid rocket motor", "Solid motor");
 
 const signedMetres = (m: number) => `${m < 0 ? "−" : "+"}${Math.abs(m).toFixed(1)} m`;
@@ -191,11 +194,19 @@ export default function EditHandles({ drawing, design, onAction, onPreview }: Ed
     [...bands.map((b) => ({ y: ((b.top + b.bottom) / 2) * H, h: ROW })), ...(roomBelow ? [] : [{ y: H - ROW / 2 - 6, h: ROW }])],
     H - 6,
   );
+  // Handles on short stages squeeze their hit areas so neighbours don't overlap.
+  const grip = bands.map((b) => {
+    const gap = Math.min(...bands.filter((o) => o !== b).map((o) => Math.abs(o.top - b.top) * H));
+    return Math.max(14, Math.min(28, gap));
+  });
+  // Both columns clear the rocket and the stretch handles, which are wider than a slim rocket.
+  const centre = (b: Band) => ((b.x0 + b.x1) / 2) * W;
+  const chipX = Math.max((rocket.x1 + 0.035) * W, ...bands.map((b) => centre(b) + handleWidth(b, W) / 2 + 8));
+  const labelX = Math.min((rocket.x0 - 0.04) * W, ...bands.map((b) => centre(b) - handleWidth(b, W) / 2 - 8));
   // The type menu narrows to fit a small napkin, down to a point; past that the chip slides left.
-  const chipX = (rocket.x1 + 0.035) * W;
   const menuWidth = Math.round(Math.min(156, Math.max(100, W - chipX - CHIP_FIXED - 6)));
   const chipLeft = Math.max(0, Math.min(chipX, W - CHIP_FIXED - menuWidth - 4));
-  const labelRight = `${((1 - rocket.x0 + 0.04) * 100).toFixed(2)}%`;
+  const labelRight = W - labelX;
   const canRemove = design.stages.length > 1;
   const control = "flex h-8 min-w-8 items-center justify-center px-2 transition-colors";
 
@@ -237,8 +248,8 @@ export default function EditHandles({ drawing, design, onAction, onPreview }: Ed
               onLostPointerCapture={(e) => drag.current?.pointerId === e.pointerId && cancel()}
               onKeyDown={(e) => nudge(e, band)}
               onBlur={() => !drag.current && live.current?.stageIndex === band.index && commit()}
-              className="napkin-overlay group pointer-events-auto absolute flex h-7 -translate-x-1/2 -translate-y-1/2 cursor-ns-resize touch-none items-center justify-center"
-              style={{ left: `${((band.x0 + band.x1) / 2) * 100}%`, top: `${top * 100}%`, width: Math.max((band.x1 - band.x0) * W + 28, 76) }}
+              className="napkin-overlay group pointer-events-auto absolute z-10 flex -translate-x-1/2 -translate-y-1/2 cursor-ns-resize touch-none items-center justify-center"
+              style={{ left: `${((band.x0 + band.x1) / 2) * 100}%`, top: `${top * 100}%`, width: handleWidth(band, W), height: grip[band.index] }}
             >
               <span className="absolute inset-x-0 top-1/2 h-0.5 -translate-y-1/2 bg-white/60 transition-colors group-hover:bg-white group-focus-visible:bg-white" />
               <span className="relative flex h-3.5 w-8 flex-col justify-center gap-[2px] border border-white bg-black px-1.5">
