@@ -1435,6 +1435,7 @@ export function drawStars(
   if (alpha <= 0.01) return;
   drawMilkyWay(ctx, W, H, alpha);
   drawConstellations(ctx, W, H, alpha, t);
+  drawPlanets(ctx, W, H, alpha);
   drawSatellitePasses(ctx, W, H, alpha, t);
   for (const s of stars) {
     const f = PARALLAX[s.layer];
@@ -1459,6 +1460,26 @@ export function drawStars(
     }
   }
   ctx.globalAlpha = 1;
+}
+
+/** Venus and Jupiter: the brightest points in the sky after the Moon, and they don't twinkle. */
+function drawPlanets(ctx: CanvasRenderingContext2D, W: number, H: number, alpha: number) {
+  ctx.save();
+  for (const [x, y, r, color, halo] of [
+    [0.545, 0.255, 2.3, "rgb(255,250,232)", 0.18],
+    [0.36, 0.53, 1.8, "rgb(255,236,206)", 0.12],
+  ] as const) {
+    ctx.globalAlpha = alpha * halo;
+    ctx.fillStyle = color;
+    ctx.beginPath();
+    ctx.arc(W * x, H * y, r * 3.2, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.globalAlpha = alpha;
+    ctx.beginPath();
+    ctx.arc(W * x, H * y, r, 0, Math.PI * 2);
+    ctx.fill();
+  }
+  ctx.restore();
 }
 
 /** Satellites drifting across the starfield: [from x, from y, to x, to y (fractions), seconds per pass]. */
@@ -1865,6 +1886,24 @@ function drawSea(ctx: CanvasRenderingContext2D, W: number, H: number, y: number,
   if (beach) {
     ctx.fillStyle = "rgb(170,160,132)";
     ctx.fillRect(W * from, y - 3, W * (1 - from) + 1, 3);
+  }
+  // Boats out on the water: spectators who came to watch, rocking a little.
+  const rock = Math.sin(wallSeconds() * 1.6);
+  ctx.fillStyle = "rgb(12,26,42)";
+  for (const [f, size] of [
+    [0.35, 1],
+    [0.72, 0.75],
+  ] as const) {
+    const bx = W * (from + (1 - from) * f);
+    const by = y - H * 0.008 + rock * 0.5 * size;
+    ctx.beginPath();
+    ctx.moveTo(bx - 7 * size, by);
+    ctx.lineTo(bx + 7 * size, by);
+    ctx.lineTo(bx + 5 * size, by + 2.5 * size);
+    ctx.lineTo(bx - 5 * size, by + 2.5 * size);
+    ctx.closePath();
+    ctx.fill();
+    ctx.fillRect(bx - 3 * size, by - 3 * size, 5 * size, 3 * size);
   }
   // Surf: short white dashes along the shore, rolling in and fading.
   const now = wallSeconds();
@@ -2768,6 +2807,36 @@ export function drawEarth(
 
   // How much of the sunlit side shows: none on the limb views, a crescent once the whole globe does.
   const day = clamp01((0.45 - shrink) / 0.3);
+
+  // Zodiacal light: sunlight scattered off dust along the planets' plane, a faint tilted glow
+  // rising from behind the limb on the side where the Sun will come up. Drawn first, so the
+  // planet hides its base.
+  const zodi = clamp01((altKm - 120) / 60) * (1 - day) * (1 - lift);
+  if (zodi > 0) {
+    const a = -Math.PI / 2 + Math.asin(Math.min(1, (W * 0.36) / R));
+    const bx = cx + R * Math.cos(a);
+    const by = cy + R * Math.sin(a);
+    const len = H * 0.6;
+    const tilt = -0.42;
+    ctx.save();
+    ctx.translate(bx, by);
+    ctx.rotate(tilt);
+    for (const [w, al] of [
+      [0.12, 0.025],
+      [0.07, 0.03],
+      [0.035, 0.035],
+    ] as const) {
+      const g = ctx.createLinearGradient(0, 0, 0, -len);
+      g.addColorStop(0, `rgba(255,236,206,${al})`);
+      g.addColorStop(1, "rgba(255,236,206,0)");
+      ctx.globalAlpha = zodi;
+      ctx.fillStyle = g;
+      ctx.beginPath();
+      ctx.ellipse(0, -len / 2, W * w, len / 2, 0, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    ctx.restore();
+  }
 
   // Surface.
   ctx.fillStyle = "#0b1d36";
