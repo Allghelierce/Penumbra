@@ -52,7 +52,7 @@ Model figures are rounded down, the way the app shows every capacity, so a paylo
 ## Tech stack
 
 - Next.js 16 (App Router, Turbopack), React 19, TypeScript, Tailwind CSS 4
-- Vitest: 250 tests across 21 files, covering the physics, the calibration, trade curves, the red pen, the real flights and the sketch readers
+- Vitest: 290 tests across 22 files, covering the physics, the calibration, trade curves, the red pen, the real flights and the sketch readers
 - xAI Grok APIs (vision, text, Voice, text-to-speech) behind a server-side wrapper with fallbacks (`lib/xai.ts`)
 - NASA Technical Reports Server API for prior-art search
 
