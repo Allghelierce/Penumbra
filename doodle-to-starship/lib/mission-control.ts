@@ -163,9 +163,10 @@ export function calloutFor(event: FlightEvent, design: Design, trace?: FlightTra
     case "impact":
       return "Loss of signal.";
     case "arrival":
-      return SURFACE.includes(design.destination)
-        ? `Touchdown, ${TARGET[design.destination]}.`
-        : `Arrival, ${TARGET[design.destination]}.`;
+      // The trace ends on arrival, not on a landing.
+      return `Arriving at ${TARGET[design.destination]}.`;
+    case "milestone":
+      return event.label.replace(/[,·].*$/, "").trim().replace(/\.?$/, ".");
     case "escape":
       return "Escape velocity. Leaving Earth.";
     case "pad-failure":

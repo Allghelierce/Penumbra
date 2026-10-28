@@ -125,6 +125,8 @@ export type FlightEventKind =
   | "apogee"
   | "impact"
   | "arrival"
+  /** A point passed on the way, e.g. the Moon's distance on a trip to Mars; says only its label. */
+  | "milestone"
   /** Past escape speed after a departure burn: leaving Earth on the long coast to Mars or Jupiter. */
   | "escape"
   | "pad-failure"

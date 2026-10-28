@@ -229,7 +229,7 @@ describe("simulateFlight past low Earth orbit", () => {
       for (const e of trace.events) expect(e.label).not.toMatch(/arriv/i);
 
       const passes = trace.events.find((e) => /^Passes the Moon's distance, \d+ hours after the burn$/.test(e.label));
-      expect(passes?.kind, rocket.name).toBe("escape");
+      expect(passes?.kind, rocket.name).toBe("milestone");
       expect(trace.points.find((p) => p.tS === passes!.tS)!.altitudeKm).toBeCloseTo(MOON_ALTITUDE_KM, 0);
 
       const last = trace.events.at(-1)!;

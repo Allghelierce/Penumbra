@@ -63,11 +63,12 @@ const EVENT_ORDER: Record<FlightEventKind, number> = {
   "fuel-exhausted": 4,
   orbit: 5,
   arrival: 6,
-  escape: 7,
-  apogee: 8,
-  impact: 9,
-  "pad-failure": 10,
-  breakup: 11,
+  milestone: 7,
+  escape: 8,
+  apogee: 9,
+  impact: 10,
+  "pad-failure": 11,
+  breakup: 12,
 };
 
 type Cutoff = { tS: number; reached: boolean; stageIndex: number };
@@ -207,7 +208,7 @@ function departingFlight(
   if (last && departure.planet) {
     const moon = coast.find((c) => Math.abs(c.rM - MOON_DISTANCE_M) < 1);
     if (moon) {
-      events.push({ tS: burnEnd.tS + moon.tS, kind: "escape", label: `Passes the Moon's distance, ${duration(moon.tS)} after the burn` });
+      events.push({ tS: burnEnd.tS + moon.tS, kind: "milestone", label: `Passes the Moon's distance, ${duration(moon.tS)} after the burn` });
     }
     if (arrived) {
       events.push({

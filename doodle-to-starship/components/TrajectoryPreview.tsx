@@ -35,23 +35,30 @@ const EVENT_LABEL: Partial<Record<FlightEventKind, string>> = {
   apogee: "Apogee",
   impact: "Impact",
   arrival: "Arrival",
+  escape: "Escape",
   "fuel-exhausted": "Burnout",
 };
 
 export default function TrajectoryPreview({ trace }: { trace: FlightTrace }) {
   const plot = useMemo(() => {
-    const maxAlt = Math.max(1, ...trace.points.map((p) => p.altitudeKm));
+    // Past LEO the coast runs for days and out to a million km: preview the climb to the parking orbit.
+    const parked = trace.events.find((e) => e.kind === "orbit");
+    const leaves = trace.events.some((e) => e.kind === "arrival" || e.kind === "escape");
+    const until = parked && leaves ? parked.tS : Infinity;
+    const shown = trace.points.filter((p) => p.tS <= until + 1e-6);
+    const maxAlt = Math.max(1, ...shown.map((p) => p.altitudeKm));
     const top = Math.max(400, maxAlt * 1.25);
-    const maxRange = Math.max(50, ...trace.points.map((p) => p.downrangeKm)) * 1.04;
+    const maxRange = Math.max(50, ...shown.map((p) => p.downrangeKm)) * 1.04;
     const x = (km: number) => PAD.left + (km / maxRange) * (W - PAD.left - PAD.right);
     const y = (km: number) => H - PAD.bottom - scaleAltitude(km, top) * (H - PAD.top - PAD.bottom);
-    const step = Math.max(1, Math.floor(trace.points.length / 160));
-    const pts = trace.points.filter((_, i) => i % step === 0 || i === trace.points.length - 1);
+    const step = Math.max(1, Math.floor(shown.length / 160));
+    const pts = shown.filter((_, i) => i % step === 0 || i === shown.length - 1);
     const path = pts.map((p, i) => `${i ? "L" : "M"}${x(p.downrangeKm).toFixed(1)} ${y(p.altitudeKm).toFixed(1)}`).join(" ");
-    const at = (tS: number) => trace.points.reduce((best, p) => (Math.abs(p.tS - tS) < Math.abs(best.tS - tS) ? p : best), trace.points[0]);
+    const at = (tS: number) => shown.reduce((best, p) => (Math.abs(p.tS - tS) < Math.abs(best.tS - tS) ? p : best), shown[0]);
     // Label events left to right, skipping any that would land on top of the previous label.
     const events: { label: string; x: number; y: number; anchor: "start" | "end"; dy: number }[] = [];
     for (const e of trace.events) {
+      if (e.tS > until) continue;
       const label = EVENT_LABEL[e.kind];
       if (!label) continue;
       const p = at(e.tS);
