@@ -6,7 +6,7 @@
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent, type PointerEvent } from "react";
 import type { TradeCurve, TradePoint } from "@/lib/design";
 import { km } from "@/lib/physics/format";
-import { explainCurve } from "@/lib/trade";
+import { explainCurve, type SweptCurve } from "@/lib/trade";
 
 type MarkKey = "real" | "best" | "you";
 
@@ -110,7 +110,7 @@ export function payloadText(kg: number, tonnes: boolean) {
   const v = Math.max(0, kg);
   if (!tonnes) return `${Math.round(v).toLocaleString("en-US")} kg`;
   if (v <= 0) return "0 t";
-  return v >= 10_000 ? `${Math.round(v / 1000).toLocaleString("en-US")} t` : `${(v / 1000).toFixed(1)} t`;
+  return v >= 100_000 ? `${Math.round(v / 1000).toLocaleString("en-US")} t` : `${(v / 1000).toFixed(1)} t`;
 }
 
 const pct = (a: number, b: number) => Math.round((a / b - 1) * 100);
@@ -182,7 +182,8 @@ function Shape({ kind, x, y, s = 1 }: { kind: MarkKey; x: number; y: number; s?:
 }
 
 interface Props {
-  curve: TradeCurve;
+  /** A trade curve; when its `limit` ends the sweep (no more engines fit), the plot shows a "won't fit" zone past it. */
+  curve: SweptCurve;
   /** x of the user's modified rocket. */
   currentX: number;
   /** Called with the swept value of the point the user clicked. */
@@ -232,14 +233,17 @@ export default function TradeChart({ curve, currentX, onPick, caption, context, 
     });
     const padL = Math.ceil(Math.max(...yLabels.map((s) => s.length)) * TICK_W) + 14;
 
+    const plotW = Math.max(40, width - padL - PAD_R);
     let lo = xs[0] ?? 0;
     let hi = xs[xs.length - 1] ?? 1;
-    if (hi - lo < 1e-9) [lo, hi] = [lo - 0.5, hi + 0.5];
-    const plotW = Math.max(40, width - padL - PAD_R);
+    // The sweep stops because nothing more fits: leave room past the end to say so.
+    const limitX = curve.limit && pts.length && Math.abs(curve.limit.x - hi) < 1e-9 ? hi : null;
+    if (hi - lo < 1e-9) [lo, hi] = limitX != null ? [lo - 1, hi] : [lo - 0.5, hi + 0.5];
+    if (limitX != null) hi += Math.max(curve.unit === "×" ? 0 : 1, (84 * (hi - lo)) / Math.max(1, plotW - 84));
     const sx = (x: number) => padL + ((Math.min(hi, Math.max(lo, x)) - lo) / (hi - lo)) * plotW;
     const integers = curve.unit !== "×" && xs.every(Number.isInteger);
     const xStep = Math.max(integers ? 1 : 0, niceStep(hi - lo, Math.max(2, Math.floor(plotW / 80))));
-    const xTicks = ticks(lo, hi, integers ? Math.round(xStep) : xStep);
+    const xTicks = ticks(lo, hi, integers ? Math.round(xStep) : xStep).filter((v) => limitX == null || v <= limitX + 1e-9);
 
     const realKg = at(curve.realX);
     const marks = (["real", "best", "you"] as const)
@@ -274,7 +278,8 @@ export default function TradeChart({ curve, currentX, onPick, caption, context, 
     const area = pts.length > 1 ? `${line}L${f(sx(xs[xs.length - 1]))},${bottom}L${f(sx(xs[0]))},${bottom}Z` : "";
     const maxDv = Math.max(0, ...pts.map((p) => p.totalDeltaVMps));
 
-    return { pts, at, nearest, allZero, tonnes, yTicks, yLabels, padL, plotW, lo, hi, sx, sy, xTicks, marks, placed, top, bottom, line, area, maxDv, height: bottom + PAD_B };
+    const limitPx = limitX == null ? null : sx(limitX);
+    return { pts, at, nearest, allZero, tonnes, yTicks, yLabels, padL, plotW, lo, hi, sx, sy, xTicks, marks, placed, top, bottom, line, area, maxDv, limitPx, height: bottom + PAD_B };
   }, [curve, currentX, width, plotHeight]);
 
   const n = g.pts.length;
@@ -319,91 +324,111 @@ export default function TradeChart({ curve, currentX, onPick, caption, context, 
       </header>
 
       <div ref={wrapRef} className="relative">
-        <svg
-          ref={svgRef}
-          width={width}
-          height={g.height}
-          className="block touch-none font-mono outline-none focus-visible:outline-1 focus-visible:outline-white/40"
-          tabIndex={n ? 0 : -1}
-          aria-label={`Payload against ${curve.label}. ${text ?? ""} Arrow keys read each point${onPick ? "; Enter picks it" : ""}.`}
-          onKeyDown={onKey}
-          onFocus={() => setCursor((c) => c ?? g.nearest(currentX))}
-          onBlur={() => setCursor(null)}
-        >
-          {g.yTicks.map((v, i) => (
-            <g key={v}>
-              <line x1={g.padL} x2={g.padL + g.plotW} y1={g.sy(v * (g.tonnes ? 1000 : 1))} y2={g.sy(v * (g.tonnes ? 1000 : 1))} stroke={v === 0 ? "#3a3a3a" : "#1c1c1c"} />
-              <text x={g.padL - 8} y={g.sy(v * (g.tonnes ? 1000 : 1)) + 3.5} textAnchor="end" fontSize={10} fill="var(--haze)" className="tabular-nums">
-                {g.yLabels[i]}
-              </text>
-            </g>
-          ))}
-          {g.xTicks.map((v, i) => (
-            <text
-              key={v}
-              x={g.sx(v)}
-              y={g.bottom + 16}
-              textAnchor={g.xTicks.length > 1 && i === g.xTicks.length - 1 && g.sx(v) > width - 20 ? "end" : "middle"}
-              fontSize={10}
-              fill="var(--haze)"
-              className="tabular-nums"
-            >
-              {curve.unit === "×" ? `${trim(v)}×` : trim(v)}
-            </text>
-          ))}
-
-          {g.area && !g.allZero && <path d={g.area} fill="#fff" fillOpacity={0.06} />}
-          <path d={g.line} fill="none" stroke={g.allZero ? "#555" : "#d9d9d9"} strokeWidth={2} strokeLinejoin="round" strokeLinecap="round" />
-          {/* Engine counts are whole numbers: a dot on each one says the line only joins them up. */}
-          {curve.unit !== "×" &&
-            !g.allZero &&
-            g.pts.map((p) => <circle key={p.x} cx={g.sx(p.x)} cy={g.sy(Math.max(0, p.payloadKg))} r={2} fill="#d9d9d9" />)}
-
-          {g.marks.map((mk, i) => (
-            <line key={mk.key} x1={mk.px} x2={mk.px} y1={g.top - 16 - g.placed[i].lane * LANE_H} y2={g.sy(mk.kg)} stroke={COLOR[mk.key]} strokeOpacity={0.55} />
-          ))}
-
-          {g.allZero && (
-            <g textAnchor="middle" className="font-space" stroke="#000" strokeWidth={6} strokeLinejoin="round" paintOrder="stroke">
-              <text x={g.padL + g.plotW / 2} y={g.top + plotHeight / 2 - 6} fontSize={15} fill="#fff" fontWeight={600}>
-                Can&apos;t reach this destination {curve.unit === "×" ? "at any stretch" : `with any number of ${curve.unit}`}
-              </text>
-              <text x={g.padL + g.plotW / 2} y={g.top + plotHeight / 2 + 16} fontSize={13} fill="var(--haze)">
-                Most Δv anywhere on this sweep: {km(g.maxDv)} km/s
-              </text>
-            </g>
-          )}
-          {hp && <line x1={hx} x2={hx} y1={g.top} y2={g.bottom} stroke="#fff" strokeOpacity={0.35} />}
-
-          {g.marks.map((mk) =>
-            mk.key === "best" ? (
-              <path key={mk.key} d={diamond(mk.px, g.sy(mk.kg), 8.5)} fill="#000" />
-            ) : (
-              <circle key={mk.key} cx={mk.px} cy={g.sy(mk.kg)} r={mk.key === "real" ? 9 : 6.5} fill="#000" />
-            ),
-          )}
-          {g.marks.map((mk) => (
-            <Shape key={mk.key} kind={mk.key} x={mk.px} y={g.sy(mk.kg)} />
-          ))}
-          {hp && <circle cx={hx} cy={g.sy(Math.max(0, hp.payloadKg))} r={4} fill="#fff" stroke="#000" strokeWidth={2} />}
-
-          {g.marks.map((mk, i) => {
-            const { lane, flip } = g.placed[i];
-            const y = g.top - 12 - lane * LANE_H;
-            return (
-              <g key={mk.key}>
-                <Shape kind={mk.key} x={mk.px} y={y - 4} s={0.62} />
-                <text x={flip ? mk.px - 9 : mk.px + 9} y={y} textAnchor={flip ? "end" : "start"} fontSize={11} letterSpacing="0.04em">
-                  <tspan fill="#fff" fontWeight={600}>
-                    {NAME[mk.key]}
-                  </tspan>
-                  {mk.value && <tspan fill="rgba(255,255,255,0.72)"> {mk.value}</tspan>}
+        {n > 0 && (
+          <svg
+            ref={svgRef}
+            width={width}
+            height={g.height}
+            className="block touch-none font-mono outline-none focus-visible:outline-1 focus-visible:outline-white/40"
+            tabIndex={n ? 0 : -1}
+            aria-label={`Payload against ${curve.label}. ${text ?? ""} Arrow keys read each point${onPick ? "; Enter picks it" : ""}.`}
+            onKeyDown={onKey}
+            onFocus={() => setCursor((c) => c ?? g.nearest(currentX))}
+            onBlur={() => setCursor(null)}
+          >
+            {g.yTicks.map((v, i) => (
+              <g key={v}>
+                <line x1={g.padL} x2={g.padL + g.plotW} y1={g.sy(v * (g.tonnes ? 1000 : 1))} y2={g.sy(v * (g.tonnes ? 1000 : 1))} stroke={v === 0 ? "#3a3a3a" : "#1c1c1c"} />
+                <text x={g.padL - 8} y={g.sy(v * (g.tonnes ? 1000 : 1)) + 3.5} textAnchor="end" fontSize={10} fill="var(--haze)" className="tabular-nums">
+                  {g.yLabels[i]}
                 </text>
               </g>
-            );
-          })}
+            ))}
+            {g.xTicks.map((v, i) => (
+              <text
+                key={v}
+                x={g.sx(v)}
+                y={g.bottom + 16}
+                textAnchor={g.xTicks.length > 1 && i === g.xTicks.length - 1 && g.sx(v) > width - 20 ? "end" : "middle"}
+                fontSize={10}
+                fill="var(--haze)"
+                className="tabular-nums"
+              >
+                {curve.unit === "×" ? `${trim(v)}×` : trim(v)}
+              </text>
+            ))}
 
-          {n > 0 && (
+            {g.limitPx != null && (
+              <g>
+                <rect x={g.limitPx} y={g.top} width={g.padL + g.plotW - g.limitPx} height={plotHeight} fill="#fff" fillOpacity={0.035} />
+                <line x1={g.limitPx} x2={g.limitPx} y1={g.top} y2={g.bottom} stroke="#3a3a3a" />
+                {/* Along the bottom, clear of the markers that sit at the limit, which is usually the top of the curve. */}
+              <text
+                x={(g.limitPx + g.padL + g.plotW) / 2}
+                y={g.bottom - 9}
+                textAnchor="middle"
+                fontSize={10}
+                letterSpacing="0.08em"
+                fill="var(--haze)"
+                stroke="#090909"
+                strokeWidth={4}
+                paintOrder="stroke"
+              >
+                  WON&apos;T FIT
+                </text>
+              </g>
+            )}
+            {g.area && !g.allZero && <path d={g.area} fill="#fff" fillOpacity={0.06} />}
+            <path d={g.line} fill="none" stroke={g.allZero ? "#555" : "#d9d9d9"} strokeWidth={2} strokeLinejoin="round" strokeLinecap="round" />
+            {/* Engine counts are whole numbers: a dot on each one says the line only joins them up. */}
+            {curve.unit !== "×" &&
+              !g.allZero &&
+              g.pts.map((p) => <circle key={p.x} cx={g.sx(p.x)} cy={g.sy(Math.max(0, p.payloadKg))} r={2} fill="#d9d9d9" />)}
+
+            {g.marks.map((mk, i) => (
+              <line key={mk.key} x1={mk.px} x2={mk.px} y1={g.top - 16 - g.placed[i].lane * LANE_H} y2={g.sy(mk.kg)} stroke={COLOR[mk.key]} strokeOpacity={0.55} />
+            ))}
+
+            {g.allZero && (
+              <g textAnchor="middle" className="font-space" stroke="#000" strokeWidth={6} strokeLinejoin="round" paintOrder="stroke">
+                <text x={g.padL + g.plotW / 2} y={g.top + plotHeight / 2 - 6} fontSize={15} fill="#fff" fontWeight={600}>
+                  Can&apos;t reach this destination {curve.unit === "×" ? "at any stretch" : `with any number of ${curve.unit}`}
+                </text>
+                <text x={g.padL + g.plotW / 2} y={g.top + plotHeight / 2 + 16} fontSize={13} fill="var(--haze)">
+                  Most Δv anywhere on this sweep: {km(g.maxDv)} km/s
+                </text>
+              </g>
+            )}
+            {hp && <line x1={hx} x2={hx} y1={g.top} y2={g.bottom} stroke="#fff" strokeOpacity={0.35} />}
+
+            {g.marks.map((mk) =>
+              mk.key === "best" ? (
+                <path key={mk.key} d={diamond(mk.px, g.sy(mk.kg), 8.5)} fill="#000" />
+              ) : (
+                <circle key={mk.key} cx={mk.px} cy={g.sy(mk.kg)} r={mk.key === "real" ? 9 : 6.5} fill="#000" />
+              ),
+            )}
+            {g.marks.map((mk) => (
+              <Shape key={mk.key} kind={mk.key} x={mk.px} y={g.sy(mk.kg)} />
+            ))}
+            {hp && <circle cx={hx} cy={g.sy(Math.max(0, hp.payloadKg))} r={4} fill="#fff" stroke="#000" strokeWidth={2} />}
+
+            {g.marks.map((mk, i) => {
+              const { lane, flip } = g.placed[i];
+              const y = g.top - 12 - lane * LANE_H;
+              return (
+                <g key={mk.key}>
+                  <Shape kind={mk.key} x={mk.px} y={y - 4} s={0.62} />
+                  <text x={flip ? mk.px - 9 : mk.px + 9} y={y} textAnchor={flip ? "end" : "start"} fontSize={11} letterSpacing="0.04em">
+                    <tspan fill="#fff" fontWeight={600}>
+                      {NAME[mk.key]}
+                    </tspan>
+                    {mk.value && <tspan fill="rgba(255,255,255,0.72)"> {mk.value}</tspan>}
+                  </text>
+                </g>
+              );
+            })}
+
             <rect
               x={g.padL - 8}
               y={g.top - 4}
@@ -416,8 +441,8 @@ export default function TradeChart({ curve, currentX, onPick, caption, context, 
               onPointerLeave={() => setCursor(null)}
               onClick={onClick}
             />
-          )}
-        </svg>
+          </svg>
+        )}
 
         {hp && (
           <div

@@ -68,7 +68,7 @@ describe("label layout", () => {
 
 describe("payloadText", () => {
   it("uses tonnes for big rockets and kilograms for small ones", () => {
-    expect(payloadText(22_800, true)).toBe("23 t");
+    expect(payloadText(22_800, true)).toBe("22.8 t");
     expect(payloadText(8_460, true)).toBe("8.5 t");
     expect(payloadText(140_000, true)).toBe("140 t");
     expect(payloadText(1_250, false)).toBe("1,250 kg");

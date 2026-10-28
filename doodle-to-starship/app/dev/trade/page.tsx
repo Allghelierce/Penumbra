@@ -11,9 +11,11 @@ import { tradeCurve, type TradeSweep } from "@/lib/trade";
 const CASES: { title: string; template: string; sweep: TradeSweep; destination?: DestinationId; start?: number }[] = [
   { title: "Falcon 9 · stage 1 stretch", template: "falcon9", sweep: { kind: "tank-stretch", stageIndex: 0 }, start: 1.45 },
   { title: "Falcon 9 · stage 2 stretch", template: "falcon9", sweep: { kind: "tank-stretch", stageIndex: 1 } },
-  { title: "Falcon 9 · stage 1 engines", template: "falcon9", sweep: { kind: "engine-count", stageIndex: 0 }, start: 12 },
+  { title: "Falcon 9 · stage 1 engines", template: "falcon9", sweep: { kind: "engine-count", stageIndex: 0 }, start: 7 },
   { title: "Saturn V · stage 1 stretch", template: "saturn-v", sweep: { kind: "tank-stretch", stageIndex: 0 }, start: 1.2 },
   { title: "Starship · booster stretch", template: "starship", sweep: { kind: "tank-stretch", stageIndex: 0 } },
+  { title: "Falcon 9 · stage 2 engines", template: "falcon9", sweep: { kind: "engine-count", stageIndex: 1 } },
+  { title: "Starship · booster engines", template: "starship", sweep: { kind: "engine-count", stageIndex: 0 }, start: 30 },
   { title: "Electron · stage 1 engines", template: "electron", sweep: { kind: "engine-count", stageIndex: 0 }, start: 7 },
   { title: "Electron · stage 1 stretch to Mars", template: "electron", sweep: { kind: "tank-stretch", stageIndex: 0 }, destination: "mars-transfer", start: 1.3 },
 ];
@@ -49,7 +51,7 @@ export default function TradeDevPage() {
         ))}
         <div className="w-[428px] space-y-6">
           <Demo title="Compact · Falcon 9 stage 1" curve={curves[0].curve} start={1.45} compact />
-          <Demo title="Compact · Electron engines" curve={curves[5].curve} start={7} compact />
+          <Demo title="Compact · Electron engines" curve={curves[7].curve} start={7} compact />
         </div>
       </div>
     </main>
