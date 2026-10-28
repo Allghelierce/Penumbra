@@ -90,12 +90,10 @@ body {
   opacity: 0;
   animation: fade-in 0.5s 1.3s ease-out forwards;
 }
+/* The red pen still writes itself on with reduced motion: a stroke appearing in place isn't movement. */
 @media (prefers-reduced-motion: reduce) {
   .draft-in *,
-  .pen-draw,
-  .pen-note,
   .part-tag,
-  .sticker-in,
   .scanline,
   .bar-grow,
   .live-dot,
@@ -156,6 +154,16 @@ body {
 @keyframes fade-in {
   to {
     opacity: 1;
+  }
+}
+/* Handwriting: a note is written left to right once its stroke is down. */
+.pen-write {
+  clip-path: inset(-40% 100% -40% -4%);
+  animation: pen-write 0.6s linear forwards;
+}
+@keyframes pen-write {
+  to {
+    clip-path: inset(-40% -4% -40% -4%);
   }
 }
 
@@ -273,18 +281,6 @@ body {
   border-bottom: 1px solid var(--rule);
 }
 
-/* Shimmer while a Grok Imagine render develops. */
-.developing {
-  background: linear-gradient(110deg, #23262d 30%, #3a3f49 50%, #23262d 70%);
-  background-size: 200% 100%;
-  animation: developing 1.6s linear infinite;
-}
-@keyframes developing {
-  to {
-    background-position: -200% 0;
-  }
-}
-
 /* Part tags step back once the red pen starts writing; hovering the napkin brings them back. */
 .part-tags {
   transition: opacity 0.2s ease-out;
@@ -309,21 +305,6 @@ body {
 }
 .pen-fix:hover {
   text-decoration: underline;
-}
-
-/* The mission patch gets slapped onto the napkin like a sticker. */
-.sticker-in {
-  animation: sticker-in 0.45s cubic-bezier(0.2, 1.4, 0.4, 1) both;
-}
-@keyframes sticker-in {
-  from {
-    opacity: 0;
-    transform: scale(1.6) rotate(-12deg);
-  }
-  to {
-    opacity: 1;
-    transform: scale(1) rotate(8deg);
-  }
 }
 
 /* SpaceX-style buttons: uppercase, a white outline that fills on hover. */
@@ -399,94 +380,6 @@ details > summary::-webkit-details-marker {
   }
 }
 
-/* ---- NapkinRender: the Grok Imagine render taking over the napkin (components/NapkinRender.tsx) ---- */
-.napkin-render-img {
-  position: absolute;
-  inset: 0;
-  width: 100%;
-  height: 100%;
-  object-fit: cover;
-  border-radius: 2px;
-  pointer-events: none;
-  -webkit-touch-callout: none;
-}
-/* A soft-edged mask twice the napkin's height slides down in step with the beam. */
-.render-wipe {
-  -webkit-mask-image: linear-gradient(180deg, #000 46%, transparent 54%);
-  mask-image: linear-gradient(180deg, #000 46%, transparent 54%);
-  -webkit-mask-size: 100% 220%;
-  mask-size: 100% 220%;
-  -webkit-mask-repeat: no-repeat;
-  mask-repeat: no-repeat;
-  animation: render-wipe 1.2s cubic-bezier(0.45, 0.05, 0.55, 0.95) both;
-}
-.scanline.render-beam {
-  animation: render-beam 1.2s cubic-bezier(0.45, 0.05, 0.55, 0.95) both;
-}
-@keyframes render-wipe {
-  from {
-    -webkit-mask-position: 0 100%;
-    mask-position: 0 100%;
-  }
-  to {
-    -webkit-mask-position: 0 0;
-    mask-position: 0 0;
-  }
-}
-@keyframes render-beam {
-  from {
-    top: -10%;
-  }
-  to {
-    top: 110%;
-  }
-}
-/* Over the render the red pen is a faint ghost that never takes a click. */
-.render-ink-faded,
-.render-ink-faded * {
-  pointer-events: none !important;
-}
-/* While Grok Imagine works: a highlight running round the napkin's edge. */
-.render-pending {
-  position: absolute;
-  inset: -3px;
-  padding: 2px;
-  border-radius: 4px;
-  pointer-events: none;
-  background: linear-gradient(110deg, rgba(255, 255, 255, 0.1) 40%, rgba(255, 255, 255, 0.9) 50%, rgba(255, 255, 255, 0.1) 60%) 0 0 / 300% 100%;
-  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
-  -webkit-mask-composite: xor;
-  mask: linear-gradient(#000 0 0) content-box exclude, linear-gradient(#000 0 0);
-  animation: render-shimmer 1.8s linear infinite;
-}
-@keyframes render-shimmer {
-  from {
-    background-position: 100% 0;
-  }
-  to {
-    background-position: 0 0;
-  }
-}
-@keyframes render-fade {
-  from {
-    opacity: 0;
-  }
-}
-@media (prefers-reduced-motion: reduce) {
-  .render-beam {
-    display: none;
-  }
-  .render-wipe {
-    -webkit-mask-image: none;
-    mask-image: none;
-    animation: render-fade 0.6s ease-out both;
-  }
-  .render-pending {
-    animation: none;
-  }
-}
-/* ---- end NapkinRender ---- */
-
 /* The selected design-review issue's number pulses on the napkin. */
 .mark-pulse {
   animation: mark-pulse 1.1s ease-in-out infinite !important;
@@ -503,7 +396,7 @@ details > summary::-webkit-details-marker {
   }
 }
 
-/* Pen down: the overlays on the drawing area (hint, tags, red pen, render, sticker) step aside. */
+/* Pen down: the overlays on the drawing area (hint, tags, red pen) step aside. */
 .napkin-overlay {
   transition: opacity 250ms ease-out 120ms;
 }
@@ -513,7 +406,7 @@ details > summary::-webkit-details-marker {
   transition: opacity 120ms ease-out;
 }
 
-/* Build and Fly on a real flight: the failed part, outlined in red, glowing softly. */
+/* Build and Fly on a real flight: the failed part, looped in red, glowing softly. */
 .failed-highlight {
   filter: drop-shadow(0 0 5px rgba(255, 75, 62, 0.85)) drop-shadow(0 0 14px rgba(255, 75, 62, 0.35));
   animation: highlight-pulse 1.8s ease-in-out infinite;
@@ -527,25 +420,4 @@ details > summary::-webkit-details-marker {
   .failed-highlight {
     animation: none;
   }
-}
-
-/* Transparent render cutouts float on the space backdrop: no paper, frame or chalk behind the ship,
-   just a soft rim glow and a shadow so it pops. */
-.napkin-render-img.is-cutout {
-  filter: drop-shadow(0 0 10px rgba(150, 190, 255, 0.35)) drop-shadow(0 16px 26px rgba(0, 0, 0, 0.7));
-}
-.render-wipe:has(.napkin-render-img.is-cutout.opacity-100) > svg {
-  opacity: 0;
-}
-.napkin:has(.napkin-render-img.is-cutout.opacity-100) {
-  outline-color: transparent;
-}
-.napkin:has(.napkin-render-img.is-cutout.opacity-100)::before {
-  opacity: 0;
-}
-.napkin:has(.napkin-render-img.is-cutout.opacity-100) > canvas {
-  opacity: 0;
-}
-.cutout-well img {
-  filter: drop-shadow(0 0 10px rgba(150, 190, 255, 0.3)) drop-shadow(0 12px 20px rgba(0, 0, 0, 0.65));
 }
