@@ -127,17 +127,42 @@ export function drawSky(ctx: CanvasRenderingContext2D, W: number, H: number, _pa
   }
   drawSun(ctx, W, H, alt);
   drawBirds(ctx, W, H, alt);
+  drawHelicopter(ctx, W, H, alt);
   drawStorm(ctx, W, H, alt, centerY);
   drawCirrus(ctx, W, H, alt, centerY);
   drawNacreous(ctx, W, H, alt, centerY);
+  drawScienceBalloon(ctx, W, H, alt, centerY);
+  drawBlueJet(ctx, W, H, alt, centerY);
   drawSprite(ctx, W, H, alt, centerY);
   drawNoctilucent(ctx, W, H, alt, centerY);
+  drawElve(ctx, W, H, alt, centerY);
   drawStarlinkTrain(ctx, W, H, alt, centerY);
   drawLandmarks(ctx, W, H, alt, centerY);
   ctx.globalAlpha = 1;
 }
 
-type LandmarkIcon = "tower" | "mountain" | "airliner" | "delta" | "glider" | "parachute" | "aurora" | "telescope" | "train";
+type LandmarkIcon =
+  | "tower"
+  | "mountain"
+  | "airliner"
+  | "vulture"
+  | "delta"
+  | "glider"
+  | "blackbird"
+  | "fighter"
+  | "parachute"
+  | "balloon"
+  | "volcano"
+  | "sprite"
+  | "ripple"
+  | "meteor"
+  | "rocketplane"
+  | "aurora"
+  | "decay"
+  | "sputnik"
+  | "capsule"
+  | "telescope"
+  | "train";
 
 /**
  * Famous things at their real heights, down the left edge, so the climb has a sense of scale.
@@ -145,12 +170,34 @@ type LandmarkIcon = "tower" | "mountain" | "airliner" | "delta" | "glider" | "pa
  */
 const LANDMARKS: { km: number; label: string; icon: LandmarkIcon }[] = [
   { km: 0.83, label: "Burj Khalifa", icon: "tower" },
+  { km: 4, label: "Skydivers jump", icon: "parachute" },
   { km: 8.8, label: "Everest", icon: "mountain" },
   { km: 10, label: "Airliners cruise", icon: "airliner" },
+  // Struck by an airliner over Côte d'Ivoire in 1973: the highest bird on record.
+  { km: 11.3, label: "Rüppell's vulture", icon: "vulture" },
   { km: 18, label: "Concorde", icon: "delta" },
   { km: 21, label: "U-2 spy plane", icon: "glider" },
+  // The record for sustained level flight, 1976.
+  { km: 25.9, label: "SR-71 Blackbird", icon: "blackbird" },
+  // The jet altitude record, a zoom climb in 1977.
+  { km: 37.7, label: "MiG-25 zoom climb", icon: "fighter" },
   { km: 41, label: "Record skydive", icon: "parachute" },
+  // JAXA's BU60-1, the highest an uncrewed balloon has flown, 2002.
+  { km: 53, label: "Highest balloon", icon: "balloon" },
+  // The 2022 eruption's plume, the highest ever measured.
+  { km: 57, label: "Hunga Tonga eruption", icon: "volcano" },
+  { km: 70, label: "Red sprites", icon: "sprite" },
+  { km: 82, label: "Highest clouds", icon: "ripple" },
+  { km: 85, label: "Meteors burn up", icon: "meteor" },
+  // Flight 91 in 1963, the highest an airplane has flown.
+  { km: 108, label: "X-15 rocket plane", icon: "rocketplane" },
   { km: 110, label: "Northern lights", icon: "aurora" },
+  // Thin air still drags hard enough here to pull a satellite down within days.
+  { km: 160, label: "Orbits last only days", icon: "decay" },
+  // Perigee of the first satellite, 1957.
+  { km: 215, label: "Sputnik 1", icon: "sputnik" },
+  // Apogee of the first crewed orbit, 1961.
+  { km: 327, label: "Gagarin's Vostok 1", icon: "capsule" },
   { km: 540, label: "Hubble", icon: "telescope" },
   { km: 550, label: "Starlink", icon: "train" },
 ];
@@ -258,11 +305,193 @@ function drawLandmarkIcon(ctx: CanvasRenderingContext2D, icon: LandmarkIcon, x: 
       ctx.fill();
       return;
     case "glider":
+      // The U-2 from above: wings far longer than the body.
       ctx.moveTo(x - 6, y);
-      ctx.lineTo(x + 6, y);
-      ctx.moveTo(x, y - 7);
-      ctx.lineTo(x, y + 7);
+      ctx.lineTo(x + 7, y);
+      ctx.moveTo(x + 1, y - 8);
+      ctx.lineTo(x + 1, y + 8);
+      ctx.moveTo(x - 5.5, y - 2.5);
+      ctx.lineTo(x - 5.5, y + 2.5);
       ctx.stroke();
+      return;
+    case "vulture":
+      // Soaring, with the fingered wingtips of a big raptor.
+      ctx.moveTo(x - 8, y - 1);
+      ctx.quadraticCurveTo(x - 4, y - 4, x, y + 1);
+      ctx.quadraticCurveTo(x + 4, y - 4, x + 8, y - 1);
+      for (const sx of [-1, 1]) {
+        ctx.moveTo(x + sx * 8, y - 1);
+        ctx.lineTo(x + sx * 9.6, y - 2.6);
+        ctx.moveTo(x + sx * 8, y - 1);
+        ctx.lineTo(x + sx * 9.8, y - 0.4);
+      }
+      ctx.stroke();
+      return;
+    case "blackbird":
+      // SR-71 from above: a long chined nose, a delta and two engine nacelles.
+      ctx.moveTo(x + 9, y);
+      ctx.lineTo(x - 2, y - 1.4);
+      ctx.lineTo(x - 8, y - 0.8);
+      ctx.lineTo(x - 8, y + 0.8);
+      ctx.lineTo(x - 2, y + 1.4);
+      ctx.closePath();
+      ctx.moveTo(x + 1, y);
+      ctx.lineTo(x - 6, y - 6);
+      ctx.lineTo(x - 6, y + 6);
+      ctx.closePath();
+      ctx.fill();
+      ctx.fillRect(x - 7.5, y - 4.6, 6, 1.6);
+      ctx.fillRect(x - 7.5, y + 3, 6, 1.6);
+      return;
+    case "fighter":
+      // MiG-25 from above: swept wings and twin tails.
+      ctx.moveTo(x + 9.5, y);
+      ctx.lineTo(x + 6, y - 1.3);
+      ctx.lineTo(x + 1, y - 1.3);
+      ctx.lineTo(x - 3, y - 6.5);
+      ctx.lineTo(x - 5.5, y - 6.5);
+      ctx.lineTo(x - 4.5, y - 1.3);
+      ctx.lineTo(x - 6, y - 1.3);
+      ctx.lineTo(x - 8.5, y - 4);
+      ctx.lineTo(x - 9.5, y - 4);
+      ctx.lineTo(x - 8.5, y);
+      ctx.lineTo(x - 9.5, y + 4);
+      ctx.lineTo(x - 8.5, y + 4);
+      ctx.lineTo(x - 6, y + 1.3);
+      ctx.lineTo(x - 4.5, y + 1.3);
+      ctx.lineTo(x - 5.5, y + 6.5);
+      ctx.lineTo(x - 3, y + 6.5);
+      ctx.lineTo(x + 1, y + 1.3);
+      ctx.lineTo(x + 6, y + 1.3);
+      ctx.closePath();
+      ctx.fill();
+      return;
+    case "balloon":
+      // A stratospheric balloon: a tall envelope on a long line to a small gondola.
+      ctx.ellipse(x, y - 3, 4, 5, 0, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.moveTo(x, y + 2);
+      ctx.lineTo(x, y + 6);
+      ctx.stroke();
+      ctx.fillRect(x - 1.5, y + 6, 3, 2.5);
+      return;
+    case "volcano":
+      ctx.moveTo(x - 7, y + 6);
+      ctx.lineTo(x - 2, y);
+      ctx.lineTo(x + 2, y);
+      ctx.lineTo(x + 7, y + 6);
+      ctx.closePath();
+      ctx.fill();
+      ctx.fillStyle = "rgb(200,204,214)";
+      ctx.beginPath();
+      ctx.arc(x, y - 3, 2.4, 0, Math.PI * 2);
+      ctx.arc(x + 2.2, y - 6.5, 2.8, 0, Math.PI * 2);
+      ctx.arc(x - 1.5, y - 8.5, 2.2, 0, Math.PI * 2);
+      ctx.fill();
+      return;
+    case "sprite":
+      ctx.fillStyle = "rgb(255,96,120)";
+      ctx.strokeStyle = "rgb(255,96,120)";
+      ctx.ellipse(x, y - 2, 5.5, 3.5, 0, Math.PI, 0);
+      ctx.closePath();
+      ctx.fill();
+      ctx.lineWidth = 1.1;
+      ctx.beginPath();
+      for (const dx of [-3.5, -1.2, 1.2, 3.5]) {
+        ctx.moveTo(x + dx, y - 1.5);
+        ctx.lineTo(x + dx * 0.8, y + 6);
+      }
+      ctx.stroke();
+      return;
+    case "ripple":
+      ctx.strokeStyle = "rgb(160,230,255)";
+      ctx.lineWidth = 1.2;
+      for (const dy of [-3, 1, 5]) {
+        ctx.moveTo(x - 7, y + dy);
+        ctx.quadraticCurveTo(x - 3.5, y + dy - 2.5, x, y + dy);
+        ctx.quadraticCurveTo(x + 3.5, y + dy + 2.5, x + 7, y + dy);
+      }
+      ctx.stroke();
+      return;
+    case "meteor":
+      ctx.strokeStyle = "rgb(255,214,160)";
+      ctx.fillStyle = "rgb(255,236,200)";
+      ctx.moveTo(x - 8, y - 6);
+      ctx.lineTo(x + 3, y + 3);
+      ctx.stroke();
+      ctx.beginPath();
+      ctx.arc(x + 4, y + 4, 2, 0, Math.PI * 2);
+      ctx.fill();
+      return;
+    case "rocketplane":
+      // X-15: a black dart with stubby wings and its rocket lit.
+      ctx.moveTo(x + 9, y);
+      ctx.lineTo(x + 5, y - 1.5);
+      ctx.lineTo(x - 7, y - 1.5);
+      ctx.lineTo(x - 7, y + 1.5);
+      ctx.lineTo(x + 5, y + 1.5);
+      ctx.closePath();
+      ctx.moveTo(x, y - 1.5);
+      ctx.lineTo(x - 3, y - 5);
+      ctx.lineTo(x - 5, y - 5);
+      ctx.lineTo(x - 4, y - 1.5);
+      ctx.moveTo(x, y + 1.5);
+      ctx.lineTo(x - 3, y + 5);
+      ctx.lineTo(x - 5, y + 5);
+      ctx.lineTo(x - 4, y + 1.5);
+      ctx.fill();
+      ctx.fillStyle = "rgb(255,170,90)";
+      ctx.beginPath();
+      ctx.moveTo(x - 7, y - 1.1);
+      ctx.lineTo(x - 11, y);
+      ctx.lineTo(x - 7, y + 1.1);
+      ctx.closePath();
+      ctx.fill();
+      return;
+    case "decay":
+      // An orbit spiralling in.
+      ctx.lineWidth = 1.2;
+      for (let i = 0; i <= 30; i++) {
+        const th = -Math.PI / 2 + i * 0.27;
+        const rr = 7.5 - i * 0.16;
+        ctx.lineTo(x + Math.cos(th) * rr, y + Math.sin(th) * rr);
+      }
+      ctx.stroke();
+      ctx.fillStyle = "rgb(90,150,230)";
+      ctx.beginPath();
+      ctx.arc(x, y, 2.2, 0, Math.PI * 2);
+      ctx.fill();
+      return;
+    case "sputnik":
+      // A polished ball trailing four whip antennas.
+      ctx.lineWidth = 1;
+      for (const [ax, ay] of [
+        [-8, -5],
+        [-9, -1.5],
+        [-8.5, 2.5],
+        [-6.5, 6],
+      ]) {
+        ctx.moveTo(x + 1, y);
+        ctx.lineTo(x + ax, y + ay);
+      }
+      ctx.stroke();
+      ctx.beginPath();
+      ctx.arc(x + 2.5, y - 0.5, 3.2, 0, Math.PI * 2);
+      ctx.fill();
+      return;
+    case "capsule":
+      // Vostok: the ball Gagarin rode in, on its cone-shaped equipment module.
+      ctx.moveTo(x - 0.5, y - 2.6);
+      ctx.lineTo(x - 7.5, y - 4.2);
+      ctx.lineTo(x - 7.5, y + 4.2);
+      ctx.lineTo(x - 0.5, y + 2.6);
+      ctx.closePath();
+      ctx.fill();
+      ctx.beginPath();
+      ctx.arc(x + 2.5, y, 3.8, 0, Math.PI * 2);
+      ctx.fill();
       return;
     case "parachute":
       ctx.arc(x, y - 1, 6, Math.PI, 0);
@@ -325,123 +554,554 @@ function drawBirds(ctx: CanvasRenderingContext2D, W: number, H: number, alt: num
   ctx.globalAlpha = base;
 }
 
+/** Wall-clock seconds, for flicker that shouldn't depend on how fast the flight plays. */
+const wallSeconds = () => (typeof performance === "undefined" ? 0 : performance.now() / 1000);
+
+/** The storm's cauliflower tower in units of its size: [x, y, r], base at y = 1.1, anvil at y = -0.3. */
+const STORM_PUFFS: [number, number, number][] = [
+  [-0.5, 0.9, 0.26],
+  [-0.1, 0.86, 0.33],
+  [0.36, 0.9, 0.28],
+  [-0.44, 0.5, 0.3],
+  [0.02, 0.42, 0.37],
+  [0.42, 0.52, 0.29],
+  [-0.36, 0.08, 0.3],
+  [0.08, -0.02, 0.36],
+  [0.46, 0.1, 0.27],
+];
+
+/** Pouches hanging under the anvil's downwind side (mammatus). */
+const MAMMATUS: [number, number][] = [
+  [0.66, -0.31],
+  [0.84, -0.335],
+  [1.0, -0.36],
+  [1.16, -0.39],
+  [1.32, -0.42],
+  [1.48, -0.455],
+];
+
+function anvilPath(ctx: CanvasRenderingContext2D) {
+  ctx.beginPath();
+  ctx.moveTo(-1.3, -0.47);
+  ctx.quadraticCurveTo(-1.2, -0.63, -0.9, -0.64);
+  ctx.lineTo(1.95, -0.67);
+  ctx.lineTo(2.45, -0.6);
+  ctx.quadraticCurveTo(1.9, -0.52, 1.5, -0.46);
+  ctx.quadraticCurveTo(0.9, -0.33, 0.42, -0.28);
+  ctx.lineTo(-0.42, -0.28);
+  ctx.quadraticCurveTo(-0.95, -0.32, -1.3, -0.47);
+  ctx.closePath();
+}
+
+/** A news helicopter hovering off the pad at liftoff, nose toward the rocket; it sinks out of view as the rocket climbs. */
+function drawHelicopter(ctx: CanvasRenderingContext2D, W: number, H: number, alt: number) {
+  const k = clamp01(1 - alt / 2.5);
+  if (k <= 0) return;
+  const base = ctx.globalAlpha;
+  const now = wallSeconds();
+  const x = W * 0.775;
+  const y = H * 0.47 + alt * H * 0.22 + Math.sin(now * 1.3) * 2;
+  ctx.save();
+  ctx.globalAlpha = base * 0.8 * k;
+  ctx.fillStyle = "rgb(24,52,86)";
+  ctx.strokeStyle = "rgb(24,52,86)";
+  ctx.lineCap = "round";
+  // Cabin, tail boom and fin.
+  ctx.beginPath();
+  ctx.ellipse(x, y, 9, 5.5, 0, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.fillRect(x + 5, y - 2.2, 17, 2.4);
+  ctx.beginPath();
+  ctx.moveTo(x + 20, y - 1.5);
+  ctx.lineTo(x + 24, y - 8);
+  ctx.lineTo(x + 25.5, y - 1);
+  ctx.closePath();
+  ctx.fill();
+  // Canopy glass.
+  ctx.fillStyle = "rgb(120,170,215)";
+  ctx.beginPath();
+  ctx.ellipse(x - 4.5, y - 1, 3.6, 2.8, 0, Math.PI * 0.95, Math.PI * 1.9);
+  ctx.closePath();
+  ctx.fill();
+  // Skids.
+  ctx.lineWidth = 1.2;
+  ctx.beginPath();
+  ctx.moveTo(x - 9, y + 9);
+  ctx.lineTo(x + 7, y + 9);
+  ctx.moveTo(x - 4, y + 5);
+  ctx.lineTo(x - 5, y + 9);
+  ctx.moveTo(x + 3, y + 5);
+  ctx.lineTo(x + 4, y + 9);
+  ctx.stroke();
+  // Rotor: the blade's apparent length swings as it turns.
+  ctx.fillStyle = "rgb(24,52,86)";
+  const blade = 4 + 18 * Math.abs(Math.cos(now * 21));
+  ctx.fillRect(x - 0.75, y - 9, 1.5, 4);
+  ctx.fillRect(x - blade, y - 9.5, blade * 2, 1.5);
+  ctx.restore();
+}
+
 /**
- * A distant thunderstorm: a flat cumulonimbus tower whose top spreads into an anvil where it
- * hits the tropopause, with a lightning bolt below. Storms stop at the tropopause because the
- * stratosphere above is warmer and won't let the air keep rising.
+ * A distant thunderstorm: a cauliflower cumulonimbus tower whose top spreads into a flat anvil
+ * where it hits the tropopause, with an overshooting dome, mammatus under the anvil, a rain
+ * shaft and forked lightning. Storms stop at the tropopause because the stratosphere above is
+ * warmer and won't let the air keep rising; only the strongest updrafts poke a dome through.
  */
 function drawStorm(ctx: CanvasRenderingContext2D, W: number, H: number, alt: number, centerY: number) {
   const y = featureY(alt, 10, centerY, H);
-  if (y < -H * 0.3 || y > H + H * 0.3) return;
+  if (y < -H * 0.35 || y > H + H * 0.3) return;
   const base = ctx.globalAlpha;
   // Left of the rocket, clear of the altitude ladder on the right.
   const x = W * 0.25;
-  const s = H * 0.11;
-  // Anvil: a wide flat top with a sheared overhang.
-  ctx.globalAlpha = base * 0.9;
-  ctx.fillStyle = "rgb(214,226,240)";
+  const s = H * 0.12;
+  const lit = "rgb(240,246,252)";
+  const body = "rgb(214,226,240)";
+  const shade = "rgb(158,177,202)";
+  const dark = "rgb(96,112,140)";
+  // A double flash every second or so: the bolt brightens and the tower lights up from inside.
+  const ph = wallSeconds() % 1.1;
+  const flash = ph < 0.07 || (ph > 0.15 && ph < 0.2);
+  ctx.save();
+  ctx.translate(x, y);
+  ctx.scale(s, s);
+  ctx.lineCap = "round";
+  ctx.lineJoin = "round";
+
+  // Rain shaft under the base, slanting with the wind.
+  ctx.globalAlpha = base * 0.14;
+  ctx.fillStyle = "rgb(120,142,172)";
   ctx.beginPath();
-  ctx.moveTo(x - s * 1.6, y - s * 0.55);
-  ctx.lineTo(x + s * 2.1, y - s * 0.62);
-  ctx.lineTo(x + s * 1.2, y - s * 0.3);
-  ctx.lineTo(x + s * 0.45, y - s * 0.22);
-  // Tower down to the base.
-  ctx.quadraticCurveTo(x + s * 0.7, y + s * 0.4, x + s * 0.55, y + s * 1.1);
-  ctx.lineTo(x - s * 0.55, y + s * 1.1);
-  ctx.quadraticCurveTo(x - s * 0.75, y + s * 0.35, x - s * 0.4, y - s * 0.22);
-  ctx.lineTo(x - s * 1.1, y - s * 0.32);
+  ctx.moveTo(-0.5, 1.1);
+  ctx.lineTo(0.44, 1.1);
+  ctx.lineTo(0.28, 1.95);
+  ctx.lineTo(-0.68, 1.95);
   ctx.closePath();
   ctx.fill();
-  // Shaded underside of the anvil and the dark storm base.
-  ctx.fillStyle = "rgb(150,170,196)";
-  ctx.fillRect(x - s * 1.1, y - s * 0.34, s * 2.3, s * 0.08);
-  ctx.fillStyle = "rgb(96,112,140)";
-  ctx.fillRect(x - s * 0.6, y + s * 0.95, s * 1.2, s * 0.16);
-  // Lightning from the base.
-  ctx.globalAlpha = base;
-  ctx.strokeStyle = "rgb(255,236,120)";
-  ctx.lineWidth = 2;
+  ctx.globalAlpha = base * 0.35;
+  ctx.strokeStyle = "rgb(140,160,190)";
+  ctx.lineWidth = 1.1 / s;
+  ctx.beginPath();
+  for (let i = 0; i < 9; i++) {
+    const rx = -0.46 + i * 0.1;
+    const len = 0.5 + ((i * 37) % 5) * 0.08;
+    ctx.moveTo(rx, 1.14);
+    ctx.lineTo(rx - len * 0.18, 1.14 + len);
+  }
+  ctx.stroke();
+
+  // Tower: shade puffs nudged down-right, then the body, then sunlit tops up-left; clipped flat at the base.
+  ctx.globalAlpha = base * 0.95;
+  ctx.save();
+  ctx.beginPath();
+  ctx.rect(-1, -0.6, 2, 1.7);
+  ctx.clip();
+  const puffs = (dx: number, dy: number, k: number) => {
+    ctx.beginPath();
+    for (const [px, py, r] of STORM_PUFFS) {
+      ctx.moveTo(px + dx + r * k, py + dy);
+      ctx.arc(px + dx, py + dy, r * k, 0, Math.PI * 2);
+    }
+  };
+  ctx.fillStyle = shade;
+  puffs(0.05, 0.06, 1);
+  ctx.fill();
+  ctx.fillStyle = body;
+  puffs(0, 0, 1);
+  ctx.fill();
+  ctx.fillStyle = lit;
+  puffs(-0.08, -0.09, 0.62);
+  ctx.fill();
+  if (flash) {
+    ctx.globalCompositeOperation = "lighter";
+    ctx.globalAlpha = base * 0.3;
+    ctx.fillStyle = "rgb(255,246,210)";
+    puffs(0, 0, 1);
+    ctx.fill();
+    ctx.globalCompositeOperation = "source-over";
+  }
+  // The dark, rain-heavy base: the bottom of the puffs in shadow, cut flat.
+  ctx.beginPath();
+  ctx.rect(-1, 0.97, 2, 0.13);
+  ctx.clip();
+  ctx.fillStyle = dark;
+  puffs(0, 0, 1);
+  ctx.fill();
+  ctx.restore();
+
+  // Anvil: the shade copy nudged down leaves a shadowed underside, then a sunlit top edge.
+  ctx.save();
+  ctx.translate(0, 0.05);
+  ctx.fillStyle = shade;
+  anvilPath(ctx);
+  ctx.fill();
+  ctx.restore();
+  ctx.fillStyle = body;
+  anvilPath(ctx);
+  ctx.fill();
+  ctx.fillStyle = lit;
+  ctx.beginPath();
+  ctx.moveTo(-1.05, -0.62);
+  ctx.lineTo(1.95, -0.67);
+  ctx.lineTo(2.35, -0.615);
+  ctx.lineTo(1.9, -0.6);
+  ctx.lineTo(-0.95, -0.575);
+  ctx.closePath();
+  ctx.fill();
+  // Overshooting top: a dome punched up through the anvil by the strongest updraft.
+  ctx.beginPath();
+  ctx.arc(0.05, -0.64, 0.2, Math.PI, 0);
+  ctx.closePath();
+  ctx.fill();
+  ctx.fillStyle = body;
+  ctx.beginPath();
+  ctx.arc(0.05, -0.64, 0.2, -Math.PI * 0.35, 0);
+  ctx.lineTo(0.05, -0.64);
+  ctx.closePath();
+  ctx.fill();
+  // Fibrous streamers blown off the anvil's downwind edge.
+  ctx.fillStyle = body;
+  for (const [sy, len, a] of [
+    [-0.655, 0.75, 0.7],
+    [-0.6, 0.55, 0.5],
+    [-0.55, 0.35, 0.35],
+  ] as const) {
+    ctx.globalAlpha = base * a;
+    ctx.beginPath();
+    ctx.moveTo(2.0, sy - 0.018);
+    ctx.lineTo(2.0 + len, sy - 0.03);
+    ctx.lineTo(2.0, sy + 0.018);
+    ctx.closePath();
+    ctx.fill();
+  }
+  // Mammatus pouches.
+  ctx.globalAlpha = base * 0.95;
+  ctx.fillStyle = shade;
+  ctx.beginPath();
+  for (const [mx, my] of MAMMATUS) {
+    ctx.moveTo(mx + 0.085, my);
+    ctx.arc(mx, my, 0.085, 0, Math.PI);
+  }
+  ctx.fill();
+
+  // Forked lightning from the base, brighter in a flash.
+  ctx.globalAlpha = base * (flash ? 1 : 0.75);
+  ctx.strokeStyle = flash ? "rgb(255,252,220)" : "rgb(255,236,120)";
+  ctx.lineWidth = (flash ? 2.6 : 2) / s;
   ctx.lineJoin = "miter";
   ctx.beginPath();
-  ctx.moveTo(x - s * 0.1, y + s * 1.1);
-  ctx.lineTo(x - s * 0.25, y + s * 1.4);
-  ctx.lineTo(x - s * 0.05, y + s * 1.42);
-  ctx.lineTo(x - s * 0.2, y + s * 1.75);
+  ctx.moveTo(0.05, 1.11);
+  ctx.lineTo(-0.08, 1.35);
+  ctx.lineTo(0.04, 1.37);
+  ctx.lineTo(-0.1, 1.62);
+  ctx.lineTo(0, 1.64);
+  ctx.lineTo(-0.13, 1.92);
+  ctx.moveTo(0.04, 1.37);
+  ctx.lineTo(0.17, 1.5);
+  ctx.lineTo(0.13, 1.52);
+  ctx.lineTo(0.25, 1.68);
   ctx.stroke();
+  ctx.restore();
   ctx.globalAlpha = base;
 }
 
-/** Nacreous ("mother-of-pearl") clouds, the iridescent polar stratospheric clouds around 22 km. */
+/** A lens with a fuller top, for nacreous clouds. */
+function lensPath(ctx: CanvasRenderingContext2D, cx: number, cy: number, a: number, b: number) {
+  ctx.beginPath();
+  ctx.moveTo(cx - a, cy);
+  ctx.quadraticCurveTo(cx, cy - b * 2, cx + a, cy);
+  ctx.quadraticCurveTo(cx, cy + b * 1.2, cx - a, cy);
+  ctx.closePath();
+}
+
+/** Nacreous lenses: [x, dy] as fractions of the screen, half-width of W, half-height of H. */
+const NACREOUS: [number, number, number, number][] = [
+  [0.21, 0, 0.12, 0.017],
+  [0.37, 0.03, 0.075, 0.012],
+  [0.1, 0.045, 0.06, 0.009],
+  [0.47, -0.022, 0.05, 0.008],
+];
+
+/** Pastel bands from the rim in, like the inside of a shell. */
+const PEARL: RGB[] = [
+  [255, 176, 214],
+  [255, 222, 168],
+  [168, 242, 206],
+  [150, 214, 246],
+  [214, 190, 255],
+  [252, 248, 255],
+];
+
+/**
+ * Nacreous ("mother-of-pearl") clouds, the polar stratospheric clouds around 22 km: thin
+ * lenses of ice crystals so small and even that they split sunlight into pastel bands.
+ */
 function drawNacreous(ctx: CanvasRenderingContext2D, W: number, H: number, alt: number, centerY: number) {
   const y = featureY(alt, 22, centerY, H);
-  if (y < -40 || y > H + 40) return;
+  if (y < -60 || y > H + 60) return;
   const base = ctx.globalAlpha;
-  ctx.lineCap = "round";
-  const tints: [string, number][] = [
-    ["rgb(255,170,210)", 0],
-    ["rgb(150,240,230)", 5],
-    ["rgb(205,180,255)", 10],
-  ];
-  for (const [color, dy] of tints) {
-    ctx.strokeStyle = color;
-    ctx.lineWidth = 3;
-    ctx.globalAlpha = base * 0.35;
-    ctx.beginPath();
-    for (let i = 0; i <= 24; i++) {
-      const x = W * (0.08 + (i / 24) * 0.42);
-      const wy = y + dy + Math.sin(i * 0.7) * 4;
-      if (i === 0) ctx.moveTo(x, wy);
-      else ctx.lineTo(x, wy);
-    }
-    ctx.stroke();
+  for (const [fx, fdy, fa, fb] of NACREOUS) {
+    const cx = W * fx;
+    const cy = y + fdy * H;
+    PEARL.forEach((c, i) => {
+      const k = 1 - i * 0.15;
+      ctx.globalAlpha = base * (i === 0 ? 0.42 : 0.5);
+      ctx.fillStyle = rgba(c, 1);
+      lensPath(ctx, cx, cy - (1 - k) * H * fb * 0.4, W * fa * k, H * fb * k);
+      ctx.fill();
+    });
   }
   ctx.globalAlpha = base;
 }
 
-/** A red sprite: the jellyfish of red light that flashes above big thunderstorms, around 70 km. */
+/**
+ * A super-pressure science balloon floating at about 33 km: a lobed pumpkin of thin film as
+ * wide as a stadium, its parachute and instrument gondola hanging far below on the flight line.
+ */
+function drawScienceBalloon(ctx: CanvasRenderingContext2D, W: number, H: number, alt: number, centerY: number) {
+  const y = featureY(alt, 33, centerY, H);
+  if (y < -H * 0.3 || y > H + H * 0.1) return;
+  const base = ctx.globalAlpha;
+  const x = W * 0.3;
+  const rx = H * 0.056;
+  const ry = H * 0.04;
+  ctx.save();
+  ctx.lineCap = "round";
+  // The flight line, with the packed parachute partway down and the gondola at the end.
+  const bottom = y + ry + H * 0.15;
+  ctx.globalAlpha = base * 0.85;
+  ctx.strokeStyle = "#ffffff";
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  ctx.moveTo(x, y + ry);
+  ctx.lineTo(x, bottom);
+  ctx.stroke();
+  ctx.fillStyle = "#ff8a3d";
+  ctx.beginPath();
+  ctx.ellipse(x, y + ry + H * 0.05, 3, 9, 0, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.fillStyle = "#e6e6e6";
+  ctx.fillRect(x - 5, bottom, 10, 8);
+  ctx.fillStyle = "#1c2a3c";
+  ctx.strokeStyle = "#ffffff";
+  for (const sx of [-17, 7]) {
+    ctx.fillRect(x + sx, bottom + 2, 10, 4);
+    ctx.strokeRect(x + sx + 0.5, bottom + 2.5, 9, 3);
+  }
+  // The envelope: lit film, a shaded side, and the seams between its lobes.
+  ctx.globalAlpha = base * 0.92;
+  ctx.fillStyle = "rgb(238,242,250)";
+  ctx.beginPath();
+  ctx.ellipse(x, y, rx, ry, 0, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.fillStyle = "rgb(200,210,228)";
+  ctx.beginPath();
+  ctx.ellipse(x, y, rx, ry, 0, -Math.PI / 2, Math.PI / 2);
+  ctx.ellipse(x, y, rx * 0.45, ry, 0, Math.PI / 2, -Math.PI / 2, true);
+  ctx.closePath();
+  ctx.fill();
+  ctx.strokeStyle = "rgba(140,156,186,0.9)";
+  ctx.lineWidth = 1;
+  for (let i = 1; i <= 3; i++) {
+    const k = Math.sin((i * Math.PI) / 8);
+    ctx.beginPath();
+    ctx.ellipse(x, y, rx * k, ry, 0, -Math.PI / 2, Math.PI / 2);
+    ctx.moveTo(x, y + ry);
+    ctx.ellipse(x, y, rx * k, ry, 0, Math.PI / 2, (Math.PI * 3) / 2);
+    ctx.stroke();
+  }
+  ctx.beginPath();
+  ctx.moveTo(x, y - ry);
+  ctx.lineTo(x, y + ry);
+  ctx.stroke();
+  // The end fittings at top and bottom.
+  ctx.fillStyle = "rgb(140,156,186)";
+  ctx.fillRect(x - 3, y - ry - 1.5, 6, 3);
+  ctx.fillRect(x - 2.5, y + ry - 1.5, 5, 3.5);
+  // Its label, in the weather balloon's style.
+  ctx.globalAlpha = base;
+  ctx.font = `700 10px ${displayFont()}`;
+  if ("letterSpacing" in ctx) (ctx as CanvasRenderingContext2D & { letterSpacing: string }).letterSpacing = "1.4px";
+  ctx.fillStyle = "#ffffff";
+  ctx.textAlign = "left";
+  ctx.textBaseline = "middle";
+  ctx.fillText("SCIENCE BALLOON · 33 KM", x + rx + 10, y);
+  ctx.restore();
+}
+
+/**
+ * Blue jets: narrow cones of blue light that shoot up out of thunderstorm tops into the
+ * stratosphere, to about 40–50 km. Drawn as nested flat cones over the storm's column.
+ */
+function drawBlueJet(ctx: CanvasRenderingContext2D, W: number, H: number, alt: number, centerY: number) {
+  const y = featureY(alt, 40, centerY, H);
+  if (y < -H * 0.35 || y > H + H * 0.35) return;
+  const base = ctx.globalAlpha;
+  const x = W * 0.25;
+  const s = H * 0.13;
+  const yb = y + s * 1.1;
+  const cones: [number, number, number, RGB][] = [
+    [0.42, 1.25, 0.2, [70, 120, 255]],
+    [0.26, 1.05, 0.32, [96, 156, 255]],
+    [0.11, 0.8, 0.5, [190, 220, 255]],
+  ];
+  for (const [w, h, a, c] of cones) {
+    const yt = yb - s * h * 1.95;
+    // Bright where it leaves the storm top, fading out as it fans up.
+    const grad = ctx.createLinearGradient(0, yb, 0, yt);
+    grad.addColorStop(0, rgba(c, a));
+    grad.addColorStop(0.6, rgba(c, a * 0.55));
+    grad.addColorStop(1, rgba(c, 0));
+    ctx.globalAlpha = base;
+    ctx.fillStyle = grad;
+    ctx.beginPath();
+    ctx.moveTo(x - s * 0.035, yb);
+    ctx.lineTo(x - s * w, yb - s * h * 1.6);
+    ctx.quadraticCurveTo(x, yt, x + s * w, yb - s * h * 1.6);
+    ctx.lineTo(x + s * 0.035, yb);
+    ctx.closePath();
+    ctx.fill();
+  }
+  ctx.globalAlpha = base;
+}
+
+/**
+ * Sprites: red jellyfish of light that flash above big thunderstorms around 70 km, with a
+ * diffuse halo over a scalloped crown and carrot-shaped tendrils that fade to blue.
+ */
 function drawSprite(ctx: CanvasRenderingContext2D, W: number, H: number, alt: number, centerY: number) {
   const y = featureY(alt, 70, centerY, H);
-  if (y < -H * 0.2 || y > H + H * 0.2) return;
+  if (y < -H * 0.25 || y > H + H * 0.25) return;
   const base = ctx.globalAlpha;
   // Straight above the thunderstorm.
   const x = W * 0.25;
-  const s = H * 0.07;
-  // The red crown...
-  ctx.globalAlpha = base * 0.55;
-  ctx.fillStyle = "rgb(255,70,90)";
+  const s = H * 0.075;
+  // The halo: a flat disc of glow just above the crown.
+  ctx.globalAlpha = base * 0.16;
+  ctx.fillStyle = "rgb(255,110,120)";
   ctx.beginPath();
-  ctx.ellipse(x, y, s * 0.9, s * 0.3, 0, 0, Math.PI * 2);
+  ctx.ellipse(x, y - s * 0.5, s * 1.55, s * 0.2, 0, 0, Math.PI * 2);
   ctx.fill();
-  // ...trailing tendrils down, fading to violet.
-  ctx.strokeStyle = "rgb(200,80,200)";
-  ctx.lineWidth = 1.5;
+  // Tendrils first, so the crown sits over their tops; red at the top, blue at the tips.
+  const grad = ctx.createLinearGradient(0, y, 0, y + s * 1.9);
+  grad.addColorStop(0, "rgba(255,72,104,0.75)");
+  grad.addColorStop(0.55, "rgba(206,72,196,0.5)");
+  grad.addColorStop(1, "rgba(110,110,255,0)");
+  ctx.globalAlpha = base;
+  ctx.fillStyle = grad;
+  ctx.strokeStyle = grad;
+  ctx.lineWidth = 1.2;
   ctx.lineCap = "round";
-  for (let i = -3; i <= 3; i++) {
-    ctx.globalAlpha = base * (0.35 - Math.abs(i) * 0.04);
+  for (let i = -4; i <= 4; i++) {
+    const tx = x + i * s * 0.2;
+    const bx = x + i * s * 0.15 + Math.sin(i * 1.7) * s * 0.08;
+    const len = s * (1.35 + 0.4 * Math.cos(i * 1.3));
+    const w = s * (0.07 - Math.abs(i) * 0.006);
     ctx.beginPath();
-    ctx.moveTo(x + i * s * 0.22, y + s * 0.2);
-    ctx.quadraticCurveTo(x + i * s * 0.3 + s * 0.1, y + s * 0.8, x + i * s * 0.18, y + s * 1.5);
+    ctx.moveTo(tx - w, y + s * 0.1);
+    ctx.lineTo(tx + w, y + s * 0.1);
+    ctx.lineTo(bx, y + len);
+    ctx.closePath();
+    ctx.fill();
+    // Every other tendril forks near its tip.
+    if (i % 2 === 0) {
+      const fy = y + len * 0.72;
+      const fx = tx + (bx - tx) * 0.72;
+      ctx.beginPath();
+      ctx.moveTo(fx, fy);
+      ctx.lineTo(fx + s * 0.12 * (i < 0 ? -1 : 1), fy + len * 0.22);
+      ctx.stroke();
+    }
+  }
+  // The crown: a bell with a scalloped hem.
+  ctx.globalAlpha = base * 0.62;
+  ctx.fillStyle = "rgb(255,64,92)";
+  ctx.beginPath();
+  ctx.moveTo(x - s * 0.95, y + s * 0.12);
+  ctx.quadraticCurveTo(x - s * 0.9, y - s * 0.38, x, y - s * 0.4);
+  ctx.quadraticCurveTo(x + s * 0.9, y - s * 0.38, x + s * 0.95, y + s * 0.12);
+  for (let i = 1; i <= 6; i++) {
+    const hx = x + s * 0.95 - i * ((s * 1.9) / 6);
+    ctx.quadraticCurveTo(hx + (s * 1.9) / 12, y + s * 0.32, hx, y + s * 0.12);
+  }
+  ctx.closePath();
+  ctx.fill();
+  ctx.globalAlpha = base;
+}
+
+/**
+ * Elves: rings of red light that race outward around 90 km when a big lightning stroke's
+ * pulse hits the ionosphere. They last a millisecond; here one ring expands every couple of seconds.
+ */
+function drawElve(ctx: CanvasRenderingContext2D, W: number, H: number, alt: number, centerY: number) {
+  const y = featureY(alt, 90, centerY, H);
+  if (y < -40 || y > H + 40) return;
+  const base = ctx.globalAlpha;
+  const x = W * 0.25;
+  const k = (wallSeconds() * 0.5) % 1;
+  ctx.lineWidth = 2;
+  for (const [lag, a] of [
+    [0, 0.5],
+    [0.12, 0.25],
+  ] as const) {
+    const kk = k - lag;
+    if (kk <= 0) continue;
+    ctx.globalAlpha = base * a * (1 - kk);
+    ctx.strokeStyle = "rgb(255,120,84)";
+    ctx.beginPath();
+    ctx.ellipse(x, y, W * (0.03 + 0.17 * kk), H * (0.005 + 0.02 * kk), 0, 0, Math.PI * 2);
     ctx.stroke();
   }
   ctx.globalAlpha = base;
 }
 
-/** Noctilucent clouds: thin electric-blue ripples near 82 km, the highest clouds on Earth. */
+/** Bands of noctilucent cloud: [dy px, start, end (fractions of W), wave phase, alpha]. */
+const NLC_BANDS: [number, number, number, number, number][] = [
+  [-13, 0.5, 0.74, 0.4, 0.35],
+  [-6, 0.44, 0.8, 1.9, 0.55],
+  [0, 0.41, 0.83, 3.1, 0.8],
+  [6, 0.46, 0.79, 4.4, 0.55],
+  [12, 0.53, 0.72, 5.6, 0.3],
+];
+
+/**
+ * Noctilucent clouds near 82 km, the highest on Earth: thin electric-blue bands that taper at
+ * both ends, with short billows rippling across the brightest one.
+ */
 function drawNoctilucent(ctx: CanvasRenderingContext2D, W: number, H: number, alt: number, centerY: number) {
   const y = featureY(alt, 82, centerY, H);
-  if (y < -30 || y > H + 30) return;
+  if (y < -40 || y > H + 40) return;
   const base = ctx.globalAlpha;
-  ctx.strokeStyle = "rgb(150,225,255)";
-  ctx.lineWidth = 1.2;
-  for (let row = 0; row < 3; row++) {
-    ctx.globalAlpha = base * (0.45 - row * 0.1);
-    ctx.beginPath();
-    for (let i = 0; i <= 40; i++) {
-      const x = W * (0.42 + (i / 40) * 0.38);
-      const wy = y + row * 6 + Math.sin(i * 0.9 + row) * 2.5;
-      if (i === 0) ctx.moveTo(x, wy);
-      else ctx.lineTo(x, wy);
+  ctx.strokeStyle = "rgb(160,230,255)";
+  ctx.lineCap = "round";
+  for (const [dy, x0, x1, ph, a] of NLC_BANDS) {
+    const n = 36;
+    let px = W * x0;
+    let py = y + dy + Math.sin(ph) * 2.5;
+    for (let i = 1; i <= n; i++) {
+      const f = i / n;
+      const x = W * (x0 + (x1 - x0) * f);
+      const wy = y + dy + Math.sin(ph + f * 9) * 2.5 + Math.sin(ph * 2 + f * 23) * 0.8;
+      // Taper: thin and faint at the ends, full in the middle.
+      const env = Math.sin(f * Math.PI);
+      ctx.globalAlpha = base * a * env;
+      ctx.lineWidth = 0.6 + 1.2 * env;
+      ctx.beginPath();
+      ctx.moveTo(px, py);
+      ctx.lineTo(x, wy);
+      ctx.stroke();
+      px = x;
+      py = wy;
     }
+  }
+  // Billows: short crests crossing the brightest band, like ripples on sand.
+  ctx.lineWidth = 1;
+  for (let i = 0; i < 11; i++) {
+    const f = 0.18 + (i / 10) * 0.64;
+    const x = W * (0.41 + 0.42 * f);
+    ctx.globalAlpha = base * 0.45 * Math.sin(f * Math.PI);
+    ctx.beginPath();
+    ctx.moveTo(x - 3, y - 7);
+    ctx.quadraticCurveTo(x + 2, y, x - 2, y + 8);
     ctx.stroke();
   }
   ctx.globalAlpha = base;
@@ -461,17 +1121,23 @@ function drawStarlinkTrain(ctx: CanvasRenderingContext2D, W: number, H: number, 
   ctx.globalAlpha = base;
 }
 
-/** A flat cartoon sun with two halo rings, low in the sky at liftoff; it sinks out of view as the rocket climbs. */
+/**
+ * A flat cartoon sun with two halo rings, low in the sky at liftoff; it sinks out of view as
+ * the rocket climbs. It fades as added light, so it dims into a glow instead of a grey disc.
+ */
 function drawSun(ctx: CanvasRenderingContext2D, W: number, H: number, alt: number) {
   const k = clamp01(1 - alt / 8);
   if (k <= 0) return;
   const base = ctx.globalAlpha;
   const x = W * 0.14;
   const y = H * 0.2 + alt * H * 0.05;
-  const r = H * 0.034;
+  const r = H * 0.034 * (0.75 + 0.25 * k);
+  ctx.save();
+  ctx.globalCompositeOperation = "lighter";
   for (const [ring, a] of [
-    [2.8, 0.07],
-    [1.9, 0.12],
+    [2.8, 0.06],
+    [1.9, 0.1],
+    [1, 0.85],
   ] as const) {
     ctx.globalAlpha = base * a * k;
     ctx.fillStyle = "rgb(255,236,170)";
@@ -479,7 +1145,9 @@ function drawSun(ctx: CanvasRenderingContext2D, W: number, H: number, alt: numbe
     ctx.arc(x, y, r * ring, 0, Math.PI * 2);
     ctx.fill();
   }
-  ctx.globalAlpha = base * k;
+  ctx.restore();
+  // The solid disc only while it's bright, so its warm color holds at liftoff.
+  ctx.globalAlpha = base * Math.pow(k, 4);
   ctx.fillStyle = "rgb(255,240,190)";
   ctx.beginPath();
   ctx.arc(x, y, r, 0, Math.PI * 2);
@@ -551,11 +1219,14 @@ export function drawStars(
 ) {
   if (alpha <= 0.01) return;
   drawMilkyWay(ctx, W, H, alpha);
-  ctx.fillStyle = "#ffffff";
+  drawConstellations(ctx, W, H, alpha, t);
   for (const s of stars) {
     const f = PARALLAX[s.layer];
     const x = wrap(s.x * W + scrollX * f, W);
     const y = wrap(s.y * H + scrollY * f, H);
+    // A few run warm or blue, the way real stars differ in temperature.
+    const tint = (s.x * 9973) % 1;
+    ctx.fillStyle = tint < 0.09 ? "rgb(255,214,170)" : tint > 0.92 ? "rgb(196,214,255)" : "#ffffff";
     ctx.globalAlpha = alpha * s.a * (0.75 + 0.25 * Math.sin(t * s.tw * 3 + s.x * 50));
     if (s.layer < 2) {
       ctx.fillRect(x - s.r / 2, y - s.r / 2, s.r, s.r);
@@ -572,6 +1243,123 @@ export function drawStars(
     }
   }
   ctx.globalAlpha = 1;
+}
+
+interface Constellation {
+  /** Center as fractions of the screen, and the size of one unit as a fraction of W. */
+  at: [number, number];
+  size: number;
+  /** [x, y, radius px, color]. */
+  stars: [number, number, number, RGB][];
+  lines: [number, number][];
+}
+
+const WHITE: RGB = [255, 255, 255];
+
+/** Orion and the Big Dipper in their real shapes, fixed far behind everything like the Milky Way. */
+const CONSTELLATIONS: Constellation[] = [
+  {
+    // Orion: Betelgeuse glows orange at the shoulder, Rigel blue-white at the knee.
+    at: [0.71, 0.5],
+    size: 0.11,
+    stars: [
+      [-0.32, -0.5, 1.9, [255, 170, 110]],
+      [0.28, -0.45, 1.4, WHITE],
+      [0.02, -0.66, 0.9, WHITE],
+      [-0.12, 0.02, 1.3, WHITE],
+      [0, -0.02, 1.35, WHITE],
+      [0.12, -0.06, 1.25, WHITE],
+      [-0.24, 0.52, 1.3, WHITE],
+      [0.3, 0.46, 1.9, [196, 214, 255]],
+      [0.02, 0.2, 0.8, WHITE],
+      [0.035, 0.3, 0.7, WHITE],
+    ],
+    lines: [
+      [0, 2],
+      [2, 1],
+      [0, 3],
+      [1, 5],
+      [3, 4],
+      [4, 5],
+      [3, 6],
+      [5, 7],
+    ],
+  },
+  {
+    // The Big Dipper: four stars in the bowl, three in the handle.
+    at: [0.27, 0.22],
+    size: 0.12,
+    stars: [
+      [0.36, -0.1, 1.4, WHITE],
+      [0.38, 0.12, 1.3, WHITE],
+      [0.14, 0.16, 1.2, WHITE],
+      [0.1, -0.04, 1, WHITE],
+      [-0.1, -0.08, 1.35, WHITE],
+      [-0.27, -0.12, 1.3, WHITE],
+      [-0.46, -0.02, 1.3, WHITE],
+    ],
+    lines: [
+      [0, 1],
+      [1, 2],
+      [2, 3],
+      [3, 0],
+      [3, 4],
+      [4, 5],
+      [5, 6],
+    ],
+  },
+];
+
+/** The Pleiades: a tight knot of blue-white stars in a faint haze, offsets in px. */
+const PLEIADES: [number, number, number][] = [
+  [0, 0, 1.1],
+  [6, -3, 1],
+  [11, 1, 0.9],
+  [4, 5, 1],
+  [-5, 3, 0.8],
+  [9, -8, 0.8],
+  [-2, -6, 0.7],
+];
+
+function drawConstellations(ctx: CanvasRenderingContext2D, W: number, H: number, alpha: number, t: number) {
+  ctx.save();
+  ctx.lineWidth = 1;
+  for (const c of CONSTELLATIONS) {
+    const u = W * c.size;
+    const cx = W * c.at[0];
+    const cy = H * c.at[1];
+    // Faint stick-figure lines, the way a star chart joins them.
+    ctx.globalAlpha = alpha * 0.1;
+    ctx.strokeStyle = "#ffffff";
+    ctx.beginPath();
+    for (const [i, j] of c.lines) {
+      ctx.moveTo(cx + c.stars[i][0] * u, cy + c.stars[i][1] * u);
+      ctx.lineTo(cx + c.stars[j][0] * u, cy + c.stars[j][1] * u);
+    }
+    ctx.stroke();
+    c.stars.forEach(([sx, sy, r, color], i) => {
+      ctx.globalAlpha = alpha * (0.8 + 0.2 * Math.sin(t * 2.3 + i * 1.7));
+      ctx.fillStyle = rgba(color, 1);
+      ctx.beginPath();
+      ctx.arc(cx + sx * u, cy + sy * u, r, 0, Math.PI * 2);
+      ctx.fill();
+    });
+  }
+  const px = W * 0.79;
+  const py = H * 0.36;
+  ctx.globalAlpha = alpha * 0.06;
+  ctx.fillStyle = "rgb(170,200,255)";
+  ctx.beginPath();
+  ctx.ellipse(px + 3, py - 1, 16, 11, 0, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.fillStyle = "rgb(214,228,255)";
+  for (const [dx, dy, r] of PLEIADES) {
+    ctx.globalAlpha = alpha * 0.85;
+    ctx.beginPath();
+    ctx.arc(px + dx, py + dy, r, 0, Math.PI * 2);
+    ctx.fill();
+  }
+  ctx.restore();
 }
 
 /** Dust lanes and a dense scatter of faint stars along the galaxy's plane, fixed far behind everything. */
@@ -686,7 +1474,51 @@ const RIDGES: number[][] = (() => {
   });
 })();
 
-/** Flat, hazy ridges and the spaceport on the horizon: assembly building, lightning masts, water tower. */
+/** Sun glints on the strip of sea at the far right: [x, height above the horizon, width] as fractions/px. */
+const OCEAN_GLINTS: [number, number, number][] = (() => {
+  const rand = seeded(909);
+  return Array.from({ length: 9 }, () => [0.89 + rand() * 0.1, 0.002 + rand() * 0.008, 3 + rand() * 7] as [number, number, number]);
+})();
+
+/** Palms along the horizon: [x as a fraction of W, size]. */
+const PALMS: [number, number][] = [
+  [0.035, 1],
+  [0.235, 0.75],
+  [0.262, 1.05],
+  [0.288, 0.85],
+  [0.925, 0.95],
+  [0.952, 0.7],
+];
+
+/** A palm silhouette: a leaning trunk and drooping fronds, `h` px tall, standing at (x, y). */
+function drawPalm(ctx: CanvasRenderingContext2D, x: number, y: number, h: number) {
+  const tx = x + h * 0.16;
+  const ty = y - h;
+  ctx.lineWidth = Math.max(1.5, h * 0.07);
+  ctx.beginPath();
+  ctx.moveTo(x, y + 1);
+  ctx.quadraticCurveTo(x + h * 0.04, y - h * 0.55, tx, ty);
+  ctx.stroke();
+  ctx.lineWidth = Math.max(1, h * 0.055);
+  ctx.beginPath();
+  for (const [dx, dy] of [
+    [-0.5, 0.3],
+    [-0.36, -0.06],
+    [0.04, -0.22],
+    [0.4, -0.04],
+    [0.52, 0.32],
+  ]) {
+    ctx.moveTo(tx, ty);
+    ctx.quadraticCurveTo(tx + dx * h * 0.55, ty + dy * h * 0.5 - h * 0.18, tx + dx * h, ty + dy * h);
+  }
+  ctx.stroke();
+}
+
+/**
+ * Flat, hazy ridges and the spaceport on the horizon: the assembly building and its low bay,
+ * lightning masts with the catenary wire slung between them, a tracking radar, propellant
+ * storage spheres, the water tower, palms, and a strip of sea past the altitude ladder.
+ */
 function drawSkyline(ctx: CanvasRenderingContext2D, W: number, H: number, y: number, alpha: number) {
   const colors = ["rgb(46,104,160)", "rgb(22,52,82)"];
   RIDGES.forEach((ridge, i) => {
@@ -699,21 +1531,59 @@ function drawSkyline(ctx: CanvasRenderingContext2D, W: number, H: number, y: num
     ctx.fill();
   });
 
-  ctx.fillStyle = "rgb(12,26,42)";
-  // Vehicle assembly building with its tall door.
+  // The sea at the far right, flat to the horizon, catching the sun.
+  ctx.fillStyle = "rgb(38,96,152)";
+  ctx.fillRect(W * 0.885, y - H * 0.012, W * 0.115, H * 0.012 + 1);
+  ctx.fillStyle = "rgba(214,236,255,0.7)";
+  for (const [gx, gy, gw] of OCEAN_GLINTS) ctx.fillRect(Math.round(W * gx), Math.round(y - H * gy), Math.round(gw), 1);
+
+  const ink = "rgb(12,26,42)";
+  const trim = "rgb(30,58,88)";
+  ctx.fillStyle = ink;
+  ctx.strokeStyle = ink;
+  ctx.lineCap = "round";
+  // Vehicle assembly building with its tall door, and the low bay beside it.
   const vx = W * 0.08;
   const vh = H * 0.075;
   ctx.fillRect(vx, y - vh, W * 0.045, vh + 1);
-  ctx.fillStyle = "rgb(30,58,88)";
+  ctx.fillRect(vx + W * 0.045, y - vh * 0.4, W * 0.028, vh * 0.4 + 1);
+  ctx.fillStyle = trim;
   ctx.fillRect(vx + W * 0.017, y - vh * 0.82, W * 0.011, vh * 0.82);
-  // Lightning masts with red warning lights.
-  ctx.fillStyle = "rgb(12,26,42)";
-  for (const mx of [0.6, 0.67]) {
-    ctx.fillRect(W * mx, y - H * 0.11, 2, H * 0.11 + 1);
-    ctx.fillStyle = "rgb(255,70,60)";
-    ctx.fillRect(W * mx - 1, y - H * 0.11 - 2, 4, 3);
-    ctx.fillStyle = "rgb(12,26,42)";
+  // Window rows along the low bay.
+  for (let r = 0; r < 2; r++) {
+    for (let c = 0; c < 5; c++) ctx.fillRect(Math.round(vx + W * 0.049 + c * W * 0.0045), Math.round(y - vh * (0.32 - r * 0.13)), 2, 2);
   }
+  // Seams across the door's stacked panels.
+  ctx.fillStyle = ink;
+  for (let i = 1; i < 6; i++) ctx.fillRect(vx + W * 0.017, Math.round(y - vh * 0.82 * (i / 6)), W * 0.011, 1);
+  // Lightning masts with red warning lights. A catenary wire sags between their tops and is
+  // anchored to the ground beyond the far mast, so lightning hits the wire, not the rocket.
+  const mh = H * 0.11;
+  const [m1, m2] = [W * 0.6, W * 0.67];
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  ctx.moveTo(m1 + 1, y - mh);
+  ctx.quadraticCurveTo((m1 + m2) / 2, y - mh * 0.6, m2 + 1, y - mh);
+  ctx.quadraticCurveTo(m2 + W * 0.02, y - mh * 0.35, m2 + W * 0.034, y);
+  ctx.stroke();
+  for (const mx of [m1, m2]) {
+    ctx.fillStyle = ink;
+    ctx.fillRect(mx, y - mh, 2, mh + 1);
+    ctx.fillStyle = "rgb(255,70,60)";
+    ctx.fillRect(mx - 1, y - mh - 2, 4, 3);
+  }
+  // A tracking radar: a dish on a short tower, tipped toward the sky.
+  ctx.fillStyle = ink;
+  const rx = W * 0.36;
+  ctx.fillRect(rx - 1, y - H * 0.03, 3, H * 0.03 + 1);
+  ctx.beginPath();
+  ctx.ellipse(rx + 1, y - H * 0.036, H * 0.015, H * 0.006, -0.6, 0, Math.PI);
+  ctx.closePath();
+  ctx.fill();
+  ctx.beginPath();
+  ctx.moveTo(rx + 1, y - H * 0.036);
+  ctx.lineTo(rx - H * 0.006, y - H * 0.05);
+  ctx.stroke();
   // Water tower, left of the altitude ladder.
   const tx = W * 0.74;
   ctx.fillRect(tx - 6, y - H * 0.045, 2, H * 0.045 + 1);
@@ -721,6 +1591,17 @@ function drawSkyline(ctx: CanvasRenderingContext2D, W: number, H: number, y: num
   ctx.beginPath();
   ctx.arc(tx, y - H * 0.055, H * 0.016, 0, Math.PI * 2);
   ctx.fill();
+  // Propellant storage spheres on short legs, also clear of the ladder.
+  for (const sx of [0.786, 0.81]) {
+    const cx = W * sx;
+    const r = H * 0.012;
+    ctx.fillRect(cx - r * 0.75, y - r * 1.1, 1.5, r * 1.1 + 1);
+    ctx.fillRect(cx + r * 0.75 - 1.5, y - r * 1.1, 1.5, r * 1.1 + 1);
+    ctx.beginPath();
+    ctx.arc(cx, y - r * 1.9, r, 0, Math.PI * 2);
+    ctx.fill();
+  }
+  for (const [px, k] of PALMS) drawPalm(ctx, W * px, y, H * 0.042 * k);
   ctx.globalAlpha = alpha;
 }
 
@@ -868,7 +1749,10 @@ export function drawBoundaries(
     const y = Math.round(layerY(altKm, b.km, centerY, (H * 2.6) / b.km));
     if (y < -30 || y > H + 30) continue;
     const near = 1 - clamp01(Math.abs(altKm - b.km) / Math.max(1, b.km * 0.05));
-    const a = alpha * ((b.hero ? 0.75 : 0.5) + 0.25 * near);
+    // Fade out under the header and the crossing log in the top-left corner.
+    const clear = clamp01((y - H * 0.12) / (H * 0.07));
+    if (clear <= 0) continue;
+    const a = alpha * ((b.hero ? 0.75 : 0.5) + 0.25 * near) * clear;
     ctx.globalAlpha = a;
     ctx.fillStyle = rgba(chalk, 1);
     ctx.fillRect(0, y, W, b.hero ? 2 : 1);
@@ -877,7 +1761,7 @@ export function drawBoundaries(
     const tw = Math.ceil(ctx.measureText(label).width);
     const px = 24;
     const ph = 22;
-    ctx.globalAlpha = Math.min(1, a + 0.2);
+    ctx.globalAlpha = Math.min(1, a + 0.2 * clear);
     ctx.fillStyle = b.hero ? "#ffffff" : "#000000";
     ctx.fillRect(px, y - ph / 2, tw + 20, ph);
     ctx.strokeStyle = "#ffffff";
@@ -1110,14 +1994,41 @@ export function drawBalloon(ctx: CanvasRenderingContext2D, x: number, y: number,
   ctx.fill();
   ctx.fillStyle = "#ffffff";
   ctx.fillRect(-9, -14, 5, 9);
+  // The neck where it was filled and tied off.
+  ctx.fillStyle = "#c9d3e2";
+  ctx.beginPath();
+  ctx.moveTo(-3, 24);
+  ctx.lineTo(3, 24);
+  ctx.lineTo(1.2, 30);
+  ctx.lineTo(-1.2, 30);
+  ctx.closePath();
+  ctx.fill();
   ctx.strokeStyle = "#ffffff";
   ctx.lineWidth = 1;
   ctx.beginPath();
-  ctx.moveTo(0.5, 26);
+  ctx.moveTo(0.5, 30);
   ctx.lineTo(0.5, 62);
   ctx.stroke();
+  // The parachute that brings the instruments down after the balloon bursts.
+  ctx.fillStyle = "#ff8a3d";
+  ctx.beginPath();
+  ctx.arc(0.5, 42, 6, Math.PI, 0);
+  ctx.closePath();
+  ctx.fill();
+  ctx.beginPath();
+  ctx.moveTo(-5.5, 42);
+  ctx.lineTo(0.5, 48);
+  ctx.lineTo(6.5, 42);
+  ctx.stroke();
+  // The radiosonde, with its antenna hanging below.
   ctx.fillStyle = "#ff4b3e";
   ctx.fillRect(-6, 62, 12, 9);
+  ctx.fillStyle = "#ffffff";
+  ctx.fillRect(-4, 64, 8, 2);
+  ctx.beginPath();
+  ctx.moveTo(0.5, 71);
+  ctx.lineTo(0.5, 80);
+  ctx.stroke();
   ctx.font = `700 10px ${font}`;
   if ("letterSpacing" in ctx) (ctx as CanvasRenderingContext2D & { letterSpacing: string }).letterSpacing = "1.4px";
   ctx.fillStyle = "#ffffff";
@@ -1157,8 +2068,36 @@ export interface CityLight {
   b: number;
 }
 
+/** Cities as clusters of lights, brightest at the core, strung together by highways, plus scattered towns. */
+/** Night-side storm cells: [angle from the top of the globe, depth below the limb (of H), flash phase]. */
+const NIGHT_STORMS: [number, number, number][] = [
+  [-0.12, 0.035, 0],
+  [0.05, 0.055, 0.9],
+  [0.2, 0.04, 1.7],
+  [-0.3, 0.06, 0.45],
+  [0.36, 0.07, 2.2],
+];
+
 export function makeCityLights(rand: () => number): CityLight[] {
-  return Array.from({ length: 260 }, () => ({ a: (rand() - 0.5) * 1.6, d: 0.004 + Math.pow(rand(), 1.8) * 0.2, b: 0.3 + rand() * 0.7 }));
+  const lights: CityLight[] = [];
+  const cities = Array.from({ length: 20 }, () => ({ a: (rand() - 0.5) * 1.6, d: 0.008 + Math.pow(rand(), 1.6) * 0.18, size: 0.35 + rand() }));
+  for (const c of cities) {
+    const n = Math.round(5 + c.size * 9);
+    for (let i = 0; i < n; i++) {
+      const r = Math.pow(rand(), 1.6) * 0.011 * c.size;
+      const th = rand() * Math.PI * 2;
+      lights.push({ a: c.a + Math.cos(th) * r, d: Math.max(0.003, c.d + Math.sin(th) * r * 0.4), b: 1 - (r / (0.011 * c.size)) * 0.6 });
+    }
+  }
+  // Highways: dotted lines of light between neighbouring cities.
+  const byAngle = [...cities].sort((p, q) => p.a - q.a);
+  for (let i = 1; i < byAngle.length; i++) {
+    const [p, q] = [byAngle[i - 1], byAngle[i]];
+    if (Math.abs(q.d - p.d) > 0.06 || rand() < 0.35) continue;
+    for (let f = 0.1; f < 0.9; f += 0.08) lights.push({ a: p.a + (q.a - p.a) * f, d: p.d + (q.d - p.d) * f, b: 0.25 + rand() * 0.2 });
+  }
+  for (let i = 0; i < 60; i++) lights.push({ a: (rand() - 0.5) * 1.6, d: 0.004 + Math.pow(rand(), 1.8) * 0.2, b: 0.2 + rand() * 0.45 });
+  return lights;
 }
 
 /**
@@ -1227,6 +2166,26 @@ export function drawEarth(
     ctx.stroke();
   }
   ctx.globalAlpha = 1;
+
+  // Thunderstorms on the night side, flickering inside the clouds as seen from orbit.
+  ctx.save();
+  ctx.globalCompositeOperation = "lighter";
+  ctx.fillStyle = "rgb(190,215,255)";
+  for (const [a0, d, ph] of NIGHT_STORMS) {
+    const f = (t * 0.8 + ph) % 2.6;
+    if (f > 0.16) continue;
+    const a = a0 + spin * 0.9;
+    const r = R - d * H;
+    const x = cx + r * Math.sin(a);
+    const y = cy - r * Math.cos(a);
+    if (x < 0 || x > W || y > H) continue;
+    // Two quick pulses, the second fainter.
+    ctx.globalAlpha = (f < 0.06 ? 0.55 : f > 0.09 ? 0.3 : 0.08) * (0.4 + 0.6 * k);
+    ctx.beginPath();
+    ctx.ellipse(x, y, 8, 3.5, a, 0, Math.PI * 2);
+    ctx.fill();
+  }
+  ctx.restore();
 
   // The atmosphere edge-on: thin, layered bands hugging the limb (twilight orange
   // at the bottom, then blue, fading out), each a crisp arc.
