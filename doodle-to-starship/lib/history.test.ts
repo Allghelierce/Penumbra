@@ -11,11 +11,13 @@ import {
   fixStrokes,
   historicReading,
   historicReview,
+  historicStrokes,
   historicTrace,
 } from "./history";
 import { ALL_MISSIONS } from "./mission-catalog";
 import { readFromGeometry } from "./sketch/geometry";
 import { HISTORIC_MISSIONS } from "./missions";
+import { drawTemplate, TEMPLATES } from "./templates";
 
 /** A local stand-in until lib/missions.ts lands; the shape is HistoricMission's. */
 const crs7: HistoricMission = {
@@ -248,11 +250,14 @@ describe("the flaw drawn into the sketch", () => {
           expect(y).toBeLessThanOrEqual(1);
         }
       }
-      const sketch = DEMO_SKETCHES.find((d) => d.id === m.sketchId)!;
-      const withFlaw = readFromGeometry([...sketch.strokes, ...flaw], m.destination);
-      const shape = (r: typeof reading) => r.parts.map((p) => `${p.kind}@${p.stageIndex ?? "-"}`).sort();
-      expect(shape(withFlaw)).toEqual(shape(reading));
-      expect(withFlaw.design.stages.length).toBe(reading.design.stages.length);
+      // On a stand-in sketch the reader must still see the same parts; a template's parts are exact.
+      if (m.sketchId) {
+        const sketch = DEMO_SKETCHES.find((d) => d.id === m.sketchId)!;
+        const withFlaw = readFromGeometry([...sketch.strokes, ...flaw], m.destination);
+        const shape = (r: typeof reading) => r.parts.map((p) => `${p.kind}@${p.stageIndex ?? "-"}`).sort();
+        expect(shape(withFlaw)).toEqual(shape(reading));
+        expect(withFlaw.design.stages.length).toBe(reading.design.stages.length);
+      }
       expect(defectStrokes(m, reading)).toEqual(flaw);
     },
   );
@@ -279,5 +284,82 @@ describe("review fixes", () => {
       expect(comebackSource(comeback)?.id).toBe(lostId);
     }
     expect(comebackSource(HISTORIC_MISSIONS[0])).toBeNull();
+  });
+});
+
+describe("flights on their rocket's template drawing", () => {
+  /** The flight with its stand-in sketch dropped, the way the catalog lists it under its rocket. */
+  const onRocket = (id: string): HistoricMission => ({ ...HISTORIC_MISSIONS.find((m) => m.id === id)!, sketchId: undefined });
+  const inside = ([x, y]: [number, number], [bx, by, bw, bh]: [number, number, number, number], slack: number) =>
+    x >= bx - slack && x <= bx + bw + slack && y >= by - slack && y <= by + bh + slack;
+
+  it.each([
+    ["crs7", "falcon9"],
+    ["ift1", "starship"],
+  ] as const)("%s replays on the %s template and the red pen marks its exact failed part", (id, rocket) => {
+    const m = onRocket(id);
+    expect(m.rocket).toBe(rocket);
+    const template = TEMPLATES.find((t) => t.id === rocket)!;
+    const reading = historicReading(m);
+    const drawing = drawTemplate(template, reading.design);
+    expect(reading.design.name).toBe(m.vehicle);
+    expect(reading.design.destination).toBe(m.destination);
+    expect(reading.design.stages).toEqual(template.design.stages);
+    expect(reading.parts).toEqual(drawing.parts);
+    expect(historicStrokes(m)).toEqual(drawing.strokes);
+
+    const failure = m.failure!;
+    const part = reading.parts.find((p) => p.kind === failure.part && p.stageIndex === failure.stageIndex)!;
+    expect(part).toBeDefined();
+
+    const review = historicReview(m, reading);
+    expect(review.marks.map((mk) => mk.kind)).toEqual(["outline", "callout", "arrow"]);
+    const [outline, label] = review.marks;
+    if (outline.kind === "outline") outline.box.forEach((v, i) => expect(v).toBeCloseTo(part.box[i], 9));
+    expect(label.note).toBe(failure.label);
+    review.marks.forEach(onNapkin);
+
+    // The flaw is drawn in (or right around) the failed part; the fix there and on the parts it
+    // changed (IFT-1's comeback also added a hot-staging ring at the interstage). All on the napkin.
+    const vehicle = reading.parts.reduce(
+      ([x0, y0, x1, y1], p) => [Math.min(x0, p.box[0]), Math.min(y0, p.box[1]), Math.max(x1, p.box[0] + p.box[2]), Math.max(y1, p.box[1] + p.box[3])],
+      [1, 1, 0, 0],
+    );
+    const vehicleBox: [number, number, number, number] = [vehicle[0], vehicle[1], vehicle[2] - vehicle[0], vehicle[3] - vehicle[1]];
+    for (const [strokes, share] of [
+      [defectStrokes(m, reading), 0.8],
+      [fixStrokes(m, reading), 0.3],
+    ] as const) {
+      expect(strokes.length).toBeGreaterThanOrEqual(2);
+      const points = strokes.flatMap((st) => st.points);
+      for (const pt of points) {
+        expect(pt[0]).toBeGreaterThanOrEqual(0);
+        expect(pt[0]).toBeLessThanOrEqual(1);
+        expect(pt[1]).toBeGreaterThanOrEqual(0);
+        expect(pt[1]).toBeLessThanOrEqual(1);
+        expect(inside(pt, vehicleBox, 0.06)).toBe(true);
+      }
+      const near = points.filter((pt) => inside(pt, part.box, 0.06)).length;
+      expect(near / points.length).toBeGreaterThan(share);
+    }
+  });
+
+  it("keeps the stand-in sketch for a flight that has one", () => {
+    const f1 = HISTORIC_MISSIONS.find((m) => m.id === "falcon1-f1")!;
+    expect(f1.sketchId).toBeDefined();
+    expect(historicStrokes(f1)).toEqual(DEMO_SKETCHES.find((d) => d.id === f1.sketchId)!.strokes);
+  });
+
+  it("puts every flight in the catalog on a drawing with its failed part", () => {
+    for (const m of ALL_MISSIONS) {
+      for (const variant of [m, { ...m, sketchId: undefined }]) {
+        const reading = historicReading(variant);
+        expect(historicStrokes(variant).length, variant.id).toBeGreaterThan(0);
+        if (variant.failure) {
+          const failure = variant.failure;
+          expect(reading.parts.some((p) => p.kind === failure.part), `${variant.id} ${failure.part}`).toBe(true);
+        }
+      }
+    }
   });
 });

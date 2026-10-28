@@ -1,21 +1,54 @@
-// Real flights from history, replayed through the studio: the demo sketch stands in for the
-// vehicle, the red pen marks the part that actually failed, and the launch follows the real
-// timeline. Pure functions over a HistoricMission; no API calls.
+// Real flights from history, replayed through the studio: the flight's rocket (its template
+// drawing, or a stand-in sketch for a vehicle with no rocket of its own here) is on the napkin,
+// the red pen marks the part that actually failed, and the launch follows the real timeline.
+// Pure functions over a HistoricMission; no API calls.
 
 import { DEMO_SKETCHES } from "./demo-sketches";
-import type { FlightEvent, FlightPoint, FlightTrace, HistoricMission, Part, Point, Review, SketchReading, Stroke } from "./design";
+import type {
+  Design,
+  FlightEvent,
+  FlightPoint,
+  FlightTrace,
+  HistoricMission,
+  Part,
+  Point,
+  Review,
+  RocketTemplate,
+  SketchReading,
+  Stroke,
+} from "./design";
 import { ALL_MISSIONS } from "./mission-catalog";
 import { historicMarks } from "./redpen";
 import { readFromGeometry } from "./sketch/geometry";
+import { drawTemplate, TEMPLATES } from "./templates";
 
 const TRACE_POINTS = 300;
 /** Speed at which a climb has turned fully horizontal, for the downrange estimate. */
 const ORBITAL_SPEED_MPS = 7_800;
 
-/** The mission's stand-in sketch, read locally, named for the real vehicle. */
+/** A flight with no stand-in sketch replays on its rocket as built, named for the flight's vehicle. */
+function onTemplate(m: HistoricMission): { template: RocketTemplate; design: Design } | null {
+  if (m.sketchId) return null;
+  const template = TEMPLATES.find((t) => t.id === m.rocket);
+  return template ? { template, design: { ...template.design, name: m.vehicle, destination: m.destination } } : null;
+}
+
+const standIn = (m: HistoricMission) => DEMO_SKETCHES.find((s) => s.id === m.sketchId) ?? DEMO_SKETCHES[0];
+
+/** The drawing a flight replays on: its rocket's template drawing, or its stand-in sketch. */
+export function historicStrokes(m: HistoricMission): Stroke[] {
+  const t = onTemplate(m);
+  return t ? drawTemplate(t.template, t.design).strokes : standIn(m).strokes;
+}
+
+/**
+ * The flight's drawing, read locally and named for the real vehicle: the template's exact parts
+ * (the same ones the Modify flow marks), or the stand-in sketch read by geometry.
+ */
 export function historicReading(m: HistoricMission): SketchReading {
-  const sketch = DEMO_SKETCHES.find((s) => s.id === m.sketchId) ?? DEMO_SKETCHES[0];
-  const reading = readFromGeometry(sketch.strokes, m.destination);
+  const t = onTemplate(m);
+  if (t) return { design: t.design, parts: drawTemplate(t.template, t.design).parts, confidence: 1, problem: null };
+  const reading = readFromGeometry(standIn(m).strokes, m.destination);
   return { ...reading, design: { ...reading.design, name: m.vehicle, destination: m.destination } };
 }
 
