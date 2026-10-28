@@ -3,9 +3,9 @@
 // every number is re-run through analyze(), and each issue links to its red-pen mark.
 
 import { applyAction } from "./actions";
-import type { Analysis, Design, DesignAction, RedPenMark, SketchReading } from "./design";
+import type { Analysis, Design, DesignAction, Part, RedPenMark, SketchReading } from "./design";
 import { analyze, ascentLossesMps, DESTINATIONS, ENGINES, km, kmShort, kmSpare } from "./physics";
-import { buildReview, DESTINATION_NAMES, isIssueMark, SAFE_TWR } from "./redpen";
+import { buildReview, DESTINATION_NAMES, hardwareNeeds, isIssueMark, SAFE_TWR } from "./redpen";
 
 export interface Issue {
   /** 1-based, in display order; the UI numbers the matching red-pen mark with it. */
@@ -48,7 +48,7 @@ export function diagnose(design: Design, analysis: Analysis, reading?: SketchRea
   drafts.push(liftoff.issue);
   drafts.push(deltaVIssue(design, liftoff.flyable, marks, markFor));
   drafts.push(...slowUpperStages(analysis));
-  drafts.push(...hardwareIssues(design, marks, markFor));
+  drafts.push(...hardwareIssues(design, reading?.parts ?? [], markFor));
 
   return drafts
     .map((d, i) => ({ d, i }))
@@ -131,7 +131,6 @@ function deltaVIssue(design: Design, flyable: Design, marks: RedPenMark[], markF
       title: "Enough delta-v",
       why,
       effect: `${kmSpare(total, a.requiredDeltaVMps)} km/s to spare`,
-      markIndex: markFor((m) => m.note === "flies!"),
     };
   }
 
@@ -201,11 +200,12 @@ function slowUpperStages(a: Analysis): Draft[] {
 // ---------------------------------------------------------------------------
 // Hardware the napkin should show
 
-function hardwareIssues(design: Design, all: RedPenMark[], markFor: MarkFinder): Draft[] {
+function hardwareIssues(design: Design, parts: Part[], markFor: MarkFinder): Draft[] {
   const out: Draft[] = [];
   const dest = DESTINATION_NAMES[design.destination];
-  const has = (note: string) => all.some((m) => isIssueMark(m) && m.note === note);
-  if (has("needs legs")) {
+  // Asked directly: the napkin only has room for three marks, so one of these may have none.
+  const needs = hardwareNeeds(design, parts);
+  if (needs.legs) {
     out.push({
       severity: "no-go",
       title: "No landing legs",
@@ -214,7 +214,7 @@ function hardwareIssues(design: Design, all: RedPenMark[], markFor: MarkFinder):
       markIndex: markFor((m) => m.note === "needs legs"),
     });
   }
-  if (has("heat shield!")) {
+  if (needs.shield) {
     out.push({
       severity: "no-go",
       title: "No heat shield",
@@ -223,14 +223,13 @@ function hardwareIssues(design: Design, all: RedPenMark[], markFor: MarkFinder):
       markIndex: markFor((m) => m.note === "heat shield!"),
     });
   }
-  const finsMark = markFor((m) => /vacuum/.test(m.note));
-  if (finsMark !== undefined) {
+  if (needs.fins) {
     out.push({
       severity: "warning",
       title: "Fins are dead weight",
       why: `Fins steer by pushing on air, and above about 100 km there's none. All the way to ${dest} they're just mass the engines have to carry.`,
       effect: "Leave them off for this mission",
-      markIndex: finsMark,
+      markIndex: markFor((m) => m.note === "useless in vacuum"),
     });
   }
   return out;

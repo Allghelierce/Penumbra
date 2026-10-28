@@ -83,6 +83,17 @@ describe("diagnose", () => {
     expect(titles).toEqual(expect.arrayContaining(["No landing legs", "No heat shield"]));
   });
 
+  it("still lists legs and dead-weight fins when the napkin had no room for their marks", () => {
+    const crowded = falconLike({
+      stages: [{ label: "Booster", engines: [{ engine: "merlin-1d", count: 1 }], propellant: "kerolox", tankVolumeM3: 400 }],
+      destination: "moon-surface",
+      features: ["fins"],
+    });
+    const list = issues(crowded);
+    expect(list.map((i) => i.title)).toEqual(expect.arrayContaining(["No landing legs", "Fins are dead weight"]));
+    expect(list.find((i) => i.title === "Fins are dead weight")?.markIndex).toBeUndefined();
+  });
+
   it("orders no-gos first, then warnings, then passes, numbered from 1", () => {
     const rank = { "no-go": 0, warning: 1, ok: 2 };
     for (const design of [stuck, hopper, falconLike(), falconLike({ destination: "moon-surface", features: ["fins"] })]) {

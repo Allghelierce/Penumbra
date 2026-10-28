@@ -1,6 +1,7 @@
 // The red pen: deterministic rules that mark up a sketch like a teacher grading
-// homework. Every number in a note comes from re-running the physics on an
-// edited design, so the corrections are computed, never guessed.
+// homework. It marks only what teaches: up to three corrections, each a few words, or a
+// check mark when nothing needs fixing. Every number in a note comes from re-running the
+// physics on an edited design, so the corrections are computed, never guessed.
 
 import { applyAction } from "./actions";
 import {
@@ -15,11 +16,11 @@ import {
   type Review,
   type SketchReading,
 } from "./design";
-import { analyze, ENGINES } from "./physics";
+import { analyze } from "./physics";
 
 type Box = [x: number, y: number, w: number, h: number];
 
-const MAX_MARKS = 4;
+const MAX_MARKS = 3;
 /** Real launchers lift off at about 1.2 or more; below that the red pen calls it marginal. */
 export const SAFE_TWR = 1.2;
 /** "+N engines" aims for this liftoff thrust-to-weight. */
@@ -27,6 +28,7 @@ const TARGET_TWR = 1.3;
 /** Past this many extra engines the advice is to rethink the booster, not to add engines. */
 const MAX_SENSIBLE_EXTRA_ENGINES = 200;
 const FINS_NOTE = "useless in vacuum";
+const PASS_NOTE = "Good to fly";
 /** Stretch the tanks at most +150% before suggesting a new stage instead. */
 const MAX_STRETCH = 2.5;
 const MAX_EXTRA_ENGINES = 500;
@@ -62,6 +64,7 @@ export const DESTINATION_NAMES: Record<DestinationId, string> = {
 export function buildReview(reading: SketchReading, analysis: Analysis): Review {
   const { design, parts } = reading;
   const sketch = new Sketch(parts);
+  const side = sketch.openSide();
   const marks: RedPenMark[] = [];
 
   const stuck = analysis.liftoffTwr < 1;
@@ -74,40 +77,50 @@ export function buildReview(reading: SketchReading, analysis: Analysis): Review 
     if (sensibleEngines) {
       const more = `+${extraEngines} engine${extraEngines === 1 ? "" : "s"}`;
       const fix = engineFix(design, extraEngines);
-      marks.push({ ...arrowTo(sketch.enginesSide(), sketch.openSide(), 0, `${twr}: ${more}`, more), ...(fix && { fix }) });
+      marks.push({ ...arrowTo(sketch.enginesSide(), side, 0, `${twr}: ${more}`, more), ...(fix && { fix }) });
     } else {
-      marks.push(arrowTo(sketch.enginesSide(), sketch.openSide(), 0, `${twr}: too heavy`, "too heavy"));
+      marks.push(arrowTo(sketch.enginesSide(), side, 0, `${twr}: too heavy`, "too heavy"));
     }
   }
 
   // A stuck or marginal rocket's fuel is judged as if the engine fix were made.
-  const flyable = !(stuck || marginal) ? design : sensibleEngines ? withExtraEngines(design, extraEngines) : null;
+  const engineFixed = sensibleEngines ? withExtraEngines(design, extraEngines) : null;
+  const flyable = !(stuck || marginal) ? design : engineFixed && analyze(engineFixed).liftoffTwr >= 1 ? engineFixed : null;
   const flyableAnalysis = flyable === design ? analysis : flyable && analyze(flyable);
   const short = flyableAnalysis !== null && flyableAnalysis.marginMps < 0;
   const fix = short ? planShortfallFix(flyable!, flyableAnalysis, sketch) : null;
   if (fix) marks.push(shortfallMark(fix, sketch));
 
-  if (VACUUM_DESTINATIONS.has(design.destination) && hasFeature(design, parts, "fins")) {
-    // The other side holds the spec callouts, so fins take the open side like the other notes.
-    const side = sketch.openSide();
-    marks.push(arrowTo(sketch.finSide(side), side, -0.04, FINS_NOTE));
-  }
-
-  const lands = LANDING_DESTINATIONS.has(design.destination);
-  const needsLegs = lands && !hasFeature(design, parts, "landing-legs");
-  const needsShield = design.destination === "mars-surface" && !hasFeature(design, parts, "heat-shield");
-  if (needsLegs) marks.push(arrowTo(sketch.bottomCenter(), sketch.openSide(), 0.06, "needs legs"));
-  if (needsShield) marks.push(arrowTo(sketch.capsuleSide(), sketch.openSide(), -0.06, "heat shield!"));
-
-  const flies = !stuck && !marginal && !short && !needsLegs && !needsShield;
-  // A tick beside the upper body; the markup already outlines the whole vehicle part by part.
-  if (flies) marks.push(arrowTo(sketch.upperSide(), sketch.openSide(), 0, "flies!"));
+  const needs = hardwareNeeds(design, parts);
+  if (needs.legs) marks.push(arrowTo(sketch.bottomCenter(), side, 0.06, "needs legs"));
+  if (needs.shield) marks.push(arrowTo(sketch.capsuleSide(), side, -0.06, "heat shield!"));
+  // Dead weight, not a no-go, so it comes after them.
+  if (needs.fins) marks.push(arrowTo(sketch.finSide(side), side, -0.04, FINS_NOTE));
 
   const issues = spreadNotes(marks.slice(0, MAX_MARKS));
   return {
-    // The engineer's markup (outlines, specs, dimensions) first, then the numbered issue marks.
-    marks: [...engineerMarkup(design, analysis, parts, sketch, issues), ...issues],
-    summary: summarize(design, analysis, { extraEngines, sensibleEngines, fix, flyableAnalysis, needsLegs, needsShield }),
+    marks: issues.length > 0 ? issues : [passMark(sketch, analysis)],
+    summary: summarize(design, analysis, {
+      extraEngines,
+      sensibleEngines,
+      fix,
+      flyableAnalysis,
+      needsLegs: needs.legs,
+      needsShield: needs.shield,
+    }),
+  };
+}
+
+/**
+ * Hardware the trip needs and the napkin doesn't show (legs and a heat shield to land), and
+ * fins that are dead weight where it's going. The review only has room for three marks, so
+ * the design review and the recap ask this directly.
+ */
+export function hardwareNeeds(design: Design, parts: Part[] = []): { legs: boolean; shield: boolean; fins: boolean } {
+  return {
+    legs: LANDING_DESTINATIONS.has(design.destination) && !hasFeature(design, parts, "landing-legs"),
+    shield: design.destination === "mars-surface" && !hasFeature(design, parts, "heat-shield"),
+    fins: VACUUM_DESTINATIONS.has(design.destination) && hasFeature(design, parts, "fins"),
   };
 }
 
@@ -134,7 +147,6 @@ function enginesForTwr(design: Design, target: number): number | null {
   return hi;
 }
 
-/** The design with `extra` more engines in the bottom stage's biggest cluster; other clusters stay as drawn. */
 /**
  * The tap-to-fix edit for "needs N more engines". set-engines replaces every cluster, so it
  * only matches the computed count when the bottom stage has a single cluster.
@@ -145,6 +157,7 @@ function engineFix(design: Design, extra: number): DesignAction | undefined {
   return { type: "set-engines", stageIndex: 0, engine: engines[0].engine, count: engines[0].count + extra };
 }
 
+/** The design with `extra` more engines in the bottom stage's biggest cluster; other clusters stay as drawn. */
 function withExtraEngines(design: Design, extra: number): Design {
   const bottom = design.stages[0];
   const main = bottom.engines.reduce((best, c, i, all) => (c.count > all[best].count ? i : best), 0);
@@ -248,15 +261,14 @@ function summarize(
 
   const twr = formatTwr(analysis.liftoffTwr);
   if (analysis.liftoffTwr < SAFE_TWR) {
+    const stuck = analysis.liftoffTwr < 1;
+    const then = fuelFix ? `, then ${fuelFix}` : "";
     const n = found.extraEngines;
     const thrust = !found.sensibleEngines
       ? `it needs ${MAX_SENSIBLE_EXTRA_ENGINES}+ more engines, so rethink the booster`
-      : `add ${n} engine${n === 1 ? "" : "s"} ${analysis.liftoffTwr < 1 ? "to clear the pad" : "for a safe liftoff"}`;
-    const start =
-      analysis.liftoffTwr < 1
-        ? `Liftoff TWR is ${twr}, so it never leaves the pad`
-        : `Liftoff TWR is ${twr}, too marginal to launch safely`;
-    return `${start}: ${thrust}${fuelFix ? `, then ${fuelFix}` : ""}.`;
+      : `add ${n} engine${n === 1 ? "" : "s"} ${stuck ? "to clear the pad" : "for a safe liftoff"}`;
+    const start = stuck ? `Liftoff TWR is ${twr}, so it never leaves the pad` : `Liftoff TWR is ${twr}, too marginal to launch safely`;
+    return `${start}: ${thrust}${then}.`;
   }
   if (fuelFix) return `${deltaV}: ${fuelFix}.`;
 
@@ -325,12 +337,6 @@ class Sketch {
       .reduce<Part | undefined>((best, p) => (!best || area(p) > area(best) ? p : best), undefined);
     const [x, y, w, h] = (ofStage ?? this.biggestTankPart())?.box ?? slice(this.whole(), 0.25, 0.75);
     return [this.openSide() > 0 ? x + w : x, y + h / 2];
-  }
-
-  /** A point on the open side of the upper body, below the mission-patch corner. */
-  upperSide(): Point {
-    const [x, y, w, h] = this.whole();
-    return [this.openSide() > 0 ? x + w : x, Math.max(y + h * 0.3, 0.2)];
   }
 
   /** The middle of the engines' outer side. */
@@ -443,8 +449,6 @@ function hasFeature(design: Design, parts: Part[], feature: "fins" | "landing-le
   return listed || parts.some((p) => p.kind === partKind);
 }
 
-
-/** One decimal, but never round a TWR just under 1 up to "1.0". */
 /**
  * Two decimals, like the rest of the screen (four below 0.01), but never rounded up across
  * a threshold: 0.996 reads "0.99", not "1.00", and 1.199 reads "1.19", not "1.20".
@@ -479,76 +483,65 @@ function kmSpare(totalMps: number, requiredMps: number) {
 }
 
 // ---------------------------------------------------------------------------
-// The engineer's markup: what each part is, its real numbers, and the vehicle's size
+// Issue marks and the check mark
 
 const ISSUE_KINDS = new Set<RedPenMark["kind"]>(["arrow", "circle", "ghost-line"]);
 
-/** Issue marks (the numbered corrections) as opposed to the identifying markup drawn before them. */
+/** Issue marks (the numbered corrections), as opposed to the check mark or a historic flight's labels. */
 export function isIssueMark(mark: RedPenMark) {
   return ISSUE_KINDS.has(mark.kind);
 }
 
-/** Callouts are set in small mono type; about this much napkin width per character. */
-const CALLOUT_CHAR_WIDTH = 0.012;
-/** Vertical room one callout label needs, as a fraction of the napkin's height. */
-const CALLOUT_LINE = 0.05;
-const MAX_CALLOUTS = 6;
+/** The overlay draws the check about this far left of `at`... */
+const TICK_LEFT = 0.03;
+/** ...and starts its note this far right of it, always writing rightward. */
+const TICK_NOTE = 0.053;
+/** Clearance between the drawing and the check (or the end of its note). */
+const TICK_GAP = 0.02;
 
-/** What's in the tanks, for the outline notes ("Booster LOX/CH4"). */
-const TANK_NAMES: Record<Design["stages"][number]["propellant"], string> = {
-  methalox: "LOX/CH4",
-  kerolox: "LOX/RP-1",
-  hydrolox: "LOX/LH2",
-  solid: "solid motor",
-  hypergolic: "N2O4/UDMH",
-};
-const PART_NAMES: Partial<Record<PartKind, string>> = {
-  nose: "Nose / fairing",
-  payload: "Payload bay",
-  engine: "Engines",
-  fin: "Fins",
-  "landing-legs": "Legs",
-  "heat-shield": "Heat shield",
-  "solar-panel": "Solar panels",
-  window: "Window",
-};
-const SHORT_ENGINE: Partial<Record<string, string>> = {
-  "raptor-vacuum": "RVac",
-  "merlin-vacuum": "MVac",
-  "generic-solid": "SRM",
-};
-
-function engineerMarkup(
-  design: Design,
-  analysis: Analysis,
-  parts: Part[],
-  sketch: Sketch,
-  issues: RedPenMark[],
-): RedPenMark[] {
-  if (parts.length === 0) return [];
-  const kept = outlines(design, parts);
-  const specs = callouts(design, analysis, parts, sketch);
-  return [
-    ...kept.map(({ box }): RedPenMark => ({ kind: "outline", box: clampBox(box), note: "" })),
-    ...dimensions(design, sketch),
-    ...specs,
-    ...partLabels(kept, sketch, issues, specs),
-  ];
+/**
+ * A teacher's check mark beside a rocket with nothing to fix, at mid-height on the open side
+ * (the other side if the note doesn't fit there), noting the delta-v to spare.
+ */
+function passMark(sketch: Sketch, analysis: Analysis): RedPenMark {
+  const spare = kmSpare(analysis.totalDeltaVMps, analysis.requiredDeltaVMps);
+  const notes = spare === "0.0" ? [PASS_NOTE] : [`${spare} km/s spare`, PASS_NOTE];
+  const [x, y, w, h] = sketch.whole();
+  const side = sketch.openSide();
+  let at: Point = [clamp(side > 0 ? x + w + TICK_GAP + TICK_LEFT : x - TICK_GAP, EDGE + TICK_LEFT, 1 - EDGE), y + h / 2];
+  let note = PASS_NOTE;
+  search: for (const text of notes) {
+    const width = TICK_NOTE + text.length * NOTE_CHAR_WIDTH;
+    for (const s of [side, -side]) {
+      // On the left the note runs toward the rocket, so the check sits a whole note's width out.
+      const atX = s > 0 ? x + w + TICK_GAP + TICK_LEFT : x - TICK_GAP - width;
+      if (atX - TICK_LEFT < EDGE || atX + width > 1 - EDGE) continue;
+      at = [atX, y + h / 2];
+      note = text;
+      break search;
+    }
+  }
+  const atY = clamp(at[1], EDGE + 0.04, 1 - EDGE);
+  return { kind: "tick", at: [at[0], inPatch(at[0], at[0] + TICK_NOTE + note.length * NOTE_CHAR_WIDTH, atY) ? PATCH.y + 0.04 : atY], note };
 }
 
 /** What failed on a replayed historic flight (HistoricMission["failure"]). */
 export type HistoricFailure = { part: PartKind; stageIndex?: number; label: string; detail: string };
 
+/** Callout labels are set in small mono type; about this much napkin width per character. */
+const CALLOUT_CHAR_WIDTH = 0.012;
+/** Vertical room one callout label needs, as a fraction of the napkin's height. */
+const CALLOUT_LINE = 0.05;
+
 /**
- * The markup for a replayed historic flight, kept to the minimum so history reads apart from
- * the design review: height and diameter, then the failure: an outline on the part that
+ * The markup for a replayed historic flight, only the failure: an outline on the part that
  * failed, a callout naming it, and ① (an arrow) saying what happened, each a few words.
+ * A flight that worked gets no marks.
  */
-export function historicMarks(reading: SketchReading, analysis: Analysis, failure: HistoricFailure | null): RedPenMark[] {
-  const { design, parts } = reading;
+export function historicMarks(reading: SketchReading, failure: HistoricFailure | null): RedPenMark[] {
+  if (!failure) return [];
+  const { parts } = reading;
   const sketch = new Sketch(parts);
-  const dims = parts.length > 0 ? dimensions(design, sketch) : [];
-  if (!failure) return dims;
 
   const ofKind = parts.filter((p) => p.kind === failure.part);
   const exact = ofKind.filter((p) => failure.stageIndex === undefined || p.stageIndex === failure.stageIndex);
@@ -563,7 +556,7 @@ export function historicMarks(reading: SketchReading, analysis: Analysis, failur
   const arrow = arrowTo(edge, side, -0.07, detail, fewWords(failure.detail, 3));
   const label = failureLabel(parts, box, side, whole, fewWords(failure.label, 4), arrow);
 
-  return [...dims, { kind: "outline", box: clampBox(box), note: "" }, label, arrow];
+  return [{ kind: "outline", box: clampBox(box), note: "" }, label, arrow];
 }
 
 /**
@@ -640,166 +633,10 @@ function inPatch(x0: number, x1: number, y: number) {
   return y < PATCH.y && x1 > PATCH.x && x0 < 1;
 }
 
-/**
- * Part names in a margin with a short leader to each outline, never inside a box: the open
- * margin if there's a free row, else the other one. A name with no free row anywhere (another
- * label, an issue note or the mission patch in the way) is dropped.
- */
-function partLabels(
-  kept: { box: Box; note: string }[],
-  sketch: Sketch,
-  issues: RedPenMark[],
-  specs: RedPenMark[],
-): RedPenMark[] {
-  const whole = sketch.whole();
-  // Rows already taken in each margin: issue notes at their arrow tails, ghost notes below their
-  // last point, and the spec callouts.
-  const taken: Record<number, number[]> = { [-1]: [], [1]: [] };
-  for (const m of [...issues, ...specs]) {
-    if (m.kind === "arrow") taken[Math.sign(m.from[0] - m.to[0]) || 1].push(m.from[1]);
-    if (m.kind === "ghost-line") taken[Math.sign(m.points.at(-1)![0] - m.points[0][0]) || 1].push(m.points.at(-1)![1] + 0.025);
-    if (m.kind === "callout") taken[Math.sign(m.label[0] - m.anchor[0]) || 1].push(m.label[1]);
-  }
-  const out: RedPenMark[] = [];
-  for (const { box, note } of [...kept].sort((a, b) => a.box[1] - b.box[1])) {
-    const width = note.length * CALLOUT_CHAR_WIDTH;
-    // The open margin first, then the other one.
-    for (const side of [sketch.openSide(), -sketch.openSide() as 1 | -1]) {
-      const labelX = clamp(side > 0 ? whole[0] + whole[2] + 0.05 : whole[0] - 0.05, EDGE, 1 - EDGE);
-      const [x0, x1] = side > 0 ? [labelX, labelX + width] : [labelX - width, labelX];
-      if (x0 < 0 || x1 > 1) continue;
-      const y = clamp(box[1] + box[3] / 2, EDGE, 1 - EDGE);
-      if (inPatch(x0, x1, y) || taken[side].some((t) => Math.abs(t - y) < CALLOUT_LINE)) continue;
-      taken[side].push(y);
-      const anchor: Point = [clamp(side > 0 ? box[0] + box[2] : box[0], EDGE, 1 - EDGE), y];
-      out.push({ kind: "callout", anchor, label: [labelX, y], note });
-      break;
-    }
-  }
-  return out;
-}
-
-/** One outline per part kind and stage (duplicates merged), identifying it. */
-/**
- * One outline per part kind and stage (duplicates merged, nose and payload bay as one). Big
- * parts first; a part whose box is mostly inside one already kept is skipped, so stacked
- * outlines don't pile up.
- */
-function outlines(design: Design, parts: Part[]): { box: Box; note: string }[] {
-  const groups = new Map<string, { box: Box; note: string }>();
-  for (const part of parts) {
-    const stage = part.stageIndex !== undefined ? design.stages[part.stageIndex] : undefined;
-    const tankStage = stage ?? design.stages[0];
-    const top = part.kind === "nose" || part.kind === "payload";
-    const note = top
-      ? "Nose / payload"
-      : part.kind === "tank"
-        ? `${tankStage?.label ?? "Tanks"} ${TANK_NAMES[tankStage?.propellant ?? "kerolox"]}`.slice(0, 22)
-        : (PART_NAMES[part.kind] ?? (/interstage/i.test(part.label) ? "Interstage" : part.label.slice(0, 16)));
-    const key = top ? "top" : `${part.kind}|${part.stageIndex ?? ""}|${note}`;
-    const prev = groups.get(key);
-    groups.set(key, { box: prev ? union([prev.box, part.box])! : part.box, note });
-  }
-  const area = (b: Box) => b[2] * b[3];
-  const kept: { box: Box; note: string }[] = [];
-  for (const g of [...groups.values()].sort((a, b) => area(b.box) - area(a.box))) {
-    if (kept.some((k) => overlap(k.box, g.box) > MAX_OUTLINE_OVERLAP * area(g.box))) continue;
-    kept.push(g);
-  }
-  return kept;
-}
-
-/** Outlines overlapping a kept one by more than this share of their own area are skipped. */
-const MAX_OUTLINE_OVERLAP = 0.4;
-
-function overlap(a: Box, b: Box) {
-  const w = Math.min(a[0] + a[2], b[0] + b[2]) - Math.max(a[0], b[0]);
-  const h = Math.min(a[1] + a[3], b[1] + b[3]) - Math.max(a[1], b[1]);
-  return w > 0 && h > 0 ? w * h : 0;
-}
-
-/** Total height beside the rocket, and the body's diameter near the base. */
-function dimensions(design: Design, sketch: Sketch): RedPenMark[] {
-  const [x, y, , h] = sketch.whole();
-  const out: RedPenMark[] = [];
-  // The height runs about 0.06 left of the body, where the overlay writes its note rotated.
-  const lineX = clamp(x - 0.06, EDGE, 1 - EDGE);
-  if (design.heightM > 0) {
-    out.push({ kind: "dimension", from: [lineX, clamp(y, EDGE, 1 - EDGE)], to: [lineX, clamp(y + h, EDGE, 1 - EDGE)], note: `${metres(design.heightM)} m` });
-  }
-  const body = sketch.biggestTankPart()?.box;
-  if (body && design.diameterM > 0) {
-    const atY = clamp(body[1] + body[3] * 0.9, EDGE, 1 - EDGE);
-    out.push({ kind: "dimension", from: [clamp(body[0], EDGE, 1 - EDGE), atY], to: [clamp(body[0] + body[2], EDGE, 1 - EDGE), atY], note: `${metres(design.diameterM)} m` });
-  }
-  return out;
-}
-
-/** Spec labels in the margin opposite the issue notes, with leaders to their parts. */
-function callouts(design: Design, analysis: Analysis, parts: Part[], sketch: Sketch): RedPenMark[] {
-  const side = -sketch.openSide() as 1 | -1;
-  const whole = sketch.whole();
-  const edgeX = side < 0 ? whole[0] : whole[0] + whole[2];
-  const tonnes = (kg: number) => `${Math.round(kg / 1000).toLocaleString("en-US")} t`;
-  const anchorOf = (box: Box): Point => [side < 0 ? box[0] : box[0] + box[2], box[1] + box[3] / 2];
-  const wanted: { anchor: Point; notes: string[] }[] = [];
-
-  // Payload at the top, then each stage from the top down, then the engines at the bottom.
-  const payloadBox = union(parts.filter((p) => p.kind === "payload").map((p) => p.box)) ?? union(parts.filter((p) => p.kind === "nose").map((p) => p.box));
-  if (payloadBox && design.payloadMassKg > 0) wanted.push({ anchor: anchorOf(payloadBox), notes: [`Payload ${tonnes(design.payloadMassKg)}`] });
-
-  for (let i = design.stages.length - 1; i >= 0; i--) {
-    const stage = design.stages[i];
-    const a = analysis.stages[i];
-    if (!a) continue;
-    const box =
-      union(parts.filter((p) => p.kind === "tank" && p.stageIndex === i).map((p) => p.box)) ??
-      (design.stages.length === 1 ? (sketch.biggestTankPart()?.box ?? null) : null);
-    if (!box) continue;
-    wanted.push({
-      anchor: anchorOf(box),
-      notes: [`${stage.label} · ${tonnes(a.propellantMassKg)} prop · Δv ${km(a.deltaVMps)}`, `${stage.label} · ${tonnes(a.propellantMassKg)} prop`, `${tonnes(a.propellantMassKg)} prop`],
-    });
-  }
-
-  const bottom = design.stages[0];
-  const thrust = analysis.stages[0]?.thrustN ?? 0;
-  if (bottom?.engines.length) {
-    const cluster = bottom.engines.map((c) => `${c.count}× ${SHORT_ENGINE[c.engine] ?? ENGINES[c.engine].name}`).join(" + ");
-    wanted.push({
-      anchor: anchorOf(sketch.engines()),
-      notes: [`${cluster} · ${Math.round(thrust / 9.80665 / 1000).toLocaleString("en-US")} tf`, cluster],
-    });
-  }
-
-  // Stack the labels down the margin in anchor order, at least one line apart.
-  wanted.sort((a, b) => a.anchor[1] - b.anchor[1]);
-  // Past the height dimension when they share the left margin.
-  const labelX = clamp(edgeX + side * (side < 0 ? 0.1 : 0.06), EDGE, 1 - EDGE);
-  const room = side < 0 ? labelX - EDGE : 1 - EDGE - labelX;
-  const out: RedPenMark[] = [];
-  let lastY = -Infinity;
-  for (const { anchor, notes } of wanted.slice(0, MAX_CALLOUTS)) {
-    const note = notes.find((n) => n.length * CALLOUT_CHAR_WIDTH <= room);
-    if (!note) continue;
-    let y = Math.max(anchor[1], lastY + CALLOUT_LINE);
-    const width = note.length * CALLOUT_CHAR_WIDTH;
-    if (inPatch(side > 0 ? labelX : labelX - width, side > 0 ? labelX + width : labelX, y)) y = Math.max(y, PATCH.y + 0.01);
-    if (y > 1 - EDGE) break;
-    lastY = y;
-    out.push({ kind: "callout", anchor: [clamp(anchor[0], EDGE, 1 - EDGE), clamp(anchor[1], EDGE, 1 - EDGE)], label: [labelX, y], note });
-  }
-  return out;
-}
-
 function clampBox([x, y, w, h]: Box): Box {
   const x0 = clamp(x, 0, 1);
   const y0 = clamp(y, 0, 1);
   return [x0, y0, clamp(x + w, 0, 1) - x0, clamp(y + h, 0, 1) - y0];
-}
-
-function metres(m: number) {
-  return m >= 10 ? String(Math.round(m)) : m.toFixed(1);
 }
 
 /** Vertical room one handwritten issue note needs, as a fraction of the napkin's height. */

@@ -5,7 +5,7 @@
 import { applyAction } from "./actions";
 import type { Analysis, Attempt, Design, DesignAction, DestinationId, Improvement, Recap, RedPenMark } from "./design";
 import { analyze, DESTINATIONS, ENGINES, km, kmShort, kmSpare } from "./physics";
-import { buildReview, DESTINATION_NAMES, SAFE_TWR } from "./redpen";
+import { buildReview, DESTINATION_NAMES, hardwareNeeds, SAFE_TWR } from "./redpen";
 
 const MAX_IMPROVEMENTS = 3;
 /** Margin past which a design counts as over-built and could shed tank volume. */
@@ -112,7 +112,7 @@ function improvements(design: Design, analysis: Analysis): Improvement[] {
   const reached = analysis.verdict === "destination" && analysis.liftoffTwr >= SAFE_TWR;
 
   if (!reached) out.push(...fixesFromRedPen(design, marks));
-  out.push(...landingNeeds(design, marks));
+  out.push(...landingNeeds(design));
   if (reached) out.push(...levelUps(design, analysis));
   if (!reached) {
     const aimLower = aimForReachable(design, analysis);
@@ -131,6 +131,8 @@ function fixesFromRedPen(design: Design, marks: RedPenMark[]): Improvement[] {
   const target = goal(design);
   const out: Improvement[] = [];
   let base = design;
+  // Fuel fixes only need to leave the pad; a marginal liftoff gets its own engine fix next time.
+  const closes = (a: Analysis) => a.liftoffTwr >= 1 && a.marginMps >= 0;
 
   const engines = marks.find((m) => m.fix?.type === "set-engines")?.fix;
   if (engines?.type === "set-engines") {
@@ -147,8 +149,6 @@ function fixesFromRedPen(design: Design, marks: RedPenMark[]): Improvement[] {
   }
   const then = base !== design;
 
-  // Fuel fixes only need to leave the pad; a marginal liftoff gets its own engine fix next time.
-  const closes = (a: Analysis) => a.liftoffTwr >= 1 && a.marginMps >= 0;
   const thenEngines = (a: Analysis) => (a.liftoffTwr < SAFE_TWR ? ", then more engines" : "");
   for (const mark of marks) {
     const fix = mark.fix;
@@ -178,12 +178,12 @@ function fixesFromRedPen(design: Design, marks: RedPenMark[]): Improvement[] {
 }
 
 /** Legs and a heat shield aren't design edits the app can make; they're drawn on the napkin. */
-function landingNeeds(design: Design, marks: RedPenMark[]): Improvement[] {
-  const notes = marks.map((m) => m.note);
+function landingNeeds(design: Design): Improvement[] {
+  const needs = hardwareNeeds(design);
   const out: Improvement[] = [];
   const place = DESTINATION_NAMES[design.destination];
-  if (notes.includes("needs legs")) out.push({ text: `Draw landing legs to touch down on ${place}` });
-  if (notes.includes("heat shield!")) out.push({ text: `Draw a heat shield to survive entry at ${place}` });
+  if (needs.legs) out.push({ text: `Draw landing legs to touch down on ${place}` });
+  if (needs.shield) out.push({ text: `Draw a heat shield to survive entry at ${place}` });
   return out;
 }
 

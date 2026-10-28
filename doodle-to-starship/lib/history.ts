@@ -3,42 +3,14 @@
 // timeline. Pure functions over a HistoricMission; no API calls.
 
 import { DEMO_SKETCHES } from "./demo-sketches";
-import type { Analysis, FlightEvent, FlightPoint, FlightTrace, HistoricMission, Part, Point, Review, SketchReading, Stroke } from "./design";
+import type { FlightEvent, FlightPoint, FlightTrace, HistoricMission, Part, Point, Review, SketchReading, Stroke } from "./design";
 import { ALL_MISSIONS } from "./mission-catalog";
-import { analyze } from "./physics";
 import { historicMarks } from "./redpen";
 import { readFromGeometry } from "./sketch/geometry";
 
 const TRACE_POINTS = 300;
 /** Speed at which a climb has turned fully horizontal, for the downrange estimate. */
 const ORBITAL_SPEED_MPS = 7_800;
-
-type Size = { heightM: number; diameterM: number };
-
-/**
- * Real vehicle sizes as flown, from the Wikipedia infoboxes (height with that flight's
- * payload or Dragon; Falcon Heavy's width includes its side boosters).
- */
-const MISSION_SIZE: Record<string, Size> = {
-  "falcon1-f1": { heightM: 21, diameterM: 1.7 },
-  "falcon1-f4": { heightM: 21, diameterM: 1.7 },
-  crs1: { heightM: 47.8, diameterM: 3.7 }, // Falcon 9 v1.0 with Dragon
-  crs7: { heightM: 63.4, diameterM: 3.7 }, // Falcon 9 v1.1 with Dragon
-  og2: { heightM: 69.8, diameterM: 3.7 }, // Falcon 9 Full Thrust with fairing
-  demo2: { heightM: 65.7, diameterM: 3.7 }, // Falcon 9 Full Thrust with Crew Dragon
-  "fh-demo": { heightM: 70, diameterM: 12.2 },
-};
-const VEHICLE_SIZE: Record<string, Size> = {
-  "Falcon 1": { heightM: 21, diameterM: 1.7 },
-  "Falcon 9": { heightM: 69.8, diameterM: 3.7 },
-  "Falcon Heavy": { heightM: 70, diameterM: 12.2 },
-  Starship: { heightM: 121.3, diameterM: 9 }, // Block 1 stack, Integrated Flight Tests 1-5
-};
-
-/** The real vehicle's height and diameter for this flight, if known. */
-export function realSize(m: HistoricMission): Size | null {
-  return MISSION_SIZE[m.id] ?? VEHICLE_SIZE[m.vehicle] ?? null;
-}
 
 /** The mission's stand-in sketch, read locally, named for the real vehicle. */
 export function historicReading(m: HistoricMission): SketchReading {
@@ -47,19 +19,12 @@ export function historicReading(m: HistoricMission): SketchReading {
   return { ...reading, design: { ...reading.design, name: m.vehicle, destination: m.destination } };
 }
 
-/** The engineer's markup, plus the real failure: a heavy outline on the part, its name, and ① what happened. */
-export function historicReview(
-  m: HistoricMission,
-  reading: SketchReading,
-  analysis: Analysis = analyze(reading.design),
-): Review {
+/** The real failure on the napkin: a heavy outline on the part, its name, and ① what happened. */
+export function historicReview(m: HistoricMission, reading: SketchReading): Review {
   const summary = m.failure
     ? `${m.vehicle}, ${m.mission}: ${m.failure.label}. ${m.failure.detail}`
     : `${m.vehicle}, ${m.mission}: flew as planned.`;
-  // Dimension labels show the real vehicle; the reading (and the launch's scale) stays the sketch's.
-  const size = realSize(m);
-  const labelled = size ? { ...reading, design: { ...reading.design, ...size } } : reading;
-  return { marks: historicMarks(labelled, analysis, m.failure), summary };
+  return { marks: historicMarks(reading, m.failure), summary };
 }
 
 /** The real timeline, interpolated to about 300 points, with its recorded events and quotes. */

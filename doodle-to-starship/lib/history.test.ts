@@ -12,7 +12,6 @@ import {
   historicReading,
   historicReview,
   historicTrace,
-  realSize,
 } from "./history";
 import { ALL_MISSIONS } from "./mission-catalog";
 import { readFromGeometry } from "./sketch/geometry";
@@ -104,9 +103,9 @@ describe("historicReview", () => {
   const reading = historicReading(crs7);
   const review = historicReview(crs7, reading);
 
-  it("draws only the minimum: dimensions, then the failed part's outline, its name and ①", () => {
-    expect(review.marks.map((m) => m.kind)).toEqual(["dimension", "dimension", "outline", "callout", "arrow"]);
-    const [, , outline, label, arrow] = review.marks;
+  it("draws only the failure: the failed part's outline, its name and ①", () => {
+    expect(review.marks.map((m) => m.kind)).toEqual(["outline", "callout", "arrow"]);
+    const [outline, label, arrow] = review.marks;
     expect(label.note).toBe("Stage 2 helium strut");
     // A few words on the napkin; the full story is in the summary.
     expect(arrow.note).toBe("A strut holding…");
@@ -128,9 +127,9 @@ describe("historicReview", () => {
     );
   });
 
-  it("draws only the dimensions for a flight that worked", () => {
+  it("draws nothing for a flight that worked", () => {
     const ok = historicReview(success, historicReading(success));
-    expect(ok.marks.every((m) => m.kind === "dimension")).toBe(true);
+    expect(ok.marks).toEqual([]);
     expect(ok.summary).toBe("Falcon 9, CRS-7: flew as planned.");
   });
 });
@@ -263,17 +262,6 @@ describe("the flaw drawn into the sketch", () => {
 });
 
 describe("review fixes", () => {
-  it("labels the real vehicle's size, leaving the sketch's own scale alone", () => {
-    const crs7 = HISTORIC_MISSIONS.find((m) => m.id === "crs7")!;
-    const reading = historicReading(crs7);
-    const dims = historicReview(crs7, reading).marks.filter((m) => m.kind === "dimension").map((m) => m.note);
-    expect(dims).toEqual(["63 m", "3.7 m"]);
-    expect(realSize(crs7)).toEqual({ heightM: 63.4, diameterM: 3.7 });
-    // The reading the launch uses keeps the sketch's guessed size.
-    expect(historicReading(crs7).design.heightM).toBe(reading.design.heightM);
-    for (const m of ALL_MISSIONS) expect(realSize(m), m.id).not.toBeNull();
-  });
-
   it("fits each featured fix note beside its fix on the 300-unit napkin", () => {
     for (const lost of HISTORIC_MISSIONS.filter((m) => COMEBACK[m.id])) {
       const xs = fixStrokes(lost, historicReading(lost)).flatMap((s) => s.points.map((p) => p[0]));

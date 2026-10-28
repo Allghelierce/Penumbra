@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import { applyAction } from "./actions";
 import { NAPKIN_ASPECT, type Design, type Part, type RedPenMark, type SketchReading } from "./design";
 import { analyze } from "./physics";
-import { buildReview, isIssueMark } from "./redpen";
+import { buildReview } from "./redpen";
 
 function falconLike(overrides: Partial<Design> = {}): Design {
   return {
@@ -37,12 +37,10 @@ function partsFor(design: Design): Part[] {
   return parts;
 }
 
-/** The numbered issue marks only; the identifying markup is tested on its own below. */
 function review(design: Design, parts = partsFor(design)) {
   const reading: SketchReading = { design, parts };
   const analysis = analyze(design);
-  const full = buildReview(reading, analysis);
-  return { analysis, review: { ...full, marks: full.marks.filter(isIssueMark) }, full };
+  return { analysis, review: buildReview(reading, analysis) };
 }
 
 function notes(marks: RedPenMark[]) {
@@ -92,18 +90,39 @@ function expectOnNapkin(mark: RedPenMark) {
   } else if (mark.kind === "ghost-line") {
     expect(mark.points.length).toBeGreaterThan(1);
     mark.points.forEach(inside);
+  } else if (mark.kind === "tick") {
+    // The overlay draws the check about 0.03 left of `at` and writes the note rightward from 0.053.
+    inside([mark.at[0] - 0.03, mark.at[1]]);
+    expect(mark.at[0] + 0.053 + mark.note.length * 0.017).toBeLessThanOrEqual(1);
   }
 }
 
 describe("a rocket that works", () => {
-  it("gets one tick saying it flies, and no circles anywhere", () => {
+  it("gets one check mark at mid-height on the open side, noting what it has to spare", () => {
     const { analysis, review: r } = review(falconLike());
-    expect(analysis.liftoffTwr).toBeGreaterThanOrEqual(1);
+    expect(analysis.liftoffTwr).toBeGreaterThanOrEqual(1.2);
     expect(analysis.marginMps).toBeGreaterThanOrEqual(0);
 
     expect(r.marks).toHaveLength(1);
-    expect(r.marks[0]).toMatchObject({ kind: "arrow", note: "flies!" });
+    const tick = r.marks[0];
+    expect(tick.kind).toBe("tick");
+    expect(tick.note).toMatch(/^(\d+\.\d km\/s spare|Good to fly)$/);
+    expect(tick.fix).toBeUndefined();
+    if (tick.kind === "tick") {
+      // Right of the drawing (x 0.42 to 0.58), level with its middle (y 0.06 to 0.84).
+      expect(tick.at[0] - 0.03).toBeGreaterThan(0.58);
+      expect(tick.at[1]).toBeCloseTo(0.45, 2);
+    }
+    expectOnNapkin(tick);
     expect(r.summary).toMatch(/^\d+\.\d of \d+\.\d km\/s: it reaches low Earth orbit with \d+\.\d km\/s to spare\.$/);
+  });
+
+  it("puts the check on the left, clear of the drawing, when the rocket sits on the right", () => {
+    const right = partsFor(falconLike()).map((p): Part => ({ ...p, box: [p.box[0] + 0.3, p.box[1], p.box[2], p.box[3]] }));
+    const [tick] = review(falconLike(), right).review.marks;
+    expect(tick.kind).toBe("tick");
+    if (tick.kind === "tick") expect(tick.at[0] + 0.053 + tick.note.length * 0.017).toBeLessThanOrEqual(0.72);
+    expectOnNapkin(tick);
   });
 });
 
@@ -263,14 +282,22 @@ describe("every review", () => {
     ["mars, no legs", falconLike({ destination: "mars-surface", features: ["fins"] }), shifted(-0.4, 0)],
   ];
 
-  it.each(cases)("%s: has 1 to 4 marks, all on the napkin", (_, design, parts) => {
+  it.each(cases)("%s: has 1 to 3 marks of a few words, all on the napkin", (_, design, parts) => {
     const { review: r } = review(design, parts);
     expect(r.marks.length).toBeGreaterThanOrEqual(1);
-    expect(r.marks.length).toBeLessThanOrEqual(4);
+    expect(r.marks.length).toBeLessThanOrEqual(3);
     r.marks.forEach(expectOnNapkin);
     r.marks.forEach((m) => expect(m.kind).not.toBe("circle"));
     r.marks.forEach((m) => expect(m.note.length).toBeGreaterThan(0));
+    r.marks.forEach((m) => expect(m.note.split(" ").length, m.note).toBeLessThanOrEqual(4));
     expect(r.summary).toMatch(/\.$/);
+  });
+
+  it.each(cases)("%s: marks only what teaches: corrections, or a lone check mark", (_, design, parts) => {
+    const kinds = review(design, parts).review.marks.map((m) => m.kind);
+    // No part outlines, spec callouts, part labels or dimensions.
+    for (const kind of kinds) expect(["arrow", "ghost-line", "tick"]).toContain(kind);
+    if (kinds.includes("tick")) expect(kinds).toEqual(["tick"]);
   });
 
   it("brings arrows in from the open side of the napkin, never across the rocket", () => {
@@ -286,12 +313,20 @@ describe("every review", () => {
   });
 
   it("only offers tap-to-fix on marks with a concrete edit", () => {
-    const advisory = ["flies!", "useless in vacuum", "needs legs", "heat shield!"];
+    const advisory = ["useless in vacuum", "needs legs", "heat shield!"];
     for (const d of [falconLike(), everythingWrong, falconLike({ destination: "mars-surface", features: ["fins"] })]) {
       for (const m of review(d).review.marks) {
-        if (advisory.includes(m.note)) expect(m.fix).toBeUndefined();
+        if (advisory.includes(m.note) || m.kind === "tick") expect(m.fix).toBeUndefined();
       }
     }
+  });
+
+  it("keeps the no-gos when there are more than three things to mark", () => {
+    // Stuck on the pad, short of the Moon, no legs, and fins: the fins (dead weight, not a no-go) give way.
+    const notes = review(everythingWrong).review.marks.map((m) => m.note);
+    expect(notes).toHaveLength(3);
+    expect(notes).toContain("needs legs");
+    expect(notes).not.toContain("useless in vacuum");
   });
 
   it("stacks issue notes on each side at least a line apart, even when they crowd the engines", () => {
@@ -324,102 +359,5 @@ describe("every review", () => {
 
   it("is deterministic", () => {
     expect(review(everythingWrong).review).toEqual(review(everythingWrong).review);
-  });
-});
-
-describe("the engineer's markup", () => {
-  const design = falconLike({ features: ["fins"] });
-  const parts = [...partsFor(design), { kind: "fin" as const, label: "fin", box: [0.6, 0.7, 0.06, 0.1] as Part["box"], stageIndex: 0 }];
-  const { full, analysis } = review(design, parts);
-  const of = <K extends RedPenMark["kind"]>(kind: K) => full.marks.filter((m): m is Extract<RedPenMark, { kind: K }> => m.kind === kind);
-
-  it("comes before the issue marks: outlines, then dimensions, then callouts", () => {
-    const order = { outline: 0, dimension: 1, callout: 2, arrow: 3, circle: 3, "ghost-line": 3, tick: 3 };
-    full.marks.forEach((m, i) => {
-      if (i > 0) expect(order[m.kind]).toBeGreaterThanOrEqual(order[full.marks[i - 1].kind]);
-    });
-  });
-
-  it("outlines each part once, merging nose and payload, and skips one mostly inside another", () => {
-    const outlines = of("outline");
-    expect(outlines.every((m) => m.note === "")).toBe(true);
-    for (const m of outlines) {
-      expect(m.box[0]).toBeGreaterThanOrEqual(0);
-      expect(m.box[1]).toBeGreaterThanOrEqual(0);
-      expect(m.box[0] + m.box[2]).toBeLessThanOrEqual(1);
-      expect(m.box[1] + m.box[3]).toBeLessThanOrEqual(1);
-    }
-    // Drawn lower, clear of the mission patch, the merged top gets its name in the margin.
-    const lower = parts.map((p): Part => ({ ...p, box: [p.box[0], p.box[1] + 0.15, p.box[2], p.box[3]] }));
-    const lowerNames = review(design, lower).full.marks.flatMap((m) => (m.kind === "callout" ? [m.note] : []));
-    expect(lowerNames).toContain("Nose / payload");
-    const names = of("callout").map((c) => c.note);
-    expect(names).not.toContain("Payload bay");
-    expect(names).not.toContain("Nose / fairing");
-    // The second fin part sits mostly inside the first fin outline's merged box, so it's one outline.
-    expect(names.filter((n) => n === "Fins").length).toBeLessThanOrEqual(1);
-
-    const legs: Part = { kind: "landing-legs", label: "legs", box: [0.45, 0.5, 0.1, 0.2], stageIndex: 0 };
-    const crowded = review(design, [...partsFor(design), legs]).full.marks.filter((m) => m.kind === "outline");
-    // Legs drawn inside the booster tank's box add no outline of their own.
-    expect(crowded).toHaveLength(of("outline").length);
-  });
-
-  it("names parts in the margin with leaders, never inside a box, on the patch or on another label", () => {
-    const labels = of("callout");
-    const outlines = of("outline").map((m) => m.box);
-    for (const c of labels) {
-      const width = c.note.length * 0.012;
-      const [x0, x1] = c.label[0] < c.anchor[0] ? [c.label[0] - width, c.label[0]] : [c.label[0], c.label[0] + width];
-      expect(x0).toBeGreaterThanOrEqual(0);
-      expect(x1).toBeLessThanOrEqual(1);
-      expect(c.label[1] < 0.18 && x1 > 0.78).toBe(false);
-      for (const [bx, by, bw, bh] of outlines) {
-        const insideBox = c.label[0] > bx && c.label[0] < bx + bw && c.label[1] > by && c.label[1] < by + bh;
-        expect(insideBox).toBe(false);
-      }
-    }
-    for (const side of [-1, 1]) {
-      const ys = labels.filter((c) => Math.sign(c.label[0] - c.anchor[0]) === side).map((c) => c.label[1]).sort((a, b) => a - b);
-      for (let i = 1; i < ys.length; i++) expect(ys[i] - ys[i - 1]).toBeGreaterThanOrEqual(0.05 - 1e-9);
-    }
-  });
-
-  it("dimensions the height beside the body and the diameter across it", () => {
-    const [height, diameter] = of("dimension");
-    expect(height.note).toBe("70 m");
-    expect(height.from[0]).toBeCloseTo(height.to[0], 6);
-    expect(height.from[0]).toBeLessThan(0.42);
-    expect(diameter.note).toBe("3.7 m");
-    expect(diameter.from[1]).toBeCloseTo(diameter.to[1], 6);
-  });
-
-  it("calls out real numbers from the physics, in the margin, without overlapping", () => {
-    // Spec callouts live in the margin away from the issue notes (the left, for this centered rocket).
-    const callouts = of("callout").filter((c) => c.label[0] < c.anchor[0]);
-    expect(callouts.length).toBeGreaterThanOrEqual(3);
-    expect(callouts.length).toBeLessThanOrEqual(6);
-    const boosterProp = Math.round(analysis.stages[0].propellantMassKg / 1000).toLocaleString("en-US");
-    expect(callouts.some((c) => c.note.includes(`${boosterProp} t prop`))).toBe(true);
-    expect(callouts.some((c) => /^9× Merlin 1D/.test(c.note))).toBe(true);
-    expect(callouts.some((c) => c.note === "Payload 1 t")).toBe(true);
-    callouts.forEach((c, i) => {
-      for (const p of [c.anchor, c.label]) {
-        expect(p[0]).toBeGreaterThanOrEqual(0);
-        expect(p[0]).toBeLessThanOrEqual(1);
-        expect(p[1]).toBeGreaterThanOrEqual(0);
-        expect(p[1]).toBeLessThanOrEqual(1);
-      }
-      // Written away from the anchor; it has to fit on the napkin.
-      const width = c.note.length * 0.012;
-      if (c.label[0] < c.anchor[0]) expect(c.label[0] - width).toBeGreaterThanOrEqual(0);
-      else expect(c.label[0] + width).toBeLessThanOrEqual(1);
-      if (i > 0) expect(c.label[1] - callouts[i - 1].label[1]).toBeGreaterThanOrEqual(0.05 - 1e-9);
-    });
-  });
-
-  it("draws no markup when the reading found no parts", () => {
-    const bare = buildReview({ design, parts: [] }, analyze(design)).marks;
-    expect(bare.every(isIssueMark)).toBe(true);
   });
 });
