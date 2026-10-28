@@ -187,8 +187,11 @@ export default function ModifyPanel({ template, design, preview, onAction, onRes
   const empty = useMemo(() => safeAnalyze({ ...shown, payloadMassKg: 0 }), [shown]);
   const landing = useMemo(() => {
     const labels = shown.stages.filter((s) => s.recover).map((s) => s.label);
-    return labels.length > 0 ? { labels, costKg: recoveryCostKg(shown, destination) } : null;
-  }, [shown, destination]);
+    if (labels.length === 0) return null;
+    // Thrown away less landing, both as shown, so this line and the table's payload change agree.
+    const thrownAwayKg = yoursMax + recoveryCostKg(shown, destination);
+    return { labels, costKg: shownKg(thrownAwayKg) - shownKg(yoursMax) };
+  }, [shown, destination, yoursMax]);
   const changes = useMemo(() => changesOf(template.design, design), [template, design]);
   const verdict = verdictLine(name, shown, yoursMax, realMax, empty, changes.length > 0 || preview !== null);
 
